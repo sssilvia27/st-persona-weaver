@@ -1,0 +1,10 @@
+{
+    "display_name": "Persona Weaver (用户设定编织者)",
+    "name": "st-persona-weaver",
+    "version": "1.0.0",
+    "author": "Yellows",
+    "description": "AI辅助生成用户设定，支持历史记录、自动保存与世界书同步。",
+    "js": "index.js",
+    "css": "style.css",
+    "type": "extension"
+}
