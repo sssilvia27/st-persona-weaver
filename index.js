@@ -6,9 +6,9 @@ import { saveSettingsDebounced, callPopup, getRequestHeaders } from "../../../..
 // ============================================================================
 
 const extensionName = "st-persona-weaver";
-const STORAGE_KEY_HISTORY = 'pw_history_v5';
-const STORAGE_KEY_STATE = 'pw_state_v6'; 
-const STORAGE_KEY_TAGS = 'pw_tags_v3';
+const STORAGE_KEY_HISTORY = 'pw_history_v6';
+const STORAGE_KEY_STATE = 'pw_state_v7'; 
+const STORAGE_KEY_TAGS = 'pw_tags_v4';
 
 // 默认标签库
 const defaultTags = [
@@ -40,12 +40,12 @@ const TEXT = {
     PANEL_TITLE: "用户设定编织者 Pro",
     BTN_OPEN_MAIN: "✨ 打开设定生成器",
     LABEL_TAGS: "点击插入标签",
-    TOAST_NO_CHAR: "⚠️ 请先打开一个角色聊天",
+    TOAST_NO_CHAR: "请先打开一个角色聊天", // 已移除图标
     TOAST_API_OK: "✅ API 连接成功",
     TOAST_API_ERR: "❌ API 连接失败",
     TOAST_SAVE_API: "API 设置已保存",
     TOAST_SNAPSHOT: "✅ 已存入历史记录",
-    TOAST_GEN_FAIL: "❌ 生成失败，请检查 API 设置"
+    TOAST_GEN_FAIL: "❌ 生成失败"
 };
 
 // ============================================================================
@@ -76,11 +76,11 @@ function loadState() {
 }
 
 function injectStyles() {
-    const styleId = 'persona-weaver-css-v6';
+    const styleId = 'persona-weaver-css-v7';
     if ($(`#${styleId}`).length) return;
 
     const css = `
-    .pw-wrapper { display: flex; flex-direction: column; height: 100%; text-align: left; font-size: 0.95em; min-height: 600px; position: relative; }
+    .pw-wrapper { display: flex; flex-direction: column; height: 100%; text-align: left; font-size: 0.95em; min-height: 600px; position: relative; overflow: hidden; }
     
     /* Header */
     .pw-header { background: var(--SmartThemeBg); border-bottom: 1px solid var(--SmartThemeBorderColor); display: flex; flex-direction: column; flex-shrink: 0; }
@@ -93,12 +93,26 @@ function injectStyles() {
     .pw-tab:hover { background: var(--white10a); opacity: 1; }
     .pw-tab.active { border-bottom-color: var(--SmartThemeQuoteColor); opacity: 1; color: var(--SmartThemeQuoteColor); background: var(--white05a); }
 
-    /* Scroll Area */
+    /* Views */
     .pw-view { display: none; flex-direction: column; flex: 1; min-height: 0; overflow: hidden; }
     .pw-view.active { display: flex; }
     .pw-scroll-area { flex: 1; overflow-y: auto; padding: 15px; display: flex; flex-direction: column; gap: 15px; }
 
-    /* Tags System */
+    /* [修复] Modal Overlay - 绝对定位覆盖整个容器 */
+    .pw-modal-overlay { 
+        position: absolute; 
+        top: 0; left: 0; right: 0; bottom: 0;
+        width: 100%; height: 100%; 
+        background: var(--SmartThemeBg); 
+        z-index: 100; 
+        display: none; 
+        flex-direction: column; 
+    }
+    .pw-modal-header { padding: 15px; border-bottom: 1px solid var(--SmartThemeBorderColor); display: flex; justify-content: space-between; align-items: center; font-weight: bold; font-size: 1.1em; background: var(--black10a); }
+    .pw-modal-body { flex: 1; overflow-y: auto; padding: 15px; }
+    .pw-modal-footer { padding: 15px; border-top: 1px solid var(--SmartThemeBorderColor); display: flex; gap: 10px; background: var(--black10a); }
+
+    /* Tags */
     .pw-tags-wrapper { display: flex; gap: 8px; align-items: flex-start; margin-bottom: 5px; }
     .pw-tags-container { flex: 1; display: flex; flex-wrap: wrap; gap: 6px; padding: 8px; background: var(--black10a); border-radius: 6px; border: 1px solid var(--SmartThemeBorderColor); max-height: 120px; overflow-y: auto; }
     .pw-tag { padding: 4px 10px; background: var(--SmartThemeInputColor); border: 1px solid var(--SmartThemeBorderColor); border-radius: 4px; cursor: pointer; font-size: 0.85em; user-select: none; transition: 0.1s; }
@@ -106,14 +120,10 @@ function injectStyles() {
     .pw-tag-val { opacity: 0.6; font-size: 0.9em; margin-left: 2px; }
     .pw-tags-edit-btn { padding: 8px; cursor: pointer; opacity: 0.7; font-size: 1.1em; }
     .pw-tags-edit-btn:hover { opacity: 1; color: var(--SmartThemeQuoteColor); }
-
-    /* Internal Modal (Overlay) */
-    .pw-modal-overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: var(--SmartThemeBg); z-index: 10; display: none; flex-direction: column; }
-    .pw-modal-header { padding: 15px; border-bottom: 1px solid var(--SmartThemeBorderColor); display: flex; justify-content: space-between; align-items: center; font-weight: bold; font-size: 1.1em; }
-    .pw-modal-body { flex: 1; overflow-y: auto; padding: 15px; }
-    .pw-tag-row { display: flex; gap: 5px; margin-bottom: 8px; align-items: center; background: var(--black10a); padding: 5px; border-radius: 4px; }
     
-    /* World Info Tree */
+    .pw-tag-row { display: flex; gap: 5px; margin-bottom: 8px; align-items: center; background: var(--black10a); padding: 8px; border-radius: 6px; border: 1px solid var(--white05a); }
+
+    /* World Info */
     .pw-wi-controls { display: flex; gap: 10px; margin-bottom: 10px; }
     .pw-wi-book { border: 1px solid var(--SmartThemeBorderColor); border-radius: 6px; overflow: hidden; margin-bottom: 8px; background: var(--black10a); }
     .pw-wi-header { padding: 10px 12px; background: var(--black30a); cursor: pointer; display: flex; justify-content: space-between; align-items: center; font-weight: bold; font-size: 0.9em; }
@@ -126,7 +136,7 @@ function injectStyles() {
     .pw-expand-btn { cursor: pointer; opacity: 0.5; padding: 2px 6px; }
     .pw-expand-btn:hover { opacity: 1; color: var(--SmartThemeQuoteColor); }
 
-    /* API Settings */
+    /* API */
     .pw-api-card { padding: 15px; background: var(--black10a); border-radius: 6px; border: 1px solid var(--SmartThemeBorderColor); display: flex; flex-direction: column; gap: 12px; }
     .pw-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
     .pw-row label { font-weight: bold; font-size: 0.9em; width: 80px; }
@@ -154,38 +164,56 @@ function injectStyles() {
 }
 
 // ============================================================================
-// 3. 业务逻辑
+// 3. 业务逻辑 (核心修复)
 // ============================================================================
 
-// [FIX] 强健的世界书读取逻辑 (参考 world-info-cleanup)
+// [FIX] 强力世界书读取 (参考 world-info-cleanup)
 async function loadAvailableWorldBooks() {
     availableWorldBooks = [];
     try {
         const context = getContext();
-        
-        // 1. 尝试从 API 获取 (最准确)
-        const response = await fetch('/api/worldinfo/get', { 
-            method: 'POST', 
-            headers: getRequestHeaders(), 
-            body: JSON.stringify({}) 
-        });
-        
-        if (response.ok) {
-            const list = await response.json();
-            availableWorldBooks = list.filter(x => x).map(item => item.name || item);
-        } 
-        
-        // 2. 如果 API 失败，尝试全局变量回退
-        if (availableWorldBooks.length === 0) {
-            if (context.world_names && Array.isArray(context.world_names)) {
-                availableWorldBooks = context.world_names;
-            } else if (window.world_names && Array.isArray(window.world_names)) {
-                availableWorldBooks = window.world_names;
+        let files = [];
+
+        // 方法 1: API /settings/get (通常最全)
+        try {
+            const res = await fetch('/api/settings/get', { 
+                method: 'POST', headers: getRequestHeaders(), body: JSON.stringify({}) 
+            });
+            if (res.ok) {
+                const data = await res.json();
+                if (data.world_names && Array.isArray(data.world_names)) {
+                    files = data.world_names;
+                }
+            }
+        } catch(e) {}
+
+        // 方法 2: Context Fallback
+        if (files.length === 0 && context.world_names && Array.isArray(context.world_names)) {
+            files = context.world_names;
+        }
+
+        // 方法 3: Window Global Fallback
+        if (files.length === 0 && window.world_names && Array.isArray(window.world_names)) {
+            files = window.world_names;
+        }
+
+        // 方法 4: API /worldinfo/get
+        if (files.length === 0) {
+            const res = await fetch('/api/worldinfo/get', { 
+                method: 'POST', headers: getRequestHeaders(), body: JSON.stringify({}) 
+            });
+            if (res.ok) {
+                const list = await res.json();
+                files = list.map(item => item.name || item);
             }
         }
-        
-        availableWorldBooks.sort();
-        console.log("[PW] Loaded WorldBooks:", availableWorldBooks.length);
+
+        // 过滤和排序
+        availableWorldBooks = [...new Set(files)] // 去重
+            .filter(x => x && typeof x === 'string' && x !== 'null')
+            .sort();
+            
+        console.log("[PW] WorldBooks loaded:", availableWorldBooks.length);
     } catch (e) { 
         console.error("[PW] Load WI failed", e); 
     }
@@ -219,7 +247,6 @@ async function getWorldBookEntries(bookName) {
             const data = await response.json();
             const entries = Object.values(data.entries || {}).map(e => ({
                 uid: e.uid,
-                // [FIX] 优先显示备注名 (Comment)，其次是 Keys
                 displayName: e.comment && e.comment.trim() !== "" ? e.comment : (Array.isArray(e.key) ? e.key.join(', ') : e.key),
                 keys: Array.isArray(e.key) ? e.key.join(', ') : e.key,
                 content: e.content,
@@ -307,7 +334,6 @@ Return ONLY a JSON object:
 async function openCreatorPopup() {
     const context = getContext();
     if (context.characterId === undefined) {
-        // [FIX] 确保文字正常显示
         return toastr.warning(TEXT.TOAST_NO_CHAR);
     }
 
@@ -338,14 +364,14 @@ async function openCreatorPopup() {
             </div>
         </div>
 
-        <!-- Tag Manager Overlay (Internal Modal) -->
+        <!-- [FIX] 标签管理 Modal (现在在 wrapper 内独立层，不会重叠) -->
         <div id="pw-tag-modal" class="pw-modal-overlay">
             <div class="pw-modal-header">
                 <span><i class="fa-solid fa-tags"></i> 管理标签</span>
                 <i class="fa-solid fa-times" id="pw-tags-close" style="cursor:pointer;"></i>
             </div>
             <div class="pw-modal-body" id="pw-tags-edit-list"></div>
-            <div style="padding:15px; border-top:1px solid var(--SmartThemeBorderColor); display:flex; gap:10px;">
+            <div class="pw-modal-footer">
                 <button id="pw-tags-add-new" class="pw-btn normal" style="flex:1;"><i class="fa-solid fa-plus"></i> 添加新标签</button>
                 <button id="pw-tags-finish" class="pw-btn primary" style="flex:1;">完成</button>
             </div>
@@ -354,6 +380,7 @@ async function openCreatorPopup() {
         <!-- 1. 编辑视图 -->
         <div id="pw-view-editor" class="pw-view active">
             <div class="pw-scroll-area">
+                
                 <div>
                     <div class="pw-label" style="display:flex; justify-content:space-between;">
                         <span>${TEXT.LABEL_TAGS}</span>
@@ -370,7 +397,6 @@ async function openCreatorPopup() {
                     <textarea id="pw-request" class="pw-textarea" placeholder="在此输入要求，或点击上方标签..." style="flex:1;">${savedState.request || ''}</textarea>
                     
                     <div class="pw-editor-controls">
-                        <!-- [FIX] 清除和保存按钮移到这里 -->
                         <div style="display:flex; gap:10px;">
                             <div class="pw-mini-btn" id="pw-clear"><i class="fa-solid fa-eraser"></i> 清空</div>
                             <div class="pw-mini-btn" id="pw-snapshot"><i class="fa-solid fa-save"></i> 存入历史</div>
@@ -413,6 +439,7 @@ async function openCreatorPopup() {
             <div class="pw-scroll-area">
                 <div class="pw-label">添加参考世界书</div>
                 <div class="pw-wi-controls">
+                    <!-- [FIX] 自动填充可用世界书 -->
                     <select id="pw-wi-select" class="pw-input" style="flex:1;">
                         <option value="">-- 选择世界书 --</option>
                         ${availableWorldBooks.map(b => `<option value="${b}">${b}</option>`).join('')}
@@ -453,7 +480,6 @@ async function openCreatorPopup() {
                             </div>
                         </div>
                     </div>
-                    <!-- [FIX] 增加保存按钮 -->
                     <div style="text-align:right; margin-top:10px;">
                         <button id="pw-api-save" class="pw-btn primary"><i class="fa-solid fa-save"></i> 保存 API 设置</button>
                     </div>
@@ -503,7 +529,7 @@ async function openCreatorPopup() {
         $(`#pw-view-${$(this).data('tab')}`).addClass('active');
     });
 
-    // --- 3. 标签系统 (修复重复生成 + 内部Overlay管理) ---
+    // --- 3. 标签系统 ---
     $(document).on('click.pw', '.pw-tag', function(e) {
         e.preventDefault(); e.stopPropagation();
         
@@ -520,7 +546,7 @@ async function openCreatorPopup() {
         saveCurrentState();
     });
 
-    // 打开标签管理 Overlay
+    // 标签管理 Overlay 逻辑
     $('.pw-tags-edit-btn').on('click', () => {
         const renderManager = () => {
             const list = $('#pw-tags-edit-list').empty();
@@ -534,7 +560,7 @@ async function openCreatorPopup() {
                 `);
             });
             
-            // 实时绑定修改
+            // 绑定实时修改
             list.find('input').on('input', function() {
                 const row = $(this).closest('.pw-tag-row');
                 const idx = row.index();
@@ -565,13 +591,9 @@ async function openCreatorPopup() {
     $('#pw-tags-add-new').on('click', () => {
         tagsCache.push({ name: "新标签", value: "" });
         saveData();
-        // 重新渲染管理列表
+        // 重新渲染列表并滚动到底部
         const list = $('#pw-tags-edit-list');
-        // Trigger re-render by simulating open or just function call.
-        // For simplicity, just append logic or re-call renderManager.
-        // We need to re-attach listeners, so let's recall the opener logic's render part.
-        // But since we can't access `renderManager` here easily without refactoring, 
-        // we will manually trigger the edit btn click again to refresh (Hack but works).
+        // 手动触发一次渲染刷新
         $('.pw-tags-edit-btn').click();
     });
 
@@ -676,13 +698,12 @@ async function openCreatorPopup() {
         }
     });
 
-    // [FIX] 保存 API 设置按钮
     $('#pw-api-save').on('click', () => {
         saveCurrentState();
         toastr.success(TEXT.TOAST_SAVE_API);
     });
 
-    // --- 6. 底部工具栏 (存入历史) ---
+    // --- 6. 底部工具栏 ---
     $('#pw-clear').on('click', () => {
         if(confirm("清空输入内容？")) {
             $('#pw-request').val('');
@@ -700,7 +721,7 @@ async function openCreatorPopup() {
         if (!req && !curName) return;
         
         saveHistory({ 
-            request: req, 
+            request: req || "无标题快照", 
             data: { 
                 name: curName || "快照", 
                 description: curDesc || "", 
@@ -783,7 +804,7 @@ async function openCreatorPopup() {
                         const newId = ids.length ? Math.max(...ids) + 1 : 0;
                         d.entries[newId] = { uid: newId, key: [name, "User"], content: wiContent, comment: `User: ${name}`, enabled: true, selective: true };
                         await fetch('/api/worldinfo/edit', { method: 'POST', headers, body: JSON.stringify({ name: book, data: d }) });
-                        toastr.success(`WI Updated: ${book}`);
+                        toastr.success(TEXT.TOAST_WI_SUCCESS(book));
                         if (context.updateWorldInfoList) context.updateWorldInfoList();
                     }
                 } catch(e) { console.error(e); }
@@ -799,8 +820,8 @@ async function openCreatorPopup() {
         $('.popup_close').click();
     });
 
-    // --- 9. 历史 ---
-    $(document).on('click.pw', '.pw-tab[data-tab="history"]', function() {
+    // --- 9. 历史 (重新渲染修复) ---
+    const renderHistoryList = () => {
         loadData();
         const $list = $('#pw-history-list').empty();
         historyCache.forEach(item => {
@@ -821,7 +842,9 @@ async function openCreatorPopup() {
             });
             $list.append($el);
         });
-    });
+    };
+
+    $(document).on('click.pw', '.pw-tab[data-tab="history"]', renderHistoryList);
 }
 
 // ============================================================================
@@ -842,5 +865,5 @@ jQuery(async () => {
         </div>
     `);
     $("#pw_open_btn").on("click", openCreatorPopup);
-    console.log(`${extensionName} v5 loaded.`);
+    console.log(`${extensionName} v6 loaded.`);
 });
