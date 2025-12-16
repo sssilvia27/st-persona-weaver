@@ -6,8 +6,8 @@ import { saveSettingsDebounced, callPopup, getRequestHeaders } from "../../../..
 // ============================================================================
 
 const extensionName = "st-persona-weaver";
-const STORAGE_KEY_HISTORY = 'pw_history_v11'; 
-const STORAGE_KEY_STATE = 'pw_state_v11'; 
+const STORAGE_KEY_HISTORY = 'pw_history_v12'; 
+const STORAGE_KEY_STATE = 'pw_state_v12'; 
 const STORAGE_KEY_TAGS = 'pw_tags_v5'; 
 
 // 默认标签库
@@ -75,7 +75,6 @@ function saveHistory(item) {
     item.timestamp = new Date().toLocaleString();
     item.targetChar = charName; 
 
-    // [修复] 默认标题格式：User & Char
     const userName = item.data.name || "未命名";
     item.data.customTitle = `${userName} & ${charName}`;
 
@@ -100,12 +99,22 @@ function loadState() {
     try { return JSON.parse(localStorage.getItem(STORAGE_KEY_STATE)) || {}; } catch { return {}; }
 }
 
+// [优化] 防抖函数，防止输入时频繁写入硬盘导致卡死
+function debounce(func, wait) {
+    let timeout;
+    return function(...args) {
+        clearTimeout(timeout);
+        timeout = setTimeout(() => func.apply(this, args), wait);
+    };
+}
+
 function injectStyles() {
-    const styleId = 'persona-weaver-css-v11';
+    const styleId = 'persona-weaver-css-v12';
     if ($(`#${styleId}`).length) return;
 
     const css = `
-    .pw-wrapper { display: flex; flex-direction: column; height: 100%; text-align: left; font-size: 0.95em; min-height: 600px; position: relative; overflow: hidden; }
+    /* Root Wrapper */
+    #pw-root { display: flex; flex-direction: column; height: 100%; text-align: left; font-size: 0.95em; min-height: 600px; position: relative; overflow: hidden; }
     
     /* Header */
     .pw-header { background: var(--SmartThemeBg); border-bottom: 1px solid var(--SmartThemeBorderColor); display: flex; flex-direction: column; flex-shrink: 0; }
@@ -123,7 +132,7 @@ function injectStyles() {
     .pw-view.active { display: flex; }
     .pw-scroll-area { flex: 1; overflow-y: auto; padding: 15px; display: flex; flex-direction: column; gap: 15px; }
 
-    /* Tags System V11 */
+    /* Tags System */
     .pw-tags-wrapper { display: flex; gap: 8px; align-items: flex-start; margin-bottom: 5px; }
     .pw-tags-container { flex: 1; display: flex; flex-wrap: wrap; gap: 8px; padding: 10px; background: var(--black10a); border-radius: 6px; border: 1px solid var(--SmartThemeBorderColor); max-height: 150px; overflow-y: auto; }
     
@@ -144,27 +153,13 @@ function injectStyles() {
     .pw-tag:hover { border-color: var(--SmartThemeQuoteColor); color: var(--SmartThemeQuoteColor); transform: translateY(-1px); }
     .pw-tag-val { opacity: 0.6; font-size: 0.9em; }
     
-    /* Tag Edit Mode Styles */
     .pw-tag.edit-mode { border-color: #e67e22; color: #e67e22; background: rgba(230, 126, 34, 0.1); padding-right: 25px; }
     .pw-tag.edit-mode:hover { background: rgba(230, 126, 34, 0.2); }
     
-    /* [新增] 标签上的删除按钮 (仅编辑模式显示) */
     .pw-tag-del-btn {
-        position: absolute;
-        right: 4px;
-        top: 50%;
-        transform: translateY(-50%);
-        width: 16px;
-        height: 16px;
-        border-radius: 50%;
-        background: #ff6b6b;
-        color: white;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-size: 10px;
-        cursor: pointer;
-        opacity: 0.8;
+        position: absolute; right: 4px; top: 50%; transform: translateY(-50%);
+        width: 16px; height: 16px; border-radius: 50%; background: #ff6b6b; color: white;
+        display: flex; align-items: center; justify-content: center; font-size: 10px; cursor: pointer; opacity: 0.8;
     }
     .pw-tag-del-btn:hover { opacity: 1; transform: translateY(-50%) scale(1.1); }
     
@@ -175,35 +170,42 @@ function injectStyles() {
     .pw-tags-edit-btn:hover { opacity: 1; }
     .pw-tags-edit-btn.active { color: #e67e22; opacity: 1; transform: rotate(90deg); }
 
+    /* Modal System - Mobile Optimized */
+    .pw-modal-overlay { 
+        position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+        width: 100%; height: 100%; 
+        background-color: rgba(0, 0, 0, 0.7); /* Pure color, faster than blur */
+        z-index: 10000; 
+        display: none; 
+        align-items: center; justify-content: center;
+        padding: 10px;
+    }
+    .pw-modal-card {
+        background-color: var(--SmartThemeBg); 
+        border: 1px solid var(--SmartThemeBorderColor);
+        border-radius: 10px;
+        box-shadow: 0 10px 25px rgba(0,0,0,0.6);
+        width: 500px;
+        max-width: 100%;
+        max-height: 90%;
+        display: flex; flex-direction: column; overflow: hidden;
+    }
+    .pw-modal-header { padding: 15px; background: var(--black30a); border-bottom: 1px solid var(--SmartThemeBorderColor); display: flex; justify-content: space-between; align-items: center; font-weight: bold; font-size: 1.1em; }
+    .pw-modal-body { flex: 1; overflow-y: auto; padding: 15px; background: var(--SmartThemeBg); }
+    .pw-modal-footer { padding: 15px; border-top: 1px solid var(--SmartThemeBorderColor); display: flex; gap: 10px; background: var(--black10a); }
+
     /* History UI */
     .pw-history-toolbar { display: flex; gap: 8px; margin-bottom: 10px; padding-bottom: 10px; border-bottom: 1px solid var(--SmartThemeBorderColor); align-items: center; }
     .pw-search-wrapper { flex: 1; position: relative; display: flex; align-items: center; }
     .pw-history-search { width: 100%; padding: 8px 30px 8px 8px; border-radius: 4px; border: 1px solid var(--SmartThemeBorderColor); background: var(--SmartThemeInputColor); color: var(--SmartThemeBodyColor); }
     .pw-search-clear { position: absolute; right: 8px; cursor: pointer; opacity: 0.5; padding: 5px; }
     
-    /* [修改] 垃圾桶只在悬停时显眼 */
-    .pw-history-clear-btn { 
-        padding: 8px 12px; 
-        color: var(--SmartThemeBodyColor); 
-        opacity: 0.3; 
-        cursor: pointer; 
-        font-size: 1.1em; 
-        transition: 0.2s; 
-        border-radius: 4px;
-    }
+    .pw-history-clear-btn { padding: 8px 12px; color: var(--SmartThemeBodyColor); opacity: 0.3; cursor: pointer; font-size: 1.1em; transition: 0.2s; border-radius: 4px; }
     .pw-history-clear-btn:hover { color: #ff6b6b; opacity: 1; background: var(--white10a); }
 
     .pw-history-item { 
-        padding: 12px; 
-        border: 1px solid var(--SmartThemeBorderColor);
-        border-radius: 6px;
-        background: var(--black10a);
-        margin-bottom: 8px;
-        display: flex;
-        justify-content: space-between;
-        align-items: flex-start;
-        transition: 0.1s;
-        gap: 10px;
+        padding: 12px; border: 1px solid var(--SmartThemeBorderColor); border-radius: 6px; background: var(--black10a); margin-bottom: 8px;
+        display: flex; justify-content: space-between; align-items: flex-start; transition: 0.1s; gap: 10px;
     }
     .pw-history-item:hover { background: var(--white10a); border-color: var(--SmartThemeQuoteColor); }
     
@@ -212,7 +214,6 @@ function injectStyles() {
     .pw-hist-title { font-weight: bold; color: var(--SmartThemeQuoteColor); font-size: 1.05em; border-bottom: 1px dashed transparent; background: transparent; border: none; width: auto; max-width: 100%; }
     .pw-hist-title.editing { border-bottom: 1px solid var(--SmartThemeBodyColor); outline: none; background: var(--black30a); color: var(--SmartThemeBodyColor); }
     .pw-hist-edit-icon { opacity: 0.4; cursor: pointer; font-size: 0.9em; }
-    .pw-hist-edit-icon:hover { opacity: 1; color: var(--SmartThemeQuoteColor); }
     
     .pw-hist-meta { font-size: 0.8em; opacity: 0.6; margin-bottom: 6px; display: flex; gap: 10px; flex-wrap: wrap; }
     .pw-hist-desc { font-size: 0.85em; opacity: 0.8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.4; }
@@ -226,7 +227,7 @@ function injectStyles() {
     .pw-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
     .pw-row label { font-weight: bold; font-size: 0.9em; width: 80px; }
     
-    /* World Info Tree */
+    /* World Info */
     .pw-wi-header > div { display: flex; align-items: center; gap: 15px; } 
     .pw-wi-controls { display: flex; gap: 10px; margin-bottom: 10px; }
     .pw-wi-book { border: 1px solid var(--SmartThemeBorderColor); border-radius: 6px; overflow: hidden; margin-bottom: 8px; background: var(--black10a); }
@@ -259,7 +260,6 @@ function injectStyles() {
 
     .pw-label { font-size: 0.85em; opacity: 0.8; font-weight: bold; margin-bottom: 4px; display: block; }
 
-    /* [Mobile] 手机适配 */
     @media screen and (max-width: 700px) {
         .pw-history-item { flex-direction: column; }
         .pw-hist-actions { width: 100%; display: flex; justify-content: flex-end; border-top: 1px solid var(--white05a); padding-top: 8px; margin-top: 5px; }
@@ -461,7 +461,7 @@ async function openCreatorPopup() {
     const config = { ...defaultSettings, ...extension_settings[extensionName], ...savedState.localConfig };
     isTagEditMode = false; 
 
-    // [重构] 渲染标签列表 (含删除按钮)
+    // 渲染标签
     const renderTags = () => {
         let html = tagsCache.map((t, i) => `
             <div class="pw-tag ${isTagEditMode ? 'edit-mode' : ''}" data-idx="${i}">
@@ -479,8 +479,9 @@ async function openCreatorPopup() {
         ? availableWorldBooks.map(b => `<option value="${b}">${b}</option>`).join('')
         : `<option disabled>未找到世界书</option>`;
 
-    const html = `
-    <div class="pw-wrapper">
+    // 基础 HTML
+    let html = `
+    <div id="pw-root" class="pw-wrapper">
         <div class="pw-header">
             <div class="pw-top-bar">
                 <div class="pw-title"><i class="fa-solid fa-wand-magic-sparkles"></i> 设定编织者 Pro</div>
@@ -602,7 +603,7 @@ async function openCreatorPopup() {
             </div>
         </div>
 
-        <!-- 4. 历史视图 [修复] -->
+        <!-- 4. 历史视图 -->
         <div id="pw-view-history" class="pw-view">
             <div class="pw-scroll-area">
                 <div class="pw-history-toolbar">
@@ -612,7 +613,6 @@ async function openCreatorPopup() {
                     </div>
                 </div>
                 <div id="pw-history-list" style="display:flex; flex-direction:column;"></div>
-                <!-- [修复] 底部红色小字清空 -->
                 <div style="margin-top:20px; text-align:center;">
                     <span id="pw-history-clear-all" style="color:#ff6b6b; font-size:0.85em; cursor:pointer; opacity:0.8; text-decoration:underline;">🗑️ 清空所有历史记录</span>
                 </div>
@@ -621,15 +621,7 @@ async function openCreatorPopup() {
     </div>
     `;
 
-    // 缓存上一个 Popup 以便防止被关闭？SillyTavern 的 callPopup 默认是覆盖的。
-    // 但是标签添加弹窗我们使用 callPopup，这会关闭主弹窗？
-    // 为了防止这个问题，我们使用内部 HTML 插入的方式，或者自定义弹窗逻辑。
-    // 为了兼容性，标签添加弹窗我们使用 `callPopup` 并传入 `closeOnOverlayClick: false`？ 
-    // 不，SillyTavern 的 `callPopup` 会替换当前弹窗。
-    // [修复方案]：使用 `callPopup` 的特性，或者我们自己手写一个简单的 Overlay 插入到 `pw-wrapper` 里（像之前的 modal）。
-    // 你之前的反馈是 modal 样式有问题。V11 我们修复样式，并使用内部 Modal 来避免关闭主窗口。
-    
-    // 我们需要在 html 字符串最后加一个内部 Modal 结构
+    // [修复] 内置 Modal，防止覆盖主弹窗
     const internalModalHtml = `
         <div id="pw-internal-modal" class="pw-modal-overlay">
             <div class="pw-modal-card">
@@ -643,8 +635,8 @@ async function openCreatorPopup() {
         </div>
     `;
     
-    // 拼接到主 HTML
-    const finalHtml = html.replace('</div>', internalModalHtml + '</div>'); // Insert before last div
+    // 拼接
+    const finalHtml = html + internalModalHtml;
 
     callPopup(finalHtml, 'text', '', { wide: true, large: true, okButton: "关闭" });
 
@@ -652,7 +644,7 @@ async function openCreatorPopup() {
     // 逻辑绑定
     // ========================================================================
     
-    // --- 内部 Modal 逻辑 (防止关闭主窗口) ---
+    // --- 内部 Modal 逻辑 ---
     const showInternalModal = (title, contentHtml, onConfirm) => {
         $('#pw-modal-title').text(title);
         $('#pw-modal-content').html(contentHtml);
@@ -672,8 +664,8 @@ async function openCreatorPopup() {
         });
     };
 
-    // --- 1. 状态保存 ---
-    const saveCurrentState = () => {
+    // --- 1. 状态保存 (防抖) ---
+    const debouncedSave = debounce(() => {
         saveState({
             request: $('#pw-request').val(),
             name: $('#pw-res-name').val(),
@@ -689,12 +681,13 @@ async function openCreatorPopup() {
                 extraBooks: window.pwExtraBooks || []
             }
         });
-    };
-    $(document).off('.pw');
-    $(document).on('input.pw change.pw', '#pw-request, #pw-res-name, #pw-res-desc, #pw-res-wi, .pw-input', saveCurrentState);
+    }, 500); // 500ms 延迟保存
+
+    // 只绑定内部容器
+    $('#pw-root').on('input change', '#pw-request, #pw-res-name, #pw-res-desc, #pw-res-wi, .pw-input', debouncedSave);
 
     // --- 2. Tab 切换 ---
-    $(document).on('click.pw', '.pw-tab', function() {
+    $('#pw-root .pw-tab').on('click', function() {
         $('.pw-tab').removeClass('active');
         $(this).addClass('active');
         $('.pw-view').removeClass('active');
@@ -703,10 +696,9 @@ async function openCreatorPopup() {
         if(tab === 'history') renderHistoryList(); 
     });
 
-    // --- 3. 标签系统 (V11 修复版) ---
-    
-    // [修复] 添加新标签 - 使用内部 Modal
-    $(document).on('click.pw', '.pw-tag-add', function(e) {
+    // --- 3. 标签系统 (V12) ---
+    // 添加新标签 (内部 Modal)
+    $('#pw-root').on('click', '.pw-tag-add', function(e) {
         e.stopPropagation();
         const formHtml = `
             <div style="display:flex; flex-direction:column; gap:10px;">
@@ -722,33 +714,33 @@ async function openCreatorPopup() {
             if (name) {
                 tagsCache.push({ name, value: val || "" });
                 saveData();
-                $('#pw-tags-list').html(renderTags()); // 刷新列表
+                $('#pw-tags-list').html(renderTags());
                 return true;
             }
             return false;
         });
     });
 
-    // 标签点击
+    // 标签点击/删除
     const renderTags = () => {
         let html = tagsCache.map((t, i) => `
             <div class="pw-tag ${isTagEditMode ? 'edit-mode' : ''}" data-idx="${i}">
                 ${isTagEditMode ? '<i class="fa-solid fa-pen"></i>' : '<i class="fa-solid fa-tag" style="opacity:0.5;font-size:0.8em;"></i>'}
                 ${t.name}
                 ${!isTagEditMode && t.value ? `<span class="pw-tag-val">:${t.value}</span>` : ''}
-                ${isTagEditMode ? `<div class="pw-tag-del-btn" data-del-idx="${i}">x</div>` : ''}
+                ${isTagEditMode ? `<div class="pw-tag-del-btn" data-del-idx="${i}"><i class="fa-solid fa-times"></i></div>` : ''}
             </div>
         `).join('');
         html += `<div class="pw-tag pw-tag-add" title="添加新标签"><i class="fa-solid fa-plus"></i></div>`;
         return html;
     };
 
-    $(document).on('click.pw', '.pw-tag:not(.pw-tag-add)', function(e) {
+    $('#pw-root').on('click', '.pw-tag:not(.pw-tag-add)', function(e) {
         e.preventDefault(); e.stopPropagation();
         const idx = $(this).data('idx');
         
-        // [修复] 点击删除按钮 (仅在编辑模式下生效)
-        if (isTagEditMode && $(e.target).hasClass('pw-tag-del-btn')) {
+        // 删除逻辑
+        if (isTagEditMode && $(e.target).closest('.pw-tag-del-btn').length) {
             tagsCache.splice(idx, 1);
             saveData();
             $('#pw-tags-list').html(renderTags());
@@ -758,7 +750,7 @@ async function openCreatorPopup() {
         const tag = tagsCache[idx];
 
         if (isTagEditMode) {
-            // [修复] 编辑标签 - 使用内部 Modal
+            // 编辑逻辑 (内部 Modal)
             const formHtml = `
                 <div style="display:flex; flex-direction:column; gap:10px;">
                     <label>标签名称</label>
@@ -775,19 +767,19 @@ async function openCreatorPopup() {
                 return true;
             });
         } else {
-            // 正常模式：插入文本
+            // 插入文本
             const $text = $('#pw-request');
             const cur = $text.val();
             const insert = tag.value ? `${tag.name}: ${tag.value}` : `${tag.name}: `;
             const prefix = (cur && !cur.endsWith('\n')) ? '\n' : '';
             $text.val(cur + prefix + insert).focus();
             $text[0].scrollTop = $text[0].scrollHeight;
-            saveCurrentState();
+            debouncedSave(); // 使用防抖保存
         }
     });
 
     // 切换编辑模式
-    $('.pw-tags-edit-btn').on('click', function() {
+    $('#pw-root .pw-tags-edit-btn').on('click', function() {
         isTagEditMode = !isTagEditMode;
         $(this).toggleClass('active', isTagEditMode);
         $('#pw-tags-list').html(renderTags());
@@ -910,7 +902,7 @@ async function openCreatorPopup() {
     $('#pw-api-test').on('click', testApiConnection);
 
     $('#pw-api-save').on('click', () => {
-        saveCurrentState();
+        debouncedSave();
         toastr.success(TEXT.TOAST_SAVE_API);
     });
 
@@ -919,7 +911,7 @@ async function openCreatorPopup() {
         if(confirm("清空输入内容？")) {
             $('#pw-request').val('');
             $('#pw-result-area').hide();
-            saveCurrentState();
+            debouncedSave();
         }
     });
 
@@ -978,7 +970,7 @@ async function openCreatorPopup() {
             $('#pw-result-area').fadeIn();
             
             saveHistory({ request: req, data });
-            saveCurrentState();
+            debouncedSave();
         } catch (e) {
             console.error(e);
             toastr.error(`${TEXT.TOAST_GEN_FAIL}: ${e.message}`);
@@ -1064,7 +1056,7 @@ async function openCreatorPopup() {
                         </div>
                         <div class="pw-hist-meta">
                             <span><i class="fa-regular fa-clock"></i> ${item.timestamp}</span>
-                            <span><i class="fa-solid fa-user-tag"></i> 目标: ${item.targetChar || '未知'}</span>
+                            <span><i class="fa-solid fa-user-tag"></i> ${item.targetChar || '未知'}</span>
                         </div>
                         <div class="pw-hist-desc">${item.data.description || item.request || '无描述'}</div>
                     </div>
@@ -1159,5 +1151,5 @@ jQuery(async () => {
         </div>
     `);
     $("#pw_open_btn").on("click", openCreatorPopup);
-    console.log(`${extensionName} v11 loaded.`);
+    console.log(`${extensionName} v12 loaded.`);
 });
