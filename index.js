@@ -6,8 +6,8 @@ import { saveSettingsDebounced, callPopup, getRequestHeaders } from "../../../..
 // ============================================================================
 
 const extensionName = "st-persona-weaver";
-const STORAGE_KEY_HISTORY = 'pw_history_v11'; // 升级版本号
-const STORAGE_KEY_STATE = 'pw_state_v11'; 
+const STORAGE_KEY_HISTORY = 'pw_history_v12'; // 升级版本号
+const STORAGE_KEY_STATE = 'pw_state_v12'; 
 const STORAGE_KEY_TAGS = 'pw_tags_v4';
 
 const defaultTags = [
@@ -225,7 +225,7 @@ async function openCreatorPopup() {
             $container.addClass('view-mode');
             let html = tagsCache.map((t, i) => `
                 <div class="pw-tag" data-idx="${i}">
-                    ${t.name}
+                    <i class="fa-solid fa-tag" style="opacity:0.5; font-size:0.8em; margin-right:4px;"></i>${t.name}
                     ${t.value ? `<span class="pw-tag-val">${t.value}</span>` : ''}
                 </div>
             `).join('');
@@ -237,7 +237,7 @@ async function openCreatorPopup() {
         if (isEditingTags) {
             $toggle.addClass('active').html('<i class="fa-solid fa-check"></i> 完成');
         } else {
-            $toggle.removeClass('active').html('<i class="fa-solid fa-gear"></i> 管理');
+            $toggle.removeClass('active').html('<i class="fa-solid fa-gear"></i> 管理标签');
         }
     };
 
@@ -256,23 +256,25 @@ async function openCreatorPopup() {
         <!-- 1. 编辑视图 -->
         <div id="pw-view-editor" class="pw-view active">
             <div class="pw-scroll-area">
-                <div>
+                <!-- 标签卡片 -->
+                <div class="pw-section-card">
                     <div class="pw-label-row">
-                        <span class="pw-label">快捷标签 (点击插入)</span>
-                        <div id="pw-tags-toggle-edit" class="pw-toggle-edit"><i class="fa-solid fa-gear"></i> 管理</div>
+                        <span class="pw-label"><i class="fa-solid fa-tags"></i> 快捷标签</span>
+                        <div id="pw-tags-toggle-edit" class="pw-toggle-edit"><i class="fa-solid fa-gear"></i> 管理标签</div>
                     </div>
                     <div id="pw-tags-list" class="pw-tags-container view-mode"></div>
                 </div>
 
-                <div style="flex:1; display:flex; flex-direction:column;">
+                <!-- 输入区域 -->
+                <div style="flex:1; display:flex; flex-direction:column; gap:10px;">
                     <textarea id="pw-request" class="pw-textarea" placeholder="输入你的要求，或点击上方标签组合描述...">${savedState.request || ''}</textarea>
                     
                     <div class="pw-editor-controls">
                         <div style="display:flex; gap:10px;">
                             <div class="pw-mini-btn" id="pw-clear"><i class="fa-solid fa-eraser"></i> 清空</div>
-                            <div class="pw-mini-btn" id="pw-snapshot"><i class="fa-solid fa-save"></i> 存历史</div>
+                            <div class="pw-mini-btn" id="pw-snapshot"><i class="fa-solid fa-save"></i> 存入历史</div>
                         </div>
-                        <select id="pw-fmt-select" class="pw-input" style="width:auto; padding:2px 6px; font-size:0.85em;">
+                        <select id="pw-fmt-select" class="pw-input" style="width:auto; padding:5px 10px; font-size:0.85em;">
                             <option value="yaml" ${config.outputFormat === 'yaml' ? 'selected' : ''}>YAML 格式</option>
                             <option value="paragraph" ${config.outputFormat === 'paragraph' ? 'selected' : ''}>小说段落</option>
                         </select>
@@ -281,20 +283,21 @@ async function openCreatorPopup() {
 
                 <button id="pw-btn-gen" class="pw-btn gen"><i class="fa-solid fa-bolt"></i> 生成 / 润色</button>
 
+                <!-- 结果区域 -->
                 <div id="pw-result-area" style="display: ${savedState.hasResult ? 'block' : 'none'};">
-                    <div class="pw-label" style="color:var(--smart-theme-quote-color); margin-bottom:8px;">
+                    <div class="pw-label" style="color:var(--smart-theme-quote-color); margin-bottom:12px; font-size:1em;">
                         <i class="fa-solid fa-check-circle"></i> 生成结果
                     </div>
-                    <div style="display:flex; flex-direction:column; gap:10px;">
-                        <input type="text" id="pw-res-name" class="pw-input" placeholder="角色名称" value="${savedState.name || ''}">
+                    <div style="display:flex; flex-direction:column; gap:15px;">
+                        <input type="text" id="pw-res-name" class="pw-input" placeholder="角色名称" value="${savedState.name || ''}" style="font-weight:bold;">
                         <textarea id="pw-res-desc" class="pw-textarea" style="min-height:150px;" placeholder="设定描述">${savedState.desc || ''}</textarea>
                         
-                        <div style="background:rgba(0,0,0,0.1); padding:8px; border-radius:6px;">
-                            <div style="display:flex; align-items:center; gap:5px; margin-bottom:5px;">
+                        <div style="background:rgba(0,0,0,0.1); padding:12px; border-radius:8px; border:1px solid var(--smart-theme-border-color-1);">
+                            <div style="display:flex; align-items:center; gap:8px; margin-bottom:8px;">
                                 <input type="checkbox" id="pw-wi-toggle" checked>
-                                <span style="font-size:0.9em;">写入世界书</span>
+                                <span style="font-size:0.9em; font-weight:bold;">同步写入世界书</span>
                             </div>
-                            <textarea id="pw-res-wi" class="pw-textarea" style="min-height:60px;" placeholder="世界书条目内容...">${savedState.wiContent || ''}</textarea>
+                            <textarea id="pw-res-wi" class="pw-textarea" style="min-height:80px;" placeholder="世界书条目内容...">${savedState.wiContent || ''}</textarea>
                         </div>
                     </div>
                     <button id="pw-btn-apply" class="pw-btn save"><i class="fa-solid fa-check"></i> 应用并切换</button>
@@ -305,12 +308,15 @@ async function openCreatorPopup() {
         <!-- 2. 世界书视图 -->
         <div id="pw-view-context" class="pw-view">
             <div class="pw-scroll-area">
-                <div class="pw-wi-controls">
-                    <select id="pw-wi-select" class="pw-input" style="flex:1;">
-                        <option value="">-- 添加参考世界书 --</option>
-                        ${availableWorldBooks.map(b => `<option value="${b}">${b}</option>`).join('')}
-                    </select>
-                    <button id="pw-wi-add" class="pw-btn normal"><i class="fa-solid fa-plus"></i></button>
+                <div class="pw-section-card">
+                    <div class="pw-label"><i class="fa-solid fa-book-open"></i> 添加参考世界书</div>
+                    <div style="display:flex; gap:10px; margin-top:10px;">
+                        <select id="pw-wi-select" class="pw-input" style="flex:1;">
+                            <option value="">-- 选择世界书 --</option>
+                            ${availableWorldBooks.map(b => `<option value="${b}">${b}</option>`).join('')}
+                        </select>
+                        <button id="pw-wi-add" class="pw-btn normal"><i class="fa-solid fa-plus"></i></button>
+                    </div>
                 </div>
                 <div id="pw-wi-container"></div>
             </div>
@@ -327,12 +333,12 @@ async function openCreatorPopup() {
                             <option value="independent" ${config.apiSource === 'independent' ? 'selected' : ''}>独立 API</option>
                         </select>
                     </div>
-                    <div id="pw-indep-settings" style="display:${config.apiSource === 'independent' ? 'flex' : 'none'}; flex-direction:column; gap:10px;">
+                    <div id="pw-indep-settings" style="display:${config.apiSource === 'independent' ? 'flex' : 'none'}; flex-direction:column; gap:15px; margin-top:10px;">
                         <input type="text" id="pw-api-url" class="pw-input" value="${config.indepApiUrl}" placeholder="API URL">
                         <input type="password" id="pw-api-key" class="pw-input" value="${config.indepApiKey}" placeholder="API Key">
                         <input type="text" id="pw-api-model" class="pw-input" value="${config.indepApiModel}" placeholder="Model ID">
                     </div>
-                    <button id="pw-api-save" class="pw-btn primary" style="margin-top:10px;">保存设置</button>
+                    <button id="pw-api-save" class="pw-btn primary" style="margin-top:20px;">保存设置</button>
                 </div>
             </div>
         </div>
@@ -342,7 +348,7 @@ async function openCreatorPopup() {
             <div class="pw-scroll-area">
                 <div class="pw-history-toolbar">
                     <input type="text" id="pw-history-search" class="pw-history-search" placeholder="搜索历史...">
-                    <i class="fa-solid fa-times" id="pw-search-clear" style="cursor:pointer; opacity:0.6; padding:5px;"></i>
+                    <i class="fa-solid fa-times" id="pw-search-clear" style="cursor:pointer; opacity:0.6; padding:10px;"></i>
                 </div>
                 <div id="pw-history-list"></div>
                 <div id="pw-history-clear-all" class="pw-text-danger-btn"><i class="fa-solid fa-trash-alt"></i> 清空所有历史</div>
@@ -352,7 +358,7 @@ async function openCreatorPopup() {
 
     callPopup(html, 'text', '', { wide: true, large: true, okButton: "关闭" });
 
-    // --- 事件绑定 ---
+    // --- 事件绑定 (逻辑保持不变) ---
     renderTags();
     $('#pw-tags-toggle-edit').on('click', () => { isEditingTags = !isEditingTags; renderTags(); });
     $(document).on('click', '#pw-tags-quick-add', () => { tagsCache.push({ name: "", value: "" }); saveData(); isEditingTags = true; renderTags(); setTimeout(() => $('#pw-tags-list .t-name').last().focus(), 50); });
