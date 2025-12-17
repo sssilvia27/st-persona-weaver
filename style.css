@@ -1,4 +1,41 @@
-/* 顶部栏 */
+/* =========================================
+   1. 弹窗容器与全局布局
+   ========================================= */
+/* 强制弹窗在移动端适配 */
+.swal2-popup.pw-wide { 
+    width: 95% !important; 
+    max-width: 800px !important;
+    padding: 0 !important;
+    display: flex !important;
+    flex-direction: column;
+    max-height: 90vh !important;
+    border-radius: 12px !important;
+    overflow: hidden !important;
+}
+
+/* 移动端全屏优化 */
+@media screen and (max-width: 700px) {
+    .swal2-popup.pw-wide {
+        width: 100% !important;
+        height: 100% !important;
+        max-height: 100% !important;
+        border-radius: 0 !important;
+    }
+}
+
+.swal2-html-container {
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: hidden !important;
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    text-align: left !important;
+}
+
+/* =========================================
+   2. 顶部栏与 Tab
+   ========================================= */
 .pw-header {
     padding: 15px;
     border-bottom: 1px solid var(--smart-theme-border-color-1);
@@ -7,13 +44,19 @@
 }
 .pw-title { font-weight: bold; font-size: 1.1em; color: var(--smart-theme-body-color); }
 
-/* Tab 样式 */
-.pw-tabs { display: flex; background: rgba(0,0,0,0.2); user-select: none; }
-.pw-tab { flex: 1; text-align: center; padding: 10px; cursor: pointer; border-bottom: 3px solid transparent; opacity: 0.7; font-size: 0.9em; font-weight: bold; transition: 0.2s; }
-.pw-tab:hover { background: rgba(255,255,255,0.1); opacity: 1; }
-.pw-tab.active { border-bottom-color: #5b8db8; opacity: 1; color: #5b8db8; background: rgba(255,255,255,0.05); }
+.pw-tabs { display: flex; background: rgba(0,0,0,0.2); user-select: none; flex-shrink: 0; }
+.pw-tab { 
+    flex: 1; text-align: center; padding: 12px 5px; cursor: pointer; 
+    border-bottom: 3px solid transparent; opacity: 0.7; 
+    font-size: 0.9em; font-weight: bold; transition: 0.2s; 
+    white-space: nowrap;
+}
+.pw-tab:hover { background: rgba(255,255,255,0.05); opacity: 1; }
+.pw-tab.active { border-bottom-color: #5b8db8; opacity: 1; color: #5b8db8; background: rgba(255,255,255,0.08); }
 
-/* 中间滚动区域 */
+/* =========================================
+   3. 滚动区域与基础组件
+   ========================================= */
 .pw-scroll-area {
     flex: 1;
     overflow-y: auto;
@@ -22,7 +65,49 @@
     -webkit-overflow-scrolling: touch;
 }
 
-/* 标签区域重构 */
+/* 输入框样式修复 - 增加对比度 */
+.pw-textarea {
+    width: 100%; 
+    background: rgba(0, 0, 0, 0.2); /* 加深背景 */
+    border: 1px solid var(--smart-theme-border-color-1);
+    color: var(--smart-theme-body-color);
+    border-radius: 8px; padding: 10px; resize: none;
+    font-family: inherit; min-height: 80px;
+    box-sizing: border-box;
+}
+.pw-textarea:focus { border-color: #5b8db8; outline: none; background: rgba(0,0,0,0.3); }
+
+.pw-input {
+    width: 100%; box-sizing: border-box;
+    background: rgba(0, 0, 0, 0.2); /* 加深背景 */
+    border: 1px solid var(--smart-theme-border-color-1);
+    color: var(--smart-theme-body-color);
+    padding: 8px; border-radius: 6px; margin-top: 5px;
+}
+
+/* 按钮通用样式 */
+.pw-btn {
+    border: none; padding: 10px 0; border-radius: 6px;
+    font-weight: bold; font-size: 0.95em;
+    display: flex; align-items: center; justify-content: center; gap: 6px;
+    transition: all 0.2s; cursor: pointer; color: white; width: 100%;
+}
+.pw-btn.gen { background: linear-gradient(135deg, #5b8db8, #4a7a9f); }
+.pw-btn.save { background: #7a9a83; margin-top: 10px;}
+.pw-btn.normal { background: var(--smart-theme-border-color-1); color: var(--smart-theme-body-color); width: auto; padding: 8px 15px; }
+.pw-btn.primary { background: #5b8db8; width: auto; padding: 8px 15px; }
+.pw-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+
+.pw-mini-btn {
+    font-size: 0.85em; cursor: pointer; opacity: 0.7; 
+    padding: 4px 8px; border-radius: 4px; border: 1px solid transparent; 
+    display: flex; align-items: center; gap: 4px;
+}
+.pw-mini-btn:hover { opacity: 1; background: rgba(255,255,255,0.1); }
+
+/* =========================================
+   4. 标签系统 (Tag System)
+   ========================================= */
 .pw-tags-wrapper {
     background: rgba(0,0,0,0.1);
     border: 1px solid var(--smart-theme-border-color-1);
@@ -33,104 +118,120 @@
 
 .pw-tags-container {
     display: flex; flex-wrap: wrap; gap: 8px;
-    max-height: 150px; overflow-y: auto;
+    max-height: 200px; overflow-y: auto;
 }
 
-/* 正常模式下的标签 */
+/* 正常标签 */
 .pw-tag {
-    padding: 5px 10px;
+    padding: 6px 10px;
     background: var(--smart-theme-bg);
     border: 1px solid var(--smart-theme-border-color-1);
     border-radius: 4px;
     cursor: pointer;
-    font-size: 0.85em;
+    font-size: 0.9em;
     user-select: none;
     transition: all 0.1s;
-    display: inline-flex; align-items: center; gap: 5px;
+    display: inline-flex; align-items: center;
 }
 .pw-tag:hover { border-color: #5b8db8; color: #5b8db8; transform: translateY(-1px); }
-.pw-tag-val { opacity: 0.6; font-size: 0.9em; margin-left: 2px; }
+.pw-tag-val { opacity: 0.6; font-size: 0.85em; margin-left: 4px; border-left: 1px solid rgba(255,255,255,0.2); padding-left: 4px; }
 
-/* 添加按钮 */
+/* 编辑模式行 */
+.pw-tag-edit-row {
+    display: flex; width: 100%; gap: 5px; align-items: center; margin-bottom: 2px;
+}
+.pw-tag-input {
+    background: rgba(0,0,0,0.2);
+    border: 1px solid var(--smart-theme-border-color-1);
+    color: var(--smart-theme-body-color);
+    padding: 6px; border-radius: 4px; font-size: 0.9em;
+}
+
+/* 新增按钮 (统一样式) */
 .pw-tag-add-btn {
-    padding: 5px 10px;
-    background: rgba(91, 141, 184, 0.2);
+    padding: 6px 12px;
+    background: rgba(91, 141, 184, 0.15);
     border: 1px dashed #5b8db8;
     color: #5b8db8;
     border-radius: 4px;
     cursor: pointer;
-    font-size: 0.85em;
+    font-size: 0.9em;
+    display: inline-flex; align-items: center; justify-content: center;
 }
 .pw-tag-add-btn:hover { background: #5b8db8; color: white; }
 
-/* 编辑模式下的标签行 */
-.pw-tag-edit-row {
-    display: flex; width: 100%; gap: 5px; align-items: center; margin-bottom: 5px;
-}
-.pw-tag-input {
-    background: var(--smart-theme-bg);
+/* =========================================
+   5. 世界书 & API 样式 (修复丑陋问题)
+   ========================================= */
+.pw-card-box {
+    background: rgba(0, 0, 0, 0.15); /* 加深背景 */
     border: 1px solid var(--smart-theme-border-color-1);
-    color: var(--smart-theme-body-color);
-    padding: 4px 8px; border-radius: 4px; font-size: 0.85em;
-}
-.pw-tag-input:focus { border-color: #5b8db8; outline: none; }
-.pw-tag-del {
-    color: #ff6b6b; cursor: pointer; padding: 5px; opacity: 0.7;
-}
-.pw-tag-del:hover { opacity: 1; transform: scale(1.1); }
-
-/* 通用输入框 */
-.pw-textarea {
-    width: 100%; background: rgba(0,0,0,0.05);
-    border: 1px solid var(--smart-theme-border-color-1);
-    color: var(--smart-theme-body-color);
-    border-radius: 8px; padding: 10px; resize: none;
-    font-family: inherit; min-height: 80px;
-    box-sizing: border-box;
-}
-.pw-textarea:focus { border-color: #7a9a83; outline: none; background: rgba(0,0,0,0.1); }
-
-.pw-input {
-    width: 100%; box-sizing: border-box;
-    background: rgba(0,0,0,0.05);
-    border: 1px solid var(--smart-theme-border-color-1);
-    color: var(--smart-theme-body-color);
-    padding: 8px; border-radius: 6px; margin-top: 5px;
+    border-radius: 8px;
+    padding: 15px;
+    display: flex; flex-direction: column; gap: 12px;
 }
 
-/* 按钮 */
-.pw-btn {
-    border: none; padding: 10px 0; border-radius: 6px;
-    font-weight: bold; font-size: 0.95em;
-    display: flex; align-items: center; justify-content: center; gap: 6px;
-    transition: all 0.2s; cursor: pointer; color: white; width: 100%;
+.pw-row { 
+    display: flex; align-items: center; justify-content: space-between; gap: 10px; 
 }
-.pw-btn.gen { background: #5b8db8; }
-.pw-btn.save { background: #7a9a83; margin-top: 10px;}
-.pw-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+.pw-row label { font-weight: bold; font-size: 0.9em; min-width: 60px; }
 
-/* 历史记录 */
+.pw-wi-book { 
+    border: 1px solid var(--smart-theme-border-color-1); 
+    border-radius: 6px; overflow: hidden; margin-bottom: 8px; 
+    background: rgba(0,0,0,0.2); 
+}
+.pw-wi-header { 
+    padding: 10px 12px; background: rgba(255,255,255,0.05); 
+    cursor: pointer; display: flex; justify-content: space-between; align-items: center; 
+    font-weight: bold; font-size: 0.9em; 
+}
+
+/* =========================================
+   6. 历史记录列表
+   ========================================= */
 .pw-history-item {
-    background: var(--smart-theme-bg);
+    background: rgba(0,0,0,0.15);
     border: 1px solid var(--smart-theme-border-color-1);
-    padding: 10px; border-radius: 6px; cursor: pointer;
-    transition: 0.2s; position: relative;
-    margin-bottom: 8px;
+    padding: 12px; border-radius: 8px; cursor: pointer;
+    transition: 0.2s; position: relative; margin-bottom: 8px;
 }
-.pw-history-item:hover { border-color: #5b8db8; transform: translateX(2px); }
-.pw-hist-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 5px; }
-.pw-hist-title { font-weight: bold; color: #5b8db8; border: none; background: transparent; width: 80%; font-size: 1em; }
-.pw-hist-title.editing { border-bottom: 1px solid; }
-.pw-hist-meta { font-size: 0.75em; opacity: 0.6; display: flex; gap: 10px; margin-bottom: 5px; }
-.pw-hist-desc { font-size: 0.85em; opacity: 0.8; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.pw-history-item:hover { border-color: #5b8db8; background: rgba(0,0,0,0.25); }
+
+.pw-hist-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 6px; }
+.pw-hist-title { 
+    font-weight: bold; color: #5b8db8; border: none; background: transparent; 
+    width: 85%; font-size: 1.05em; padding: 0;
+}
+.pw-hist-title.editing { border-bottom: 1px solid #5b8db8; outline: none; }
+.pw-hist-meta { font-size: 0.8em; opacity: 0.6; display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 6px; }
+.pw-hist-desc { font-size: 0.9em; opacity: 0.8; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; line-height: 1.4; }
 
 /* 底部红色小字 */
 .pw-text-danger-btn {
-    color: #ff6b6b; font-size: 0.85em; cursor: pointer; text-align: center;
-    padding: 15px; margin-top: auto; opacity: 0.7;
+    color: #ff6b6b; font-size: 0.9em; cursor: pointer; text-align: center;
+    padding: 20px; margin-top: auto; opacity: 0.8;
 }
 .pw-text-danger-btn:hover { opacity: 1; text-decoration: underline; }
 
-/* 视图控制 */
+/* =========================================
+   7. 移动端响应式 (Mobile Responsive)
+   ========================================= */
+@media screen and (max-width: 700px) {
+    /* 调整 Tab 大小 */
+    .pw-tab { font-size: 0.85em; padding: 10px 2px; }
+    
+    /* 标签编辑行变竖排 */
+    .pw-tag-edit-row { flex-direction: column; align-items: stretch; border-bottom: 1px dashed rgba(255,255,255,0.1); padding-bottom: 5px; margin-bottom: 8px; }
+    
+    /* API 设置行变竖排 */
+    .pw-row { flex-direction: column; align-items: stretch; gap: 5px; }
+    .pw-row label { margin-bottom: 2px; }
+    
+    /* 工具栏调整 */
+    .pw-editor-controls { flex-direction: column; gap: 10px; }
+    .pw-editor-controls > div { justify-content: space-between; width: 100%; }
+}
+
 .pw-view { display: none; flex-direction: column; flex: 1; }
 .pw-view.active { display: flex; }
