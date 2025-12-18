@@ -6,7 +6,7 @@ import { saveSettingsDebounced, callPopup, getRequestHeaders } from "../../../..
 // ============================================================================
 
 const extensionName = "st-persona-weaver";
-const STORAGE_KEY_HISTORY = 'pw_history_v18'; // 升级版本
+const STORAGE_KEY_HISTORY = 'pw_history_v18'; // 版本升级
 const STORAGE_KEY_STATE = 'pw_state_v18'; 
 const STORAGE_KEY_TAGS = 'pw_tags_v12';
 
@@ -44,7 +44,7 @@ const TEXT = {
     TOAST_SAVE_API: "API 设置已保存",
     TOAST_SNAPSHOT: "已存入历史记录",
     TOAST_GEN_FAIL: "生成失败，请检查 API 设置",
-    TOAST_SAVE_SUCCESS: (name) => `Persona "${name}" 已保存并绑定！`
+    TOAST_SAVE_SUCCESS: (name) => `Persona "${name}" 已强制写入并绑定！`
 };
 
 // ============================================================================
@@ -91,7 +91,40 @@ function injectStyles() {
 // 3. 业务逻辑 (核心功能)
 // ============================================================================
 
-// [核心] 执行 Slash 命令
+// [核心] 暴力写入 Persona (参考了用户的 F12 方案)
+async function forceSavePersona(name, description, title) {
+    const context = getContext();
+    
+    // 1. 直接修改内存中的数据源 (SillyTavern 的核心数据)
+    if (!context.powerUserSettings.personas) context.powerUserSettings.personas = {};
+    context.powerUserSettings.personas[name] = description;
+
+    if (!context.powerUserSettings.persona_titles) context.powerUserSettings.persona_titles = {};
+    context.powerUserSettings.persona_titles[name] = title || "";
+
+    // 2. 切换当前选中的 Persona
+    context.powerUserSettings.persona_selected = name;
+
+    // 3. 尝试暴力更新 UI (如果用户正打开着设置面板)
+    // 这是为了防止 UI 显示旧数据
+    const $nameInput = $('#your_name'); // ST 的用户名称输入框 ID
+    const $descInput = $('#persona_description'); // ST 的用户描述输入框 ID
+    
+    if ($nameInput.length) {
+        $nameInput.val(name).trigger('input').trigger('change');
+    }
+    if ($descInput.length) {
+        $descInput.val(description).trigger('input').trigger('change');
+    }
+
+    // 4. 调用系统保存 (最关键的一步)
+    await saveSettingsDebounced();
+    
+    console.log(`[PW] Persona "${name}" created/updated via direct memory injection.`);
+    return true;
+}
+
+// [核心] 执行 Slash 命令 (用于绑定)
 async function executeSlash(command) {
     const { executeSlashCommandsWithOptions } = SillyTavern;
     if (executeSlashCommandsWithOptions) {
@@ -99,37 +132,6 @@ async function executeSlash(command) {
     } else {
         console.warn("[PW] Slash command API not found!");
     }
-}
-
-// [核心] 暴力 UI 写入 (参考用户提供的 F12 方案)
-async function forceUpdatePersonaUI(name, description, title) {
-    const context = getContext();
-    
-    // 1. 确保数据层更新 (这是基础)
-    if (!context.powerUserSettings.personas) context.powerUserSettings.personas = {};
-    context.powerUserSettings.personas[name] = description;
-    
-    if (!context.powerUserSettings.persona_titles) context.powerUserSettings.persona_titles = {};
-    context.powerUserSettings.persona_titles[name] = title || "";
-
-    // 2. 暴力操作 DOM (模拟用户输入)
-    // 只有当 ST 的输入框存在时才有效，但即使不存在，上面的数据层更新+保存也能生效
-    // 如果输入框存在，必须触发 input 事件，否则 UI 会覆盖数据
-    const $descInput = $('#persona_description');
-    const $nameInput = $('#your_name'); // 或者是 #persona_name，取决于版本
-    
-    // 只有当前显示的也是这个名字时，才去改 UI，防止串台
-    if ($nameInput.val() === name) {
-        if ($descInput.length) {
-            $descInput.val(description);
-            // 触发事件
-            $descInput[0].dispatchEvent(new Event('input', { bubbles: true }));
-            $descInput[0].dispatchEvent(new Event('change', { bubbles: true }));
-        }
-    }
-
-    // 3. 强制保存
-    await saveSettingsDebounced();
 }
 
 async function loadAvailableWorldBooks() {
@@ -156,7 +158,6 @@ async function getContextWorldBooks(extras = []) {
     if (charId !== undefined && context.characters[charId]) {
         const char = context.characters[charId];
         const data = char.data || char;
-        // 尝试获取 V2 Character Book Name 或 Extension World
         const v2Book = data.character_book?.name;
         const extWorld = data.extensions?.world;
         const legacyWorld = data.world;
@@ -756,7 +757,7 @@ async function openCreatorPopup() {
         }
     });
 
-    // --- 8. 应用 (保存逻辑大修) ---
+    // --- 8. 应用 (核心修复：暴力写入 + 强制同步) ---
     $('#pw-btn-apply').on('click', async function() {
         const name = $('#pw-res-name').val();
         const title = $('#pw-res-title').val();
@@ -765,25 +766,29 @@ async function openCreatorPopup() {
         
         if (!name) return toastr.warning("名字不能为空");
         
-        // 1. 先切换 (Switch) - 让 ST 认为这是当前 Persona
-        // 使用 Slash Command 可以自动处理 "如果不存在则新建内存对象" 的逻辑
-        await executeSlash(`/persona-set "${name}"`);
-        
-        // 等待一小会儿，确保切换逻辑执行完毕
-        await new Promise(r => setTimeout(r, 300));
-
-        // 2. 后更新 & 暴力 UI 写入 (Update)
-        await forceUpdatePersonaUI(name, desc, title);
-
-        // 3. 锁定到聊天 (Bind)
-        await executeSlash(`/persona-lock type=chat`);
-
-        // 4. 写入世界书
         const context = getContext();
+        
+        // 1. 暴力保存 Persona (内存劫持 + UI更新 + 强制存盘)
+        try {
+            await forceSavePersona(name, desc, title);
+        } catch (e) {
+            toastr.error("保存失败: " + e.message);
+            return;
+        }
+
+        // 2. 绑定到聊天
+        try {
+            // 这里双保险：先切，再锁
+            await executeSlash(`/persona-set "${name}"`);
+            await executeSlash(`/persona-lock type=chat`);
+        } catch (e) {
+            console.warn("Slash command execution failed", e);
+        }
+
+        // 3. 写入世界书
         if ($('#pw-wi-toggle').is(':checked') && wiContent) {
             const char = context.characters[context.characterId];
             const data = char.data || char;
-            
             let targetBook = data.character_book?.name || data.extensions?.world || data.world;
             
             if (!targetBook) {
