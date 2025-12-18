@@ -6,9 +6,9 @@ import { saveSettingsDebounced, callPopup, getRequestHeaders } from "../../../..
 // ============================================================================
 
 const extensionName = "st-persona-weaver";
-const STORAGE_KEY_HISTORY = 'pw_history_v16'; // 升级存储版本
-const STORAGE_KEY_STATE = 'pw_state_v16'; 
-const STORAGE_KEY_TAGS = 'pw_tags_v10';
+const STORAGE_KEY_HISTORY = 'pw_history_v18'; 
+const STORAGE_KEY_STATE = 'pw_state_v18'; 
+const STORAGE_KEY_TAGS = 'pw_tags_v12';
 
 // 默认标签库
 const defaultTags = [
@@ -44,7 +44,7 @@ const TEXT = {
     TOAST_SAVE_API: "API 设置已保存",
     TOAST_SNAPSHOT: "已存入历史记录",
     TOAST_GEN_FAIL: "生成失败，请检查 API 设置",
-    TOAST_SAVE_SUCCESS: (name) => `设定 "${name}" 已创建并绑定!`
+    TOAST_SAVE_SUCCESS: (name) => `设定 "${name}" 已保存并连接!`
 };
 
 // ============================================================================
@@ -83,7 +83,7 @@ function loadState() {
 }
 
 function injectStyles() {
-    const styleId = 'persona-weaver-css-v16';
+    const styleId = 'persona-weaver-css-v18';
     if ($(`#${styleId}`).length) return;
 }
 
@@ -710,7 +710,7 @@ async function openCreatorPopup() {
         }
     });
 
-    // --- 8. 应用 (修复: 完整创建流程) ---
+    // --- 8. 应用 (修复: 复制当前头像逻辑) ---
     $('#pw-btn-apply').on('click', async function() {
         const name = $('#pw-res-name').val();
         const title = $('#pw-res-title').val();
@@ -723,18 +723,49 @@ async function openCreatorPopup() {
         $btn.prop('disabled', true).html('<i class="fas fa-spinner fa-spin"></i> 保存中...');
 
         try {
-            // 1. 构造 Persona 数据对象 (必须符合 ST 格式)
+            const context = getContext();
+            
+            // 1. 获取当前正在使用的头像文件
+            const currentAvatarFile = context.powerUserSettings.user_avatar || "default.png";
+            
+            // 2. 将其下载为 Blob
+            // SillyTavern 的用户头像路径通常为 /User/Avatars/filename
+            // 注意: url 可能是 /user/images/avatars/ 或者 /User/Avatars/ 取决于版本，通常小写兼容性更好
+            const avatarUrl = `/user/images/avatars/${currentAvatarFile}`;
+            const imgRes = await fetch(avatarUrl);
+            
+            let imgBlob;
+            if (imgRes.ok) {
+                imgBlob = await imgRes.blob();
+            } else {
+                // 如果获取失败（极罕见），创建一个 1x1 透明 PNG 避免报错
+                const fallbackBase64 = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=";
+                imgBlob = await (await fetch(fallbackBase64)).blob();
+            }
+
+            // 3. 上传该 Blob 作为新 Persona 的头像 (文件名 = persona_name.png)
+            const formData = new FormData();
+            formData.append('avatar', imgBlob, `${name}.png`);
+            
+            const headers = getRequestHeaders();
+            const token = headers['X-CSRF-TOKEN'];
+            
+            const uploadRes = await fetch('/api/upload?type=user_avatar', {
+                method: 'POST',
+                headers: { 'X-CSRF-TOKEN': token },
+                body: formData
+            });
+            
+            if (!uploadRes.ok) console.warn("Avatar upload warning:", await uploadRes.text());
+
+            // 4. 保存 Persona 数据 (此时头像文件已存在)
             const personaData = {
                 name: name,
                 description: desc,
-                avatar: "default.png" // 默认占位，如果用户有 current.png 可尝试替换
+                avatar: `${name}.png` 
             };
-            
-            // *重要*: 如果后端支持 title 字段则加入
-            // 由于 ST 官方API /api/personas/save 接收的是整个 JSON，我们直接传进去
             if(title) personaData.title = title;
 
-            // 2. 调用 API 创建文件
             const saveRes = await fetch('/api/personas/save', {
                 method: 'POST',
                 headers: getRequestHeaders(),
@@ -743,19 +774,11 @@ async function openCreatorPopup() {
             
             if (!saveRes.ok) throw new Error("API Save Failed");
 
-            // 3. 强制绑定 (使用 TavernHelper 或 Slash Command)
+            // 5. 自动切换
             if (defaultSettings.autoSwitchPersona) {
-                // 等待一下让后端写入文件
-                await new Promise(r => setTimeout(r, 500));
-                
                 if (window.TavernHelper && window.TavernHelper.triggerSlash) {
-                    // 使用 Slash Command 切换，它会自动处理列表刷新
                     await window.TavernHelper.triggerSlash(`/persona-set ${name}`);
-                    await window.TavernHelper.triggerSlash(`/persona-lock`); // 锁定/连接到当前聊天
                 } else {
-                    console.warn("[PW] TavernHelper missing, trying fallback.");
-                    // Fallback: 仅修改前端设置 (可能不持久)
-                    const context = getContext();
                     if(!context.powerUserSettings.personas) context.powerUserSettings.personas = {};
                     context.powerUserSettings.personas[name] = desc;
                     context.powerUserSettings.persona_selected = name;
@@ -763,7 +786,7 @@ async function openCreatorPopup() {
                 }
             }
 
-            // 4. 写入世界书 (使用 TavernHelper)
+            // 6. 世界书
             if ($('#pw-wi-toggle').is(':checked') && wiContent) {
                 if (window.TavernHelper && window.TavernHelper.getOrCreateChatWorldbook) {
                     const bookName = await window.TavernHelper.getOrCreateChatWorldbook('current');
@@ -774,7 +797,7 @@ async function openCreatorPopup() {
                         enabled: true,
                         selective: true
                     }]);
-                    toastr.success(`世界书条目已添加`);
+                    toastr.success(`世界书已更新`);
                 }
             }
 
@@ -900,5 +923,5 @@ jQuery(async () => {
         </div>
     `);
     $("#pw_open_btn").on("click", openCreatorPopup);
-    console.log(`${extensionName} v16 loaded.`);
+    console.log(`${extensionName} v18 loaded.`);
 });
