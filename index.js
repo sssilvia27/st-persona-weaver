@@ -6,9 +6,9 @@ import { saveSettingsDebounced, callPopup, getRequestHeaders } from "../../../..
 // ============================================================================
 
 const extensionName = "st-persona-weaver";
-const STORAGE_KEY_HISTORY = 'pw_history_v14'; 
-const STORAGE_KEY_STATE = 'pw_state_v14'; 
-const STORAGE_KEY_TAGS = 'pw_tags_v8';
+const STORAGE_KEY_HISTORY = 'pw_history_v21'; // 升级版本
+const STORAGE_KEY_STATE = 'pw_state_v21'; 
+const STORAGE_KEY_TAGS = 'pw_tags_v15';
 
 // 默认标签库
 const defaultTags = [
@@ -44,7 +44,7 @@ const TEXT = {
     TOAST_SAVE_API: "API 设置已保存",
     TOAST_SNAPSHOT: "已存入历史记录",
     TOAST_GEN_FAIL: "生成失败，请检查 API 设置",
-    TOAST_SAVE_SUCCESS: (name) => `设定已保存并切换为: ${name}`
+    TOAST_SAVE_SUCCESS: (name) => `Persona "${name}" 已新建并绑定！`
 };
 
 // ============================================================================
@@ -83,36 +83,50 @@ function loadState() {
 }
 
 function injectStyles() {
-    const styleId = 'persona-weaver-css-v14';
+    const styleId = 'persona-weaver-css-v21';
     if ($(`#${styleId}`).length) return;
 }
 
 // ============================================================================
-// 3. 业务逻辑 (世界书与生成)
+// 3. 业务逻辑 (核心功能)
 // ============================================================================
+
+// [核心] 纯数据层保存 Persona
+async function pureSavePersona(name, description, title) {
+    const context = getContext();
+    if (!context.powerUserSettings.personas) context.powerUserSettings.personas = {};
+    if (!context.powerUserSettings.persona_titles) context.powerUserSettings.persona_titles = {};
+
+    context.powerUserSettings.personas[name] = description;
+    context.powerUserSettings.persona_titles[name] = title || "";
+
+    await saveSettingsDebounced();
+    console.log(`[PW] Persona "${name}" data saved to config.`);
+}
+
+// [核心] 执行 Slash 命令
+async function executeSlash(command) {
+    const { executeSlashCommandsWithOptions } = SillyTavern;
+    if (executeSlashCommandsWithOptions) {
+        await executeSlashCommandsWithOptions(command, { quiet: true });
+    } else {
+        console.warn("[PW] Slash command API not found!");
+    }
+}
 
 async function loadAvailableWorldBooks() {
     availableWorldBooks = [];
-    const context = getContext();
-    
-    if (window.TavernHelper && typeof window.TavernHelper.getWorldbookNames === 'function') {
-        try { availableWorldBooks = window.TavernHelper.getWorldbookNames(); } catch (e) { console.warn("[PW] TavernHelper load failed", e); }
-    }
-
-    if (!availableWorldBooks || availableWorldBooks.length === 0) {
-        try {
-            const response = await fetch('/api/worldinfo/get', { method: 'POST', headers: getRequestHeaders(), body: JSON.stringify({}) });
-            if (response.ok) {
-                const data = await response.json();
-                if (Array.isArray(data)) {
-                    availableWorldBooks = data.map(item => item.name || item);
-                } else if (data && data.world_names) {
-                    availableWorldBooks = data.world_names;
-                }
+    try {
+        const response = await fetch('/api/worldinfo/get', { method: 'POST', headers: getRequestHeaders(), body: JSON.stringify({}) });
+        if (response.ok) {
+            const data = await response.json();
+            if (Array.isArray(data)) {
+                availableWorldBooks = data.map(item => item.name || item);
+            } else if (data && data.world_names) {
+                availableWorldBooks = data.world_names;
             }
-        } catch (e) { console.error("[PW] API load failed", e); }
-    }
-    
+        }
+    } catch (e) { console.error("[PW] API load failed", e); }
     availableWorldBooks = [...new Set(availableWorldBooks)].filter(x => x).sort();
 }
 
@@ -124,7 +138,11 @@ async function getContextWorldBooks(extras = []) {
     if (charId !== undefined && context.characters[charId]) {
         const char = context.characters[charId];
         const data = char.data || char;
-        const main = data.extensions?.world || data.world || data.character_book?.name;
+        const v2Book = data.character_book?.name;
+        const extWorld = data.extensions?.world;
+        const legacyWorld = data.world;
+        
+        const main = v2Book || extWorld || legacyWorld;
         if (main) books.add(main);
     }
     return Array.from(books).filter(Boolean);
@@ -166,6 +184,61 @@ async function fetchModels(url, key) {
     }
 }
 
+// [核心辅助] 智能 JSON 修复与解析器
+// 专门解决：流式数据堆积、Markdown包裹、多余字符等问题
+function smartJsonParse(text) {
+    if (!text) throw new Error("Empty response");
+    
+    console.log("[PW] Raw API Response:", text.substring(0, 100) + "..."); // Debug
+
+    // 1. 尝试清洗流式数据 (data: ...)
+    // 如果开头是 data:，说明是 SSE 流被当做文本返回了
+    if (text.trim().startsWith("data:")) {
+        console.log("[PW] Detected raw stream data, reconstructing...");
+        const lines = text.split('\n');
+        let reconstructed = "";
+        for (const line of lines) {
+            const cleanLine = line.trim();
+            if (cleanLine.startsWith("data:") && !cleanLine.includes("[DONE]")) {
+                try {
+                    const json = JSON.parse(cleanLine.substring(5).trim());
+                    // 兼容不同厂商的 delta 字段位置
+                    const chunk = json.choices?.[0]?.delta?.content || json.choices?.[0]?.message?.content || "";
+                    reconstructed += chunk;
+                } catch (e) { 
+                    // 忽略解析错误的行
+                }
+            }
+        }
+        if (reconstructed) {
+            text = reconstructed; // 替换为重组后的文本
+            console.log("[PW] Reconstructed Text:", text.substring(0, 50) + "...");
+        }
+    }
+
+    // 2. 尝试提取 Markdown JSON 代码块
+    const jsonMatch = text.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/i);
+    if (jsonMatch && jsonMatch[1]) {
+        try { return JSON.parse(jsonMatch[1]); } catch(e) {}
+    }
+
+    // 3. 尝试提取首尾大括号的内容 (最通用的 JSON 提取)
+    const firstOpen = text.indexOf('{');
+    const lastClose = text.lastIndexOf('}');
+    if (firstOpen !== -1 && lastClose !== -1) {
+        const jsonStr = text.substring(firstOpen, lastClose + 1);
+        try { return JSON.parse(jsonStr); } catch (e) {}
+    }
+
+    // 4. 最后尝试直接解析 (万一它就是纯 JSON)
+    try {
+        return JSON.parse(text);
+    } catch (e) {
+        console.error("[PW] Parsing failed. Content:", text);
+        throw new Error("无法解析 JSON 数据，API 可能返回了非标准格式。");
+    }
+}
+
 async function runGeneration(data, apiConfig) {
     const context = getContext();
     const char = context.characters[context.characterId];
@@ -179,7 +252,6 @@ async function runGeneration(data, apiConfig) {
         wiText = `\n[Context]:\n${data.wiContext.join('\n\n')}\n`;
     }
 
-    // 获取用户输入的 Name 和 Title
     const specifiedName = $('#pw-res-name').val() || "";
     const specifiedTitle = $('#pw-res-title').val() || "";
 
@@ -205,26 +277,36 @@ Return ONLY a JSON object:
     "wi_entry": "Concise facts."
 }`;
 
+    let content = "";
+
+    // 独立 API
     if (apiConfig.apiSource === 'independent') {
         const url = `${apiConfig.indepApiUrl.replace(/\/$/, '')}/chat/completions`;
         const body = {
             model: apiConfig.indepApiModel,
             messages: [{ role: 'system', content: systemPrompt }],
-            temperature: 0.7
+            temperature: 0.7,
+            stream: false // 显式关闭流式
         };
         const res = await fetch(url, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiConfig.indepApiKey}` },
             body: JSON.stringify(body)
         });
-        if (!res.ok) throw new Error("Independent API Error");
+        
+        if (!res.ok) throw new Error(`Independent API Error: ${res.status}`);
+        
         const json = await res.json();
-        const content = json.choices[0].message.content;
-        return JSON.parse(content.match(/\{[\s\S]*\}/)[0]);
-    } else {
-        const generatedText = await context.generateQuietPrompt(systemPrompt, false, false, "System");
-        return JSON.parse(generatedText.match(/\{[\s\S]*\}/)[0]);
+        content = json.choices?.[0]?.message?.content || json.choices?.[0]?.text || "";
+    } 
+    // 主 API
+    else {
+        // 主 API 返回的可能是流式数据的文本堆积
+        content = await context.generateQuietPrompt(systemPrompt, false, false, "System");
     }
+
+    // 使用智能解析器处理所有情况
+    return smartJsonParse(content);
 }
 
 // ============================================================================
@@ -246,7 +328,6 @@ async function openCreatorPopup() {
         ? availableWorldBooks.map(b => `<option value="${b}">${b}</option>`).join('')
         : `<option disabled>未找到世界书</option>`;
 
-    // 主弹窗 HTML 结构
     const html = `
     <div class="pw-wrapper">
         <div class="pw-header">
@@ -261,10 +342,8 @@ async function openCreatorPopup() {
             </div>
         </div>
 
-        <!-- 1. 编辑视图 -->
         <div id="pw-view-editor" class="pw-view active">
             <div class="pw-scroll-area">
-                <!-- 标签区域 -->
                 <div>
                     <div class="pw-tags-header">
                         <span class="pw-tags-label">快速标签</span>
@@ -273,9 +352,7 @@ async function openCreatorPopup() {
                     <div class="pw-tags-container" id="pw-tags-list"></div>
                 </div>
 
-                <!-- 核心输入区域 -->
                 <div style="flex:1; display:flex; flex-direction:column; gap:8px;">
-                    <!-- 姓名与标题输入框 (Placeholder 更新) -->
                     <div style="display:flex; gap:10px;">
                         <input type="text" id="pw-res-name" class="pw-input" placeholder="姓名" value="${savedState.name || ''}" style="flex:1;">
                         <input type="text" id="pw-res-title" class="pw-input" placeholder="Title (选填)" value="${savedState.title || ''}" style="flex:1;">
@@ -295,7 +372,6 @@ async function openCreatorPopup() {
 
                 <button id="pw-btn-gen" class="pw-btn gen"><i class="fa-solid fa-bolt"></i> 生成 / 润色</button>
 
-                <!-- 结果区域 (仅保留描述和世界书) -->
                 <div id="pw-result-area" style="display: ${savedState.hasResult ? 'block' : 'none'}; border-top: 1px dashed var(--SmartThemeBorderColor); padding-top: 15px; margin-top:5px;">
                     <div style="font-weight:bold; margin-bottom:10px; color:#5b8db8;"><i class="fa-solid fa-check-circle"></i> 生成结果</div>
                     <div style="display:flex; flex-direction:column; gap:10px;">
@@ -314,7 +390,6 @@ async function openCreatorPopup() {
             </div>
         </div>
 
-        <!-- 2. 世界书视图 -->
         <div id="pw-view-context" class="pw-view">
             <div class="pw-scroll-area">
                 <div class="pw-card-section">
@@ -330,7 +405,6 @@ async function openCreatorPopup() {
             </div>
         </div>
 
-        <!-- 3. API 设置视图 -->
         <div id="pw-view-api" class="pw-view">
             <div class="pw-scroll-area">
                 <div class="pw-card-section">
@@ -341,7 +415,6 @@ async function openCreatorPopup() {
                             <option value="independent" ${config.apiSource === 'independent' ? 'selected' : ''}>独立 API</option>
                         </select>
                     </div>
-                    
                     <div id="pw-indep-settings" style="display:${config.apiSource === 'independent' ? 'flex' : 'none'}; flex-direction:column; gap:15px;">
                         <div class="pw-row">
                             <label>URL</label>
@@ -367,7 +440,6 @@ async function openCreatorPopup() {
             </div>
         </div>
 
-        <!-- 4. 历史视图 -->
         <div id="pw-view-history" class="pw-view">
             <div class="pw-scroll-area">
                 <div class="pw-search-box">
@@ -392,7 +464,7 @@ async function openCreatorPopup() {
         saveState({
             request: $('#pw-request').val(),
             name: $('#pw-res-name').val(),
-            title: $('#pw-res-title').val(), // 保存 Title
+            title: $('#pw-res-title').val(),
             desc: $('#pw-res-desc').val(),
             wiContent: $('#pw-res-wi').val(),
             hasResult: $('#pw-result-area').is(':visible'),
@@ -419,7 +491,7 @@ async function openCreatorPopup() {
         if(tab === 'history') renderHistoryList(); 
     });
 
-    // --- 3. 标签系统 (极致紧凑版) ---
+    // --- 3. 标签系统 ---
     isEditingTags = false; 
 
     const renderTagsList = () => {
@@ -431,7 +503,6 @@ async function openCreatorPopup() {
 
         tagsCache.forEach((tag, index) => {
             if (isEditingTags) {
-                // 编辑模式
                 const $row = $(`
                     <div class="pw-tag-edit-row">
                         <input class="pw-tag-edit-input t-name" value="${tag.name}" placeholder="名">
@@ -455,7 +526,6 @@ async function openCreatorPopup() {
                 });
                 $container.append($row);
             } else {
-                // 浏览模式
                 const $chip = $(`
                     <div class="pw-tag-chip" title="点击插入">
                         <i class="fa-solid fa-tag" style="opacity:0.5; margin-right:4px;"></i>
@@ -477,7 +547,6 @@ async function openCreatorPopup() {
             }
         });
 
-        // 按钮
         const $addBtn = $(`<div class="pw-tag-add-btn"><i class="fa-solid fa-plus"></i> ${isEditingTags ? '新增' : '标签'}</div>`);
         $addBtn.on('click', () => {
             tagsCache.push({ name: "", value: "" });
@@ -488,7 +557,6 @@ async function openCreatorPopup() {
         });
         $container.append($addBtn);
 
-        // 编辑模式底部增加“完成”按钮
         if (isEditingTags) {
             const $finishBtn = $(`<div class="pw-tags-finish-bar"><i class="fa-solid fa-check"></i> 完成编辑</div>`);
             $finishBtn.on('click', () => {
@@ -644,7 +712,6 @@ async function openCreatorPopup() {
         }
     });
 
-    // [快照存入历史] -> 标题 = "Name + Title"
     $('#pw-snapshot').on('click', () => {
         const req = $('#pw-request').val();
         const curName = $('#pw-res-name').val();
@@ -655,8 +722,6 @@ async function openCreatorPopup() {
         
         const userName = curName || "User"; 
         const userTitle = curTitle || "";
-        
-        // 标题逻辑：Name + Space + Title
         const finalTitle = userTitle ? `${userName} ${userTitle}` : userName;
         
         saveHistory({ 
@@ -705,7 +770,6 @@ async function openCreatorPopup() {
         try {
             const data = await runGeneration(config, config);
             
-            // 回填数据，确保如果没生成Name/Title，保持用户输入
             const finalName = data.name || $('#pw-res-name').val() || "User";
             const finalTitle = data.title || $('#pw-res-title').val() || "";
 
@@ -715,7 +779,6 @@ async function openCreatorPopup() {
             $('#pw-res-wi').val(data.wi_entry || data.description);
             $('#pw-result-area').fadeIn();
             
-            // 自动存历史 -> 标题 = Name + Title
             const finalTitleStr = finalTitle ? `${finalName} ${finalTitle}` : finalName;
             
             saveHistory({ 
@@ -739,47 +802,74 @@ async function openCreatorPopup() {
         }
     });
 
-    // --- 8. 应用 ---
+    // --- 8. 应用 (纯数据层逻辑，完全移除UI更新) ---
     $('#pw-btn-apply').on('click', async function() {
         const name = $('#pw-res-name').val();
+        const title = $('#pw-res-title').val();
         const desc = $('#pw-res-desc').val();
         const wiContent = $('#pw-res-wi').val();
         
         if (!name) return toastr.warning("名字不能为空");
         
-        const context = getContext();
-        if (!context.powerUserSettings.personas) context.powerUserSettings.personas = {};
-        context.powerUserSettings.personas[name] = desc;
-        await saveSettingsDebounced();
+        try {
+            // 1. 保存 Persona 到配置 (不碰UI，避免重命名当前)
+            await pureSavePersona(name, desc, title);
 
-        if ($('#pw-wi-toggle').is(':checked') && wiContent) {
-            const books = await getContextWorldBooks();
-            if (books.length > 0) {
-                const book = books[0];
-                try {
+            // 2. 切换并绑定 (Slash Command 会自动处理 UI 刷新)
+            // 先切换
+            await executeSlash(`/persona-set "${name}"`);
+            // 再锁定
+            await executeSlash(`/persona-lock type=chat`);
+
+            // 3. 写入世界书
+            if ($('#pw-wi-toggle').is(':checked') && wiContent) {
+                const context = getContext();
+                const char = context.characters[context.characterId];
+                const data = char.data || char;
+                let targetBook = data.character_book?.name || data.extensions?.world || data.world;
+                
+                if (!targetBook) {
+                    const books = await getContextWorldBooks();
+                    if (books.length > 0) targetBook = books[0];
+                }
+
+                if (targetBook) {
                     const headers = getRequestHeaders();
-                    const r = await fetch('/api/worldinfo/get', { method: 'POST', headers, body: JSON.stringify({ name: book }) });
+                    const r = await fetch('/api/worldinfo/get', { method: 'POST', headers, body: JSON.stringify({ name: targetBook }) });
                     if (r.ok) {
                         const d = await r.json();
                         if (!d.entries) d.entries = {};
                         const ids = Object.keys(d.entries).map(Number);
                         const newId = ids.length ? Math.max(...ids) + 1 : 0;
-                        d.entries[newId] = { uid: newId, key: [name, "User"], content: wiContent, comment: `User: ${name}`, enabled: true, selective: true };
-                        await fetch('/api/worldinfo/edit', { method: 'POST', headers, body: JSON.stringify({ name: book, data: d }) });
-                        toastr.success(`WI Updated: ${book}`);
+                        
+                        const keys = [name, "User"];
+                        if (title) keys.push(title);
+
+                        d.entries[newId] = { 
+                            uid: newId, 
+                            key: keys, 
+                            content: wiContent, 
+                            comment: `User: ${name}`, 
+                            enabled: true, 
+                            selective: true 
+                        };
+                        
+                        await fetch('/api/worldinfo/edit', { method: 'POST', headers, body: JSON.stringify({ name: targetBook, data: d }) });
+                        toastr.success(`已写入世界书: ${targetBook}`);
                         if (context.updateWorldInfoList) context.updateWorldInfoList();
                     }
-                } catch(e) { console.error(e); }
+                } else {
+                    toastr.warning("未找到可用的世界书，跳过写入。");
+                }
             }
-        }
 
-        if (defaultSettings.autoSwitchPersona) {
-            context.powerUserSettings.persona_selected = name;
-            $("#your_name").val(name).trigger("input").trigger("change");
-            $("#your_desc").val(desc).trigger("input").trigger("change");
+            toastr.success(TEXT.TOAST_SAVE_SUCCESS(name));
+            $('.popup_close').click();
+
+        } catch (e) {
+            console.error(e);
+            toastr.error("应用失败: " + e.message);
         }
-        toastr.success(TEXT.TOAST_SAVE_SUCCESS(name));
-        $('.popup_close').click();
     });
 
     // --- 9. 历史管理 ---
@@ -822,14 +912,13 @@ async function openCreatorPopup() {
                 if ($(e.target).closest('.pw-hist-del-btn, .pw-hist-title-input').length) return;
                 $('#pw-request').val(item.request);
                 $('#pw-res-name').val(item.data.name);
-                $('#pw-res-title').val(item.data.title || ""); // 加载 Title
+                $('#pw-res-title').val(item.data.title || "");
                 $('#pw-res-desc').val(item.data.description);
                 $('#pw-res-wi').val(item.data.wi_entry);
                 $('#pw-result-area').show();
                 $('.pw-tab[data-tab="editor"]').click();
             });
 
-            // 编辑标题
             const $titleInput = $el.find('.pw-hist-title-input');
             $titleInput.on('click', function(e) {
                 e.stopPropagation();
@@ -847,7 +936,6 @@ async function openCreatorPopup() {
                 }
             });
 
-            // 删除
             $el.find('.pw-hist-del-btn').on('click', function(e) {
                 e.stopPropagation();
                 if(confirm(`删除这条记录?`)) {
@@ -895,5 +983,5 @@ jQuery(async () => {
         </div>
     `);
     $("#pw_open_btn").on("click", openCreatorPopup);
-    console.log(`${extensionName} v14 loaded.`);
+    console.log(`${extensionName} v21 loaded.`);
 });
