@@ -6,9 +6,9 @@ import { saveSettingsDebounced, callPopup, getRequestHeaders } from "../../../..
 // ============================================================================
 
 const extensionName = "st-persona-weaver";
-const STORAGE_KEY_HISTORY = 'pw_history_v15'; // 升级版本
-const STORAGE_KEY_STATE = 'pw_state_v15'; 
-const STORAGE_KEY_TAGS = 'pw_tags_v9';
+const STORAGE_KEY_HISTORY = 'pw_history_v16'; // 升级版本
+const STORAGE_KEY_STATE = 'pw_state_v16'; 
+const STORAGE_KEY_TAGS = 'pw_tags_v10';
 
 // 默认标签库
 const defaultTags = [
@@ -44,7 +44,7 @@ const TEXT = {
     TOAST_SAVE_API: "API 设置已保存",
     TOAST_SNAPSHOT: "已存入历史记录",
     TOAST_GEN_FAIL: "生成失败，请检查 API 设置",
-    TOAST_SAVE_SUCCESS: (name) => `设定已保存: ${name} (已绑定到当前聊天)`
+    TOAST_SAVE_SUCCESS: (name) => `Persona "${name}" 已创建并绑定到当前聊天！`
 };
 
 // ============================================================================
@@ -83,19 +83,55 @@ function loadState() {
 }
 
 function injectStyles() {
-    const styleId = 'persona-weaver-css-v15';
+    const styleId = 'persona-weaver-css-v16';
     if ($(`#${styleId}`).length) return;
 }
 
 // ============================================================================
-// 3. 业务逻辑 (世界书与生成)
+// 3. 业务逻辑 (核心功能)
 // ============================================================================
+
+// [新增] 核心 API：调用后端保存 Persona
+async function apiSavePersona(name, description, title) {
+    // 构造符合 ST 后端要求的数据包
+    // 即使是新建，也要传 avatar (虽然是空的)，否则可能报错
+    const payload = {
+        name: name,
+        description: description,
+        title: title || "",
+        avatar: "default.png" // 使用默认头像，避免空指针，用户后续可以在UI里改
+    };
+
+    try {
+        const response = await fetch('/api/personas/save', {
+            method: 'POST',
+            headers: getRequestHeaders(),
+            body: JSON.stringify(payload)
+        });
+        
+        if (!response.ok) {
+            throw new Error(`Server Error: ${response.status}`);
+        }
+        return true;
+    } catch (e) {
+        console.error("[PW] Failed to save persona:", e);
+        throw e;
+    }
+}
+
+// [新增] 核心 API：执行 Slash 命令
+async function executeSlash(command) {
+    const { executeSlashCommandsWithOptions } = SillyTavern;
+    if (executeSlashCommandsWithOptions) {
+        // 使用 pipe: true 可以获取返回值，但在 fire-and-forget 场景下主要为了执行
+        await executeSlashCommandsWithOptions(command, { quiet: true });
+    } else {
+        console.warn("[PW] Slash command API not found!");
+    }
+}
 
 async function loadAvailableWorldBooks() {
     availableWorldBooks = [];
-    const context = getContext();
-    
-    // 尝试从 API 获取完整列表
     try {
         const response = await fetch('/api/worldinfo/get', { method: 'POST', headers: getRequestHeaders(), body: JSON.stringify({}) });
         if (response.ok) {
@@ -107,7 +143,6 @@ async function loadAvailableWorldBooks() {
             }
         }
     } catch (e) { console.error("[PW] API load failed", e); }
-    
     availableWorldBooks = [...new Set(availableWorldBooks)].filter(x => x).sort();
 }
 
@@ -119,8 +154,12 @@ async function getContextWorldBooks(extras = []) {
     if (charId !== undefined && context.characters[charId]) {
         const char = context.characters[charId];
         const data = char.data || char;
-        // 获取角色绑定的世界书 (优先)
-        const main = data.extensions?.world || data.world || data.character_book?.name;
+        // 尝试获取 V2 Character Book Name 或 Extension World
+        const v2Book = data.character_book?.name;
+        const extWorld = data.extensions?.world;
+        const legacyWorld = data.world;
+        
+        const main = v2Book || extWorld || legacyWorld;
         if (main) books.add(main);
     }
     return Array.from(books).filter(Boolean);
@@ -625,7 +664,6 @@ async function openCreatorPopup() {
         }
     });
 
-    // 快照逻辑
     $('#pw-snapshot').on('click', () => {
         const req = $('#pw-request').val();
         const curName = $('#pw-res-name').val();
@@ -716,7 +754,7 @@ async function openCreatorPopup() {
         }
     });
 
-    // --- 8. 应用 (核心修复逻辑) ---
+    // --- 8. 应用 (核心修复：API保存 + Slash绑定) ---
     $('#pw-btn-apply').on('click', async function() {
         const name = $('#pw-res-name').val();
         const title = $('#pw-res-title').val();
@@ -727,41 +765,32 @@ async function openCreatorPopup() {
         
         const context = getContext();
         
-        // 1. 保存到 Persona Management (名称+描述)
-        if (!context.powerUserSettings.personas) context.powerUserSettings.personas = {};
-        context.powerUserSettings.personas[name] = desc;
-
-        // 2. 保存 Title
-        if (!context.powerUserSettings.persona_titles) context.powerUserSettings.persona_titles = {};
-        context.powerUserSettings.persona_titles[name] = title || "";
-
-        await saveSettingsDebounced();
-
-        // 3. 执行 Slash 命令进行切换和绑定 (最稳妥的方式)
-        // 使用 executeSlashCommandsWithOptions 执行，确保调用成功
-        const { executeSlashCommandsWithOptions } = SillyTavern;
-        if (executeSlashCommandsWithOptions) {
-            // 先切换
-            await executeSlashCommandsWithOptions(`/persona-set "${name}"`);
-            // 再锁定到聊天
-            await executeSlashCommandsWithOptions(`/persona-lock type=chat`);
-        } else {
-            console.warn("Slash commands API not found, fallback manual switch.");
-            // Fallback: 仅切换，不绑定
-            context.powerUserSettings.persona_selected = name;
-            $("#your_name").val(name).trigger("input").trigger("change");
-            $("#your_desc").val(desc).trigger("input").trigger("change");
+        // 1. 调用后端 API 保存 Persona
+        try {
+            await apiSavePersona(name, desc, title);
+        } catch (e) {
+            toastr.error("保存 Persona 文件失败: " + e.message);
+            return;
         }
 
-        // 4. 写入世界书 (优化定位逻辑)
+        // 2. 使用 Slash Command 切换并绑定
+        try {
+            // 切换到新 Persona (引号防止名字空格问题)
+            await executeSlash(`/persona-set "${name}"`);
+            // 锁定到当前聊天
+            await executeSlash(`/persona-lock type=chat`);
+        } catch (e) {
+            console.warn("Slash command execution failed", e);
+        }
+
+        // 3. 写入世界书 (优化定位)
         if ($('#pw-wi-toggle').is(':checked') && wiContent) {
             const char = context.characters[context.characterId];
             const data = char.data || char;
             
-            // 优先顺序: 角色绑定的世界书 -> 第一个找到的世界书
-            let targetBook = data.extensions?.world || data.world;
+            // 优先级：V2 Book > Extension > Legacy World > 全局列表第一个
+            let targetBook = data.character_book?.name || data.extensions?.world || data.world;
             
-            // 如果角色没有显式绑定，尝试查找是否在全局列表中
             if (!targetBook) {
                 const books = await getContextWorldBooks();
                 if (books.length > 0) targetBook = books[0];
@@ -770,7 +799,7 @@ async function openCreatorPopup() {
             if (targetBook) {
                 try {
                     const headers = getRequestHeaders();
-                    // 获取条目
+                    // 先获取，确保不覆盖 ID
                     const r = await fetch('/api/worldinfo/get', { method: 'POST', headers, body: JSON.stringify({ name: targetBook }) });
                     if (r.ok) {
                         const d = await r.json();
@@ -778,7 +807,7 @@ async function openCreatorPopup() {
                         const ids = Object.keys(d.entries).map(Number);
                         const newId = ids.length ? Math.max(...ids) + 1 : 0;
                         
-                        // 构造 Key，包含名字和称号
+                        // 构造 Key
                         const keys = [name, "User"];
                         if (title) keys.push(title);
 
@@ -791,16 +820,13 @@ async function openCreatorPopup() {
                             selective: true 
                         };
                         
-                        // 写入
                         await fetch('/api/worldinfo/edit', { method: 'POST', headers, body: JSON.stringify({ name: targetBook, data: d }) });
                         toastr.success(`已写入世界书: ${targetBook}`);
-                        
-                        // 刷新界面
                         if (context.updateWorldInfoList) context.updateWorldInfoList();
                     }
                 } catch(e) { console.error("WI Update Failed", e); }
             } else {
-                toastr.warning("未找到绑定的世界书，无法写入条目。");
+                toastr.warning("未找到可用的世界书，跳过写入。");
             }
         }
 
@@ -919,5 +945,5 @@ jQuery(async () => {
         </div>
     `);
     $("#pw_open_btn").on("click", openCreatorPopup);
-    console.log(`${extensionName} v15 loaded.`);
+    console.log(`${extensionName} v16 loaded.`);
 });
