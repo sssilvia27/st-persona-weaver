@@ -6,13 +6,12 @@ import { saveSettingsDebounced, callPopup, getRequestHeaders } from "../../../..
 // ============================================================================
 
 const extensionName = "st-persona-weaver";
-const STORAGE_KEY_HISTORY = 'pw_history_v11'; // 版本升级
-const STORAGE_KEY_STATE = 'pw_state_v11'; 
-const STORAGE_KEY_TAGS = 'pw_tags_v5';
+const STORAGE_KEY_HISTORY = 'pw_history_v12'; // 升级版本
+const STORAGE_KEY_STATE = 'pw_state_v12'; 
+const STORAGE_KEY_TAGS = 'pw_tags_v6';
 
 // 默认标签库
 const defaultTags = [
-    { name: "姓名", value: "" },
     { name: "性别", value: "" },
     { name: "年龄", value: "" },
     { name: "MBTI", value: "" },
@@ -84,7 +83,7 @@ function loadState() {
 }
 
 function injectStyles() {
-    const styleId = 'persona-weaver-css-v11';
+    const styleId = 'persona-weaver-css-v12';
     if ($(`#${styleId}`).length) return;
 }
 
@@ -172,16 +171,16 @@ async function runGeneration(data, apiConfig) {
     const char = context.characters[context.characterId];
     
     const formatInst = data.format === 'yaml' 
-        ? `"description": "Use YAML format key-value pairs inside this string. Keys: Name, Age, Role, Appearance, Personality, Background, etc."`
-        : `"description": "Narrative paragraph style (Novel style, 3rd person). Approx 200 words."`;
+        ? `"description": "Use YAML format key-value pairs."`
+        : `"description": "Narrative paragraph style."`;
 
     let wiText = "";
     if (data.wiContext && data.wiContext.length > 0) {
-        wiText = `\n[Context/World Info]:\n${data.wiContext.join('\n\n')}\n`;
+        wiText = `\n[Context]:\n${data.wiContext.join('\n\n')}\n`;
     }
 
     const systemPrompt = `You are a creative writing assistant.
-Task: Create a detailed User Persona based on the Request.
+Task: Create a User Persona based on Request.
 ${wiText}
 Target Character: ${char.name}
 Scenario: ${char.scenario || "None"}
@@ -193,8 +192,9 @@ ${data.request}
 Return ONLY a JSON object:
 {
     "name": "Name",
+    "title": "Short Title (e.g. Detective, Shy Student)",
     "description": ${formatInst},
-    "wi_entry": "Concise facts for World Info."
+    "wi_entry": "Concise facts."
 }`;
 
     if (apiConfig.apiSource === 'independent') {
@@ -243,20 +243,20 @@ async function openCreatorPopup() {
     <div class="pw-wrapper">
         <div class="pw-header">
             <div class="pw-top-bar">
-                <div class="pw-title"><i class="fa-solid fa-wand-magic-sparkles"></i> 设定编织者 Pro</div>
+                <div class="pw-title"><i class="fa-solid fa-wand-magic-sparkles" style="color:#e0af68;"></i> 设定编织者 Pro</div>
             </div>
             <div class="pw-tabs">
-                <div class="pw-tab active" data-tab="editor">📝 编辑</div>
-                <div class="pw-tab" data-tab="context">📚 世界书</div>
-                <div class="pw-tab" data-tab="api">⚙️ API</div>
-                <div class="pw-tab" data-tab="history">📜 历史</div>
+                <div class="pw-tab active" data-tab="editor"><i class="fa-solid fa-pen-to-square"></i> 编辑</div>
+                <div class="pw-tab" data-tab="context"><i class="fa-solid fa-book"></i> 世界书</div>
+                <div class="pw-tab" data-tab="api"><i class="fa-solid fa-gear"></i> API</div>
+                <div class="pw-tab" data-tab="history"><i class="fa-solid fa-clock-rotate-left"></i> 历史</div>
             </div>
         </div>
 
         <!-- 1. 编辑视图 -->
         <div id="pw-view-editor" class="pw-view active">
             <div class="pw-scroll-area">
-                <!-- 标签区域 (Inline) -->
+                <!-- 标签区域 -->
                 <div>
                     <div class="pw-tags-header">
                         <span class="pw-tags-label">快速标签</span>
@@ -285,7 +285,12 @@ async function openCreatorPopup() {
                 <div id="pw-result-area" style="display: ${savedState.hasResult ? 'block' : 'none'}; border-top: 1px dashed var(--SmartThemeBorderColor); padding-top: 15px; margin-top:5px;">
                     <div style="font-weight:bold; margin-bottom:10px; color:#5b8db8;"><i class="fa-solid fa-check-circle"></i> 生成结果</div>
                     <div style="display:flex; flex-direction:column; gap:10px;">
-                        <input type="text" id="pw-res-name" class="pw-input" placeholder="角色名称" value="${savedState.name || ''}">
+                        <!-- 姓名与称号一行 -->
+                        <div style="display:flex; gap:10px;">
+                            <input type="text" id="pw-res-name" class="pw-input" placeholder="姓名" value="${savedState.name || ''}" style="flex:1;">
+                            <input type="text" id="pw-res-title" class="pw-input" placeholder="称号 (Title)" value="${savedState.title || ''}" style="flex:1;">
+                        </div>
+                        
                         <textarea id="pw-res-desc" class="pw-textarea" rows="6" placeholder="用户设定描述">${savedState.desc || ''}</textarea>
                         
                         <div style="background:rgba(0,0,0,0.1); padding:10px; border-radius:8px; border:1px solid var(--SmartThemeBorderColor);">
@@ -305,7 +310,6 @@ async function openCreatorPopup() {
         <div id="pw-view-context" class="pw-view">
             <div class="pw-scroll-area">
                 <div class="pw-card-section">
-                    <!-- 控制栏：选择框与按钮并排 -->
                     <div class="pw-wi-controls">
                         <select id="pw-wi-select" class="pw-input pw-wi-select">
                             <option value="">-- 添加参考世界书 --</option>
@@ -344,7 +348,7 @@ async function openCreatorPopup() {
                             <div style="flex:1; display:flex; gap:5px; width:100%;">
                                 <input type="text" id="pw-api-model" class="pw-input" value="${config.indepApiModel}" list="pw-model-list" style="flex:1;">
                                 <datalist id="pw-model-list"></datalist>
-                                <button id="pw-api-fetch" class="pw-btn primary pw-api-fetch-btn" title="获取模型" style="width:auto; padding:0 15px;"><i class="fa-solid fa-cloud-download-alt"></i></button>
+                                <button id="pw-api-fetch" class="pw-btn primary pw-api-fetch-btn" title="获取模型" style="width:auto;"><i class="fa-solid fa-cloud-download-alt"></i></button>
                             </div>
                         </div>
                     </div>
@@ -375,19 +379,12 @@ async function openCreatorPopup() {
     // 逻辑绑定
     // ========================================================================
     
-    // --- 0. 辅助: 获取当前聊天信息 ---
-    const getCurrentChatInfo = () => {
-        const ctx = getContext();
-        if (ctx.characterId === undefined) return { charName: "未知" };
-        const charName = ctx.characters[ctx.characterId]?.name || "未知";
-        return { charName };
-    };
-
     // --- 1. 状态保存 ---
     const saveCurrentState = () => {
         saveState({
             request: $('#pw-request').val(),
             name: $('#pw-res-name').val(),
+            title: $('#pw-res-title').val(), // 保存 Title
             desc: $('#pw-res-desc').val(),
             wiContent: $('#pw-res-wi').val(),
             hasResult: $('#pw-result-area').is(':visible'),
@@ -402,7 +399,7 @@ async function openCreatorPopup() {
         });
     };
     $(document).off('.pw');
-    $(document).on('input.pw change.pw', '#pw-request, #pw-res-name, #pw-res-desc, #pw-res-wi, .pw-input', saveCurrentState);
+    $(document).on('input.pw change.pw', '#pw-request, #pw-res-name, #pw-res-title, #pw-res-desc, #pw-res-wi, .pw-input', saveCurrentState);
 
     // --- 2. Tab 切换 ---
     $(document).on('click.pw', '.pw-tab', function() {
@@ -414,23 +411,23 @@ async function openCreatorPopup() {
         if(tab === 'history') renderHistoryList(); 
     });
 
-    // --- 3. 标签系统 (精简 Inline 模式) ---
+    // --- 3. 标签系统 (极致紧凑版) ---
     isEditingTags = false; 
 
     const renderTagsList = () => {
         const $container = $('#pw-tags-list').empty();
         const $toggleBtn = $('#pw-toggle-edit-tags');
 
-        $toggleBtn.text(isEditingTags ? '完成' : '编辑标签');
-        $toggleBtn.css('color', isEditingTags ? '#7a9a83' : '#5b8db8');
+        $toggleBtn.text(isEditingTags ? '取消编辑' : '编辑标签');
+        $toggleBtn.css('color', isEditingTags ? '#ff6b6b' : '#5b8db8');
 
         tagsCache.forEach((tag, index) => {
             if (isEditingTags) {
-                // 编辑模式：强制一行
+                // 编辑模式：强制单行
                 const $row = $(`
                     <div class="pw-tag-edit-row">
-                        <input class="pw-tag-edit-input t-name" value="${tag.name}" placeholder="标签名">
-                        <input class="pw-tag-edit-input t-val" value="${tag.value}" placeholder="预填内容">
+                        <input class="pw-tag-edit-input t-name" value="${tag.name}" placeholder="名">
+                        <input class="pw-tag-edit-input t-val" value="${tag.value}" placeholder="值">
                         <div class="pw-tag-del-btn" title="删除"><i class="fa-solid fa-trash"></i></div>
                     </div>
                 `);
@@ -450,8 +447,7 @@ async function openCreatorPopup() {
                 });
                 $container.append($row);
             } else {
-                // 浏览模式：Chip
-                const label = tag.value ? `${tag.name}: ${tag.value}` : tag.name;
+                // 浏览模式
                 const $chip = $(`
                     <div class="pw-tag-chip" title="点击插入">
                         <i class="fa-solid fa-tag" style="opacity:0.5; margin-right:4px;"></i>
@@ -473,7 +469,7 @@ async function openCreatorPopup() {
             }
         });
 
-        // 添加按钮
+        // 按钮
         const $addBtn = $(`<div class="pw-tag-add-btn"><i class="fa-solid fa-plus"></i> ${isEditingTags ? '新增' : '标签'}</div>`);
         $addBtn.on('click', () => {
             tagsCache.push({ name: "", value: "" });
@@ -483,6 +479,16 @@ async function openCreatorPopup() {
             setTimeout(() => { $('#pw-tags-list .t-name').last().focus(); }, 50);
         });
         $container.append($addBtn);
+
+        // 编辑模式底部增加“完成”按钮
+        if (isEditingTags) {
+            const $finishBtn = $(`<div class="pw-tags-finish-bar"><i class="fa-solid fa-check"></i> 完成编辑</div>`);
+            $finishBtn.on('click', () => {
+                isEditingTags = false;
+                renderTagsList();
+            });
+            $container.append($finishBtn);
+        }
     };
 
     $('#pw-toggle-edit-tags').on('click', () => {
@@ -553,11 +559,13 @@ async function openCreatorPopup() {
                                         <div style="font-weight:bold; font-size:0.9em; flex:1;">${entry.displayName}</div>
                                         <i class="fa-solid fa-eye pw-wi-toggle-icon" title="查看内容"></i>
                                     </div>
-                                    <div class="pw-wi-desc">${entry.content}</div>
+                                    <div class="pw-wi-desc">
+                                        ${entry.content}
+                                        <div class="pw-wi-close-bar"><i class="fa-solid fa-angle-up"></i> 收起</div>
+                                    </div>
                                 </div>
                             `);
                             
-                            // 展开逻辑
                             $item.find('.pw-wi-toggle-icon').on('click', function(e) {
                                 e.stopPropagation();
                                 const $desc = $(this).closest('.pw-wi-item').find('.pw-wi-desc');
@@ -568,6 +576,11 @@ async function openCreatorPopup() {
                                     $desc.slideDown();
                                     $(this).css('color', '#5b8db8');
                                 }
+                            });
+
+                            $item.find('.pw-wi-close-bar').on('click', function() {
+                                $(this).parent().slideUp();
+                                $item.find('.pw-wi-toggle-icon').css('color', '');
                             });
                             
                             $list.append($item);
@@ -614,7 +627,7 @@ async function openCreatorPopup() {
         toastr.success(TEXT.TOAST_SAVE_API);
     });
 
-    // --- 6. 工具栏逻辑 ---
+    // --- 6. 工具栏 ---
     $('#pw-clear').on('click', () => {
         if(confirm("清空输入内容？")) {
             $('#pw-request').val('');
@@ -623,28 +636,31 @@ async function openCreatorPopup() {
         }
     });
 
-    // [逻辑更新] 存入历史 - 角色名 + 日期
+    // [快照存入历史] -> 标题 = "Name + Title"
     $('#pw-snapshot').on('click', () => {
         const req = $('#pw-request').val();
         const curName = $('#pw-res-name').val();
+        const curTitle = $('#pw-res-title').val();
         const curDesc = $('#pw-res-desc').val();
         
         if (!req && !curName) return;
         
-        const { charName } = getCurrentChatInfo();
         const userName = curName || "User"; 
-        const dateStr = new Date().toLocaleDateString();
+        const userTitle = curTitle || "";
+        
+        // 标题逻辑：Name + Space + Title
+        const finalTitle = userTitle ? `${userName} ${userTitle}` : userName;
         
         saveHistory({ 
             request: req || "无请求内容", 
             timestamp: new Date().toLocaleString(),
-            targetChar: charName,
+            targetChar: getContext().characters[getContext().characterId]?.name || "未知",
             data: { 
                 name: userName, 
+                title: userTitle,
                 description: curDesc || "", 
                 wi_entry: $('#pw-res-wi').val(),
-                // 标题格式: CharName + Date
-                customTitle: `${charName} ${dateStr}`
+                customTitle: finalTitle
             } 
         });
         toastr.success(TEXT.TOAST_SNAPSHOT);
@@ -682,20 +698,23 @@ async function openCreatorPopup() {
             const data = await runGeneration(config, config);
             
             $('#pw-res-name').val(data.name);
+            $('#pw-res-title').val(data.title || ""); // 填充 Title
             $('#pw-res-desc').val(data.description);
             $('#pw-res-wi').val(data.wi_entry || data.description);
             $('#pw-result-area').fadeIn();
             
-            const { charName } = getCurrentChatInfo();
-            const dateStr = new Date().toLocaleDateString();
+            // 自动存历史 -> 标题 = Name + Title
+            const userName = data.name || "User";
+            const userTitle = data.title || "";
+            const finalTitle = userTitle ? `${userName} ${userTitle}` : userName;
             
             saveHistory({ 
                 request: req, 
                 timestamp: new Date().toLocaleString(),
-                targetChar: charName, 
+                targetChar: getContext().characters[getContext().characterId]?.name || "未知", 
                 data: {
                     ...data,
-                    customTitle: `${charName} ${dateStr}` // 修正默认标题
+                    customTitle: finalTitle
                 }
             });
             saveCurrentState();
@@ -712,6 +731,7 @@ async function openCreatorPopup() {
         const name = $('#pw-res-name').val();
         const desc = $('#pw-res-desc').val();
         const wiContent = $('#pw-res-wi').val();
+        // 如果想支持 Title 保存到 Persona，需要依赖 ST 具体实现，暂存本地配置或 Desc 中
         
         if (!name) return toastr.warning("名字不能为空");
         
@@ -750,7 +770,7 @@ async function openCreatorPopup() {
         $('.popup_close').click();
     });
 
-    // --- 9. 历史管理 (修复渲染与清空搜索) ---
+    // --- 9. 历史管理 ---
     const renderHistoryList = () => {
         loadData();
         const $list = $('#pw-history-list').empty();
@@ -760,8 +780,7 @@ async function openCreatorPopup() {
             if (!search) return true;
             const title = (item.data.customTitle || item.data.name || "").toLowerCase();
             const content = (item.data.description || "").toLowerCase();
-            const target = (item.targetChar || "").toLowerCase(); 
-            return title.includes(search) || content.includes(search) || target.includes(search);
+            return title.includes(search) || content.includes(search);
         });
 
         if (filtered.length === 0) {
@@ -778,7 +797,7 @@ async function openCreatorPopup() {
                     <div class="pw-hist-main">
                         <input class="pw-hist-title-input" value="${displayTitle}" readonly>
                         <div class="pw-hist-meta">
-                            <span><i class="fa-solid fa-user-tag"></i> ${targetChar}</span>
+                            <span><i class="fa-solid fa-user-tag"></i> 目标: ${targetChar}</span>
                             <span><i class="fa-regular fa-clock"></i> ${item.timestamp || ''}</span>
                         </div>
                         <div class="pw-hist-desc">${item.data.description || item.request || '无描述'}</div>
@@ -787,24 +806,22 @@ async function openCreatorPopup() {
                 </div>
             `);
 
-            // 点击卡片(非按钮/输入框)加载
             $el.on('click', function(e) {
                 if ($(e.target).closest('.pw-hist-del-btn, .pw-hist-title-input').length) return;
                 $('#pw-request').val(item.request);
                 $('#pw-res-name').val(item.data.name);
+                $('#pw-res-title').val(item.data.title || ""); // 加载 Title
                 $('#pw-res-desc').val(item.data.description);
                 $('#pw-res-wi').val(item.data.wi_entry);
                 $('#pw-result-area').show();
                 $('.pw-tab[data-tab="editor"]').click();
             });
 
-            // 标题编辑逻辑
+            // 编辑标题
             const $titleInput = $el.find('.pw-hist-title-input');
             $titleInput.on('click', function(e) {
                 e.stopPropagation();
-                if ($(this).attr('readonly')) {
-                    $(this).removeAttr('readonly').focus().select();
-                }
+                if ($(this).attr('readonly')) $(this).removeAttr('readonly').focus().select();
             });
             $titleInput.on('blur keydown', function(e) {
                 if (e.type === 'keydown' && e.key !== 'Enter') return;
@@ -834,7 +851,6 @@ async function openCreatorPopup() {
 
     $(document).on('input.pw', '#pw-history-search', renderHistoryList);
     
-    // 清空搜索
     $(document).on('click.pw', '#pw-history-search-clear', function() {
         $('#pw-history-search').val('').trigger('input');
     });
@@ -867,5 +883,5 @@ jQuery(async () => {
         </div>
     `);
     $("#pw_open_btn").on("click", openCreatorPopup);
-    console.log(`${extensionName} v11 loaded.`);
+    console.log(`${extensionName} v12 loaded.`);
 });
