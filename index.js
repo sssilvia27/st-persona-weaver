@@ -6,9 +6,9 @@ import { saveSettingsDebounced, callPopup, getRequestHeaders } from "../../../..
 // ============================================================================
 
 const extensionName = "st-persona-weaver";
-const STORAGE_KEY_HISTORY = 'pw_history_v14'; 
-const STORAGE_KEY_STATE = 'pw_state_v14'; 
-const STORAGE_KEY_TAGS = 'pw_tags_v8';
+const STORAGE_KEY_HISTORY = 'pw_history_v15'; // 升级版本
+const STORAGE_KEY_STATE = 'pw_state_v15'; 
+const STORAGE_KEY_TAGS = 'pw_tags_v9';
 
 // 默认标签库
 const defaultTags = [
@@ -44,7 +44,7 @@ const TEXT = {
     TOAST_SAVE_API: "API 设置已保存",
     TOAST_SNAPSHOT: "已存入历史记录",
     TOAST_GEN_FAIL: "生成失败，请检查 API 设置",
-    TOAST_SAVE_SUCCESS: (name) => `设定已保存并切换为: ${name}`
+    TOAST_SAVE_SUCCESS: (name) => `设定已保存: ${name} (已绑定到当前聊天)`
 };
 
 // ============================================================================
@@ -83,7 +83,7 @@ function loadState() {
 }
 
 function injectStyles() {
-    const styleId = 'persona-weaver-css-v14';
+    const styleId = 'persona-weaver-css-v15';
     if ($(`#${styleId}`).length) return;
 }
 
@@ -95,23 +95,18 @@ async function loadAvailableWorldBooks() {
     availableWorldBooks = [];
     const context = getContext();
     
-    if (window.TavernHelper && typeof window.TavernHelper.getWorldbookNames === 'function') {
-        try { availableWorldBooks = window.TavernHelper.getWorldbookNames(); } catch (e) { console.warn("[PW] TavernHelper load failed", e); }
-    }
-
-    if (!availableWorldBooks || availableWorldBooks.length === 0) {
-        try {
-            const response = await fetch('/api/worldinfo/get', { method: 'POST', headers: getRequestHeaders(), body: JSON.stringify({}) });
-            if (response.ok) {
-                const data = await response.json();
-                if (Array.isArray(data)) {
-                    availableWorldBooks = data.map(item => item.name || item);
-                } else if (data && data.world_names) {
-                    availableWorldBooks = data.world_names;
-                }
+    // 尝试从 API 获取完整列表
+    try {
+        const response = await fetch('/api/worldinfo/get', { method: 'POST', headers: getRequestHeaders(), body: JSON.stringify({}) });
+        if (response.ok) {
+            const data = await response.json();
+            if (Array.isArray(data)) {
+                availableWorldBooks = data.map(item => item.name || item);
+            } else if (data && data.world_names) {
+                availableWorldBooks = data.world_names;
             }
-        } catch (e) { console.error("[PW] API load failed", e); }
-    }
+        }
+    } catch (e) { console.error("[PW] API load failed", e); }
     
     availableWorldBooks = [...new Set(availableWorldBooks)].filter(x => x).sort();
 }
@@ -124,6 +119,7 @@ async function getContextWorldBooks(extras = []) {
     if (charId !== undefined && context.characters[charId]) {
         const char = context.characters[charId];
         const data = char.data || char;
+        // 获取角色绑定的世界书 (优先)
         const main = data.extensions?.world || data.world || data.character_book?.name;
         if (main) books.add(main);
     }
@@ -179,7 +175,6 @@ async function runGeneration(data, apiConfig) {
         wiText = `\n[Context]:\n${data.wiContext.join('\n\n')}\n`;
     }
 
-    // 获取用户输入的 Name 和 Title
     const specifiedName = $('#pw-res-name').val() || "";
     const specifiedTitle = $('#pw-res-title').val() || "";
 
@@ -246,7 +241,6 @@ async function openCreatorPopup() {
         ? availableWorldBooks.map(b => `<option value="${b}">${b}</option>`).join('')
         : `<option disabled>未找到世界书</option>`;
 
-    // 主弹窗 HTML 结构
     const html = `
     <div class="pw-wrapper">
         <div class="pw-header">
@@ -261,10 +255,8 @@ async function openCreatorPopup() {
             </div>
         </div>
 
-        <!-- 1. 编辑视图 -->
         <div id="pw-view-editor" class="pw-view active">
             <div class="pw-scroll-area">
-                <!-- 标签区域 -->
                 <div>
                     <div class="pw-tags-header">
                         <span class="pw-tags-label">快速标签</span>
@@ -273,9 +265,7 @@ async function openCreatorPopup() {
                     <div class="pw-tags-container" id="pw-tags-list"></div>
                 </div>
 
-                <!-- 核心输入区域 -->
                 <div style="flex:1; display:flex; flex-direction:column; gap:8px;">
-                    <!-- 姓名与标题输入框 (Placeholder 更新) -->
                     <div style="display:flex; gap:10px;">
                         <input type="text" id="pw-res-name" class="pw-input" placeholder="姓名" value="${savedState.name || ''}" style="flex:1;">
                         <input type="text" id="pw-res-title" class="pw-input" placeholder="Title (选填)" value="${savedState.title || ''}" style="flex:1;">
@@ -295,7 +285,6 @@ async function openCreatorPopup() {
 
                 <button id="pw-btn-gen" class="pw-btn gen"><i class="fa-solid fa-bolt"></i> 生成 / 润色</button>
 
-                <!-- 结果区域 (仅保留描述和世界书) -->
                 <div id="pw-result-area" style="display: ${savedState.hasResult ? 'block' : 'none'}; border-top: 1px dashed var(--SmartThemeBorderColor); padding-top: 15px; margin-top:5px;">
                     <div style="font-weight:bold; margin-bottom:10px; color:#5b8db8;"><i class="fa-solid fa-check-circle"></i> 生成结果</div>
                     <div style="display:flex; flex-direction:column; gap:10px;">
@@ -314,7 +303,6 @@ async function openCreatorPopup() {
             </div>
         </div>
 
-        <!-- 2. 世界书视图 -->
         <div id="pw-view-context" class="pw-view">
             <div class="pw-scroll-area">
                 <div class="pw-card-section">
@@ -330,7 +318,6 @@ async function openCreatorPopup() {
             </div>
         </div>
 
-        <!-- 3. API 设置视图 -->
         <div id="pw-view-api" class="pw-view">
             <div class="pw-scroll-area">
                 <div class="pw-card-section">
@@ -341,7 +328,6 @@ async function openCreatorPopup() {
                             <option value="independent" ${config.apiSource === 'independent' ? 'selected' : ''}>独立 API</option>
                         </select>
                     </div>
-                    
                     <div id="pw-indep-settings" style="display:${config.apiSource === 'independent' ? 'flex' : 'none'}; flex-direction:column; gap:15px;">
                         <div class="pw-row">
                             <label>URL</label>
@@ -367,7 +353,6 @@ async function openCreatorPopup() {
             </div>
         </div>
 
-        <!-- 4. 历史视图 -->
         <div id="pw-view-history" class="pw-view">
             <div class="pw-scroll-area">
                 <div class="pw-search-box">
@@ -392,7 +377,7 @@ async function openCreatorPopup() {
         saveState({
             request: $('#pw-request').val(),
             name: $('#pw-res-name').val(),
-            title: $('#pw-res-title').val(), // 保存 Title
+            title: $('#pw-res-title').val(),
             desc: $('#pw-res-desc').val(),
             wiContent: $('#pw-res-wi').val(),
             hasResult: $('#pw-result-area').is(':visible'),
@@ -419,7 +404,7 @@ async function openCreatorPopup() {
         if(tab === 'history') renderHistoryList(); 
     });
 
-    // --- 3. 标签系统 (极致紧凑版) ---
+    // --- 3. 标签系统 ---
     isEditingTags = false; 
 
     const renderTagsList = () => {
@@ -431,7 +416,6 @@ async function openCreatorPopup() {
 
         tagsCache.forEach((tag, index) => {
             if (isEditingTags) {
-                // 编辑模式
                 const $row = $(`
                     <div class="pw-tag-edit-row">
                         <input class="pw-tag-edit-input t-name" value="${tag.name}" placeholder="名">
@@ -455,7 +439,6 @@ async function openCreatorPopup() {
                 });
                 $container.append($row);
             } else {
-                // 浏览模式
                 const $chip = $(`
                     <div class="pw-tag-chip" title="点击插入">
                         <i class="fa-solid fa-tag" style="opacity:0.5; margin-right:4px;"></i>
@@ -477,7 +460,6 @@ async function openCreatorPopup() {
             }
         });
 
-        // 按钮
         const $addBtn = $(`<div class="pw-tag-add-btn"><i class="fa-solid fa-plus"></i> ${isEditingTags ? '新增' : '标签'}</div>`);
         $addBtn.on('click', () => {
             tagsCache.push({ name: "", value: "" });
@@ -488,7 +470,6 @@ async function openCreatorPopup() {
         });
         $container.append($addBtn);
 
-        // 编辑模式底部增加“完成”按钮
         if (isEditingTags) {
             const $finishBtn = $(`<div class="pw-tags-finish-bar"><i class="fa-solid fa-check"></i> 完成编辑</div>`);
             $finishBtn.on('click', () => {
@@ -644,7 +625,7 @@ async function openCreatorPopup() {
         }
     });
 
-    // [快照存入历史] -> 标题 = "Name + Title"
+    // 快照逻辑
     $('#pw-snapshot').on('click', () => {
         const req = $('#pw-request').val();
         const curName = $('#pw-res-name').val();
@@ -655,8 +636,6 @@ async function openCreatorPopup() {
         
         const userName = curName || "User"; 
         const userTitle = curTitle || "";
-        
-        // 标题逻辑：Name + Space + Title
         const finalTitle = userTitle ? `${userName} ${userTitle}` : userName;
         
         saveHistory({ 
@@ -705,7 +684,6 @@ async function openCreatorPopup() {
         try {
             const data = await runGeneration(config, config);
             
-            // 回填数据，确保如果没生成Name/Title，保持用户输入
             const finalName = data.name || $('#pw-res-name').val() || "User";
             const finalTitle = data.title || $('#pw-res-title').val() || "";
 
@@ -715,7 +693,6 @@ async function openCreatorPopup() {
             $('#pw-res-wi').val(data.wi_entry || data.description);
             $('#pw-result-area').fadeIn();
             
-            // 自动存历史 -> 标题 = Name + Title
             const finalTitleStr = finalTitle ? `${finalName} ${finalTitle}` : finalName;
             
             saveHistory({ 
@@ -739,45 +716,94 @@ async function openCreatorPopup() {
         }
     });
 
-    // --- 8. 应用 ---
+    // --- 8. 应用 (核心修复逻辑) ---
     $('#pw-btn-apply').on('click', async function() {
         const name = $('#pw-res-name').val();
+        const title = $('#pw-res-title').val();
         const desc = $('#pw-res-desc').val();
         const wiContent = $('#pw-res-wi').val();
         
         if (!name) return toastr.warning("名字不能为空");
         
         const context = getContext();
+        
+        // 1. 保存到 Persona Management (名称+描述)
         if (!context.powerUserSettings.personas) context.powerUserSettings.personas = {};
         context.powerUserSettings.personas[name] = desc;
+
+        // 2. 保存 Title
+        if (!context.powerUserSettings.persona_titles) context.powerUserSettings.persona_titles = {};
+        context.powerUserSettings.persona_titles[name] = title || "";
+
         await saveSettingsDebounced();
 
+        // 3. 执行 Slash 命令进行切换和绑定 (最稳妥的方式)
+        // 使用 executeSlashCommandsWithOptions 执行，确保调用成功
+        const { executeSlashCommandsWithOptions } = SillyTavern;
+        if (executeSlashCommandsWithOptions) {
+            // 先切换
+            await executeSlashCommandsWithOptions(`/persona-set "${name}"`);
+            // 再锁定到聊天
+            await executeSlashCommandsWithOptions(`/persona-lock type=chat`);
+        } else {
+            console.warn("Slash commands API not found, fallback manual switch.");
+            // Fallback: 仅切换，不绑定
+            context.powerUserSettings.persona_selected = name;
+            $("#your_name").val(name).trigger("input").trigger("change");
+            $("#your_desc").val(desc).trigger("input").trigger("change");
+        }
+
+        // 4. 写入世界书 (优化定位逻辑)
         if ($('#pw-wi-toggle').is(':checked') && wiContent) {
-            const books = await getContextWorldBooks();
-            if (books.length > 0) {
-                const book = books[0];
+            const char = context.characters[context.characterId];
+            const data = char.data || char;
+            
+            // 优先顺序: 角色绑定的世界书 -> 第一个找到的世界书
+            let targetBook = data.extensions?.world || data.world;
+            
+            // 如果角色没有显式绑定，尝试查找是否在全局列表中
+            if (!targetBook) {
+                const books = await getContextWorldBooks();
+                if (books.length > 0) targetBook = books[0];
+            }
+
+            if (targetBook) {
                 try {
                     const headers = getRequestHeaders();
-                    const r = await fetch('/api/worldinfo/get', { method: 'POST', headers, body: JSON.stringify({ name: book }) });
+                    // 获取条目
+                    const r = await fetch('/api/worldinfo/get', { method: 'POST', headers, body: JSON.stringify({ name: targetBook }) });
                     if (r.ok) {
                         const d = await r.json();
                         if (!d.entries) d.entries = {};
                         const ids = Object.keys(d.entries).map(Number);
                         const newId = ids.length ? Math.max(...ids) + 1 : 0;
-                        d.entries[newId] = { uid: newId, key: [name, "User"], content: wiContent, comment: `User: ${name}`, enabled: true, selective: true };
-                        await fetch('/api/worldinfo/edit', { method: 'POST', headers, body: JSON.stringify({ name: book, data: d }) });
-                        toastr.success(`WI Updated: ${book}`);
+                        
+                        // 构造 Key，包含名字和称号
+                        const keys = [name, "User"];
+                        if (title) keys.push(title);
+
+                        d.entries[newId] = { 
+                            uid: newId, 
+                            key: keys, 
+                            content: wiContent, 
+                            comment: `User: ${name}`, 
+                            enabled: true, 
+                            selective: true 
+                        };
+                        
+                        // 写入
+                        await fetch('/api/worldinfo/edit', { method: 'POST', headers, body: JSON.stringify({ name: targetBook, data: d }) });
+                        toastr.success(`已写入世界书: ${targetBook}`);
+                        
+                        // 刷新界面
                         if (context.updateWorldInfoList) context.updateWorldInfoList();
                     }
-                } catch(e) { console.error(e); }
+                } catch(e) { console.error("WI Update Failed", e); }
+            } else {
+                toastr.warning("未找到绑定的世界书，无法写入条目。");
             }
         }
 
-        if (defaultSettings.autoSwitchPersona) {
-            context.powerUserSettings.persona_selected = name;
-            $("#your_name").val(name).trigger("input").trigger("change");
-            $("#your_desc").val(desc).trigger("input").trigger("change");
-        }
         toastr.success(TEXT.TOAST_SAVE_SUCCESS(name));
         $('.popup_close').click();
     });
@@ -822,14 +848,13 @@ async function openCreatorPopup() {
                 if ($(e.target).closest('.pw-hist-del-btn, .pw-hist-title-input').length) return;
                 $('#pw-request').val(item.request);
                 $('#pw-res-name').val(item.data.name);
-                $('#pw-res-title').val(item.data.title || ""); // 加载 Title
+                $('#pw-res-title').val(item.data.title || "");
                 $('#pw-res-desc').val(item.data.description);
                 $('#pw-res-wi').val(item.data.wi_entry);
                 $('#pw-result-area').show();
                 $('.pw-tab[data-tab="editor"]').click();
             });
 
-            // 编辑标题
             const $titleInput = $el.find('.pw-hist-title-input');
             $titleInput.on('click', function(e) {
                 e.stopPropagation();
@@ -847,7 +872,6 @@ async function openCreatorPopup() {
                 }
             });
 
-            // 删除
             $el.find('.pw-hist-del-btn').on('click', function(e) {
                 e.stopPropagation();
                 if(confirm(`删除这条记录?`)) {
@@ -895,5 +919,5 @@ jQuery(async () => {
         </div>
     `);
     $("#pw_open_btn").on("click", openCreatorPopup);
-    console.log(`${extensionName} v14 loaded.`);
+    console.log(`${extensionName} v15 loaded.`);
 });
