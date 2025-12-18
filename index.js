@@ -6,11 +6,11 @@ import { saveSettingsDebounced, callPopup, getRequestHeaders } from "../../../..
 // ============================================================================
 
 const extensionName = "st-persona-weaver";
-const STORAGE_KEY_HISTORY = 'pw_history_v13'; // 版本升级
-const STORAGE_KEY_STATE = 'pw_state_v13'; 
-const STORAGE_KEY_TAGS = 'pw_tags_v7';
+const STORAGE_KEY_HISTORY = 'pw_history_v14'; 
+const STORAGE_KEY_STATE = 'pw_state_v14'; 
+const STORAGE_KEY_TAGS = 'pw_tags_v8';
 
-// 默认标签库 (已移除姓名)
+// 默认标签库
 const defaultTags = [
     { name: "性别", value: "" },
     { name: "年龄", value: "" },
@@ -83,7 +83,7 @@ function loadState() {
 }
 
 function injectStyles() {
-    const styleId = 'persona-weaver-css-v13';
+    const styleId = 'persona-weaver-css-v14';
     if ($(`#${styleId}`).length) return;
 }
 
@@ -275,10 +275,10 @@ async function openCreatorPopup() {
 
                 <!-- 核心输入区域 -->
                 <div style="flex:1; display:flex; flex-direction:column; gap:8px;">
-                    <!-- [移动到这里] 姓名与标题输入框 -->
+                    <!-- 姓名与标题输入框 (Placeholder 更新) -->
                     <div style="display:flex; gap:10px;">
-                        <input type="text" id="pw-res-name" class="pw-input" placeholder="姓名 (默认空)" value="${savedState.name || ''}" style="flex:1;">
-                        <input type="text" id="pw-res-title" class="pw-input" placeholder="Title (Optional - AI auto-fills if empty)" value="${savedState.title || ''}" style="flex:1;">
+                        <input type="text" id="pw-res-name" class="pw-input" placeholder="姓名" value="${savedState.name || ''}" style="flex:1;">
+                        <input type="text" id="pw-res-title" class="pw-input" placeholder="Title (选填)" value="${savedState.title || ''}" style="flex:1;">
                     </div>
 
                     <textarea id="pw-request" class="pw-textarea" placeholder="在此输入设定要求，或点击上方标签..." style="min-height:100px;">${savedState.request || ''}</textarea>
@@ -895,5 +895,5 @@ jQuery(async () => {
         </div>
     `);
     $("#pw_open_btn").on("click", openCreatorPopup);
-    console.log(`${extensionName} v13 loaded.`);
+    console.log(`${extensionName} v14 loaded.`);
 });
