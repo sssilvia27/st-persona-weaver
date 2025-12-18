@@ -6,9 +6,9 @@ import { saveSettingsDebounced, callPopup, getRequestHeaders } from "../../../..
 // ============================================================================
 
 const extensionName = "st-persona-weaver";
-const STORAGE_KEY_HISTORY = 'pw_history_v19'; // 升级版本
-const STORAGE_KEY_STATE = 'pw_state_v19'; 
-const STORAGE_KEY_TAGS = 'pw_tags_v13';
+const STORAGE_KEY_HISTORY = 'pw_history_v20'; // 升级版本
+const STORAGE_KEY_STATE = 'pw_state_v20'; 
+const STORAGE_KEY_TAGS = 'pw_tags_v14';
 
 // 默认标签库
 const defaultTags = [
@@ -43,7 +43,7 @@ const TEXT = {
     TOAST_API_ERR: "API 连接失败",
     TOAST_SAVE_API: "API 设置已保存",
     TOAST_SNAPSHOT: "已存入历史记录",
-    TOAST_GEN_FAIL: "生成失败，请检查 API 设置",
+    TOAST_GEN_FAIL: "生成失败",
     TOAST_SAVE_SUCCESS: (name) => `Persona "${name}" 已新建并绑定！`
 };
 
@@ -83,7 +83,7 @@ function loadState() {
 }
 
 function injectStyles() {
-    const styleId = 'persona-weaver-css-v19';
+    const styleId = 'persona-weaver-css-v20';
     if ($(`#${styleId}`).length) return;
 }
 
@@ -91,22 +91,41 @@ function injectStyles() {
 // 3. 业务逻辑 (核心功能)
 // ============================================================================
 
-// [核心] 纯数据层保存 Persona (避免触发 UI 重命名逻辑)
+// [辅助] 鲁棒的 JSON 解析器 (自动处理 Markdown 代码块和非标准格式)
+function robustJSONParse(text) {
+    if (!text) return null;
+    let cleanText = text.trim();
+    
+    // 1. 尝试直接解析
+    try { return JSON.parse(cleanText); } catch(e) {}
+
+    // 2. 尝试提取 Markdown 代码块 ```json ... ```
+    const codeBlockMatch = cleanText.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/i);
+    if (codeBlockMatch) {
+        try { return JSON.parse(codeBlockMatch[1]); } catch(e) {}
+    }
+
+    // 3. 尝试暴力查找最外层 {}
+    const firstOpen = cleanText.indexOf('{');
+    const lastClose = cleanText.lastIndexOf('}');
+    if (firstOpen !== -1 && lastClose !== -1 && lastClose > firstOpen) {
+        try { return JSON.parse(cleanText.substring(firstOpen, lastClose + 1)); } catch(e) {}
+    }
+
+    throw new Error("无法从返回内容中解析 JSON");
+}
+
+// [核心] 纯数据层保存 Persona
 async function pureSavePersona(name, description, title) {
     const context = getContext();
-    
-    // 1. 确保数据结构存在
     if (!context.powerUserSettings.personas) context.powerUserSettings.personas = {};
     if (!context.powerUserSettings.persona_titles) context.powerUserSettings.persona_titles = {};
 
-    // 2. 写入数据 (Key = Name)
-    // 只要 Name 与当前使用的不同，这就自动创建了一个新条目，不会影响旧的
     context.powerUserSettings.personas[name] = description;
     context.powerUserSettings.persona_titles[name] = title || "";
 
-    // 3. 强制写入 config.json
     await saveSettingsDebounced();
-    console.log(`[PW] Persona "${name}" data saved to config.`);
+    console.log(`[PW] Persona "${name}" data saved.`);
 }
 
 // [核心] 执行 Slash 命令
@@ -114,8 +133,6 @@ async function executeSlash(command) {
     const { executeSlashCommandsWithOptions } = SillyTavern;
     if (executeSlashCommandsWithOptions) {
         await executeSlashCommandsWithOptions(command, { quiet: true });
-    } else {
-        console.warn("[PW] Slash command API not found!");
     }
 }
 
@@ -146,7 +163,6 @@ async function getContextWorldBooks(extras = []) {
         const v2Book = data.character_book?.name;
         const extWorld = data.extensions?.world;
         const legacyWorld = data.world;
-        
         const main = v2Book || extWorld || legacyWorld;
         if (main) books.add(main);
     }
@@ -219,7 +235,7 @@ ${specifiedName ? `1. Use the Name: "${specifiedName}".` : "1. Generate a fittin
 ${specifiedTitle ? `2. Use the Title: "${specifiedTitle}".` : "2. Generate a short Title (e.g. Detective, Shy Student)."}
 
 [Response Format]:
-Return ONLY a JSON object:
+Return ONLY a JSON object (Do not output markdown code blocks):
 {
     "name": "${specifiedName || "Name"}",
     "title": "${specifiedTitle || "Short Title"}",
@@ -232,20 +248,27 @@ Return ONLY a JSON object:
         const body = {
             model: apiConfig.indepApiModel,
             messages: [{ role: 'system', content: systemPrompt }],
-            temperature: 0.7
+            temperature: 0.7,
+            stream: false // <--- 关键修复：强制关闭流式传输
         };
         const res = await fetch(url, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiConfig.indepApiKey}` },
             body: JSON.stringify(body)
         });
-        if (!res.ok) throw new Error("Independent API Error");
+        
+        if (!res.ok) {
+            const errText = await res.text();
+            throw new Error(`Status ${res.status}: ${errText}`);
+        }
+        
         const json = await res.json();
         const content = json.choices[0].message.content;
-        return JSON.parse(content.match(/\{[\s\S]*\}/)[0]);
+        return robustJSONParse(content); // 使用增强解析器
     } else {
+        // 使用主 API (generateQuietPrompt 通常返回字符串)
         const generatedText = await context.generateQuietPrompt(systemPrompt, false, false, "System");
-        return JSON.parse(generatedText.match(/\{[\s\S]*\}/)[0]);
+        return robustJSONParse(generatedText);
     }
 }
 
@@ -923,5 +946,5 @@ jQuery(async () => {
         </div>
     `);
     $("#pw_open_btn").on("click", openCreatorPopup);
-    console.log(`${extensionName} v19 loaded.`);
+    console.log(`${extensionName} v20 loaded.`);
 });
