@@ -33,6 +33,9 @@ let historyCache = [];
 let tagsCache = [];
 let availableWorldBooks = []; 
 let isEditingTags = false; 
+// 鼠标坐标追踪
+let lastClientX = 0;
+let lastClientY = 0;
 
 // ============================================================================
 // 1. 核心解析
@@ -272,7 +275,7 @@ async function openCreatorPopup() {
                     <div class="pw-relative-container">
                         <div style="font-weight:bold; color:#5b8db8; margin-bottom:5px;"><i class="fa-solid fa-list-ul"></i> 设定详情</div>
                         
-                        <!-- 悬浮引用按钮 (固定在文本框右上角) -->
+                        <!-- 悬浮引用按钮 -->
                         <div id="pw-float-quote-btn" class="pw-float-quote-btn"><i class="fa-solid fa-pen-to-square"></i> 修改此段</div>
                     </div>
                     
@@ -281,7 +284,6 @@ async function openCreatorPopup() {
                     <div class="pw-refine-toolbar">
                         <textarea id="pw-refine-input" class="pw-refine-input" placeholder="输入润色意见..."></textarea>
                         <div class="pw-refine-actions">
-                            <div class="pw-tool-btn" id="pw-insert-selection" title="引用选中的文字"><i class="fa-solid fa-quote-left"></i> 引用</div>
                             <div class="pw-tool-btn" id="pw-btn-refine" title="执行润色"><i class="fa-solid fa-magic"></i> 润色</div>
                         </div>
                     </div>
@@ -311,15 +313,7 @@ async function openCreatorPopup() {
 
         <div id="pw-view-context" class="pw-view"><div class="pw-scroll-area"><div class="pw-card-section"><div class="pw-wi-controls"><select id="pw-wi-select" class="pw-input pw-wi-select"><option value="">-- 添加参考/目标世界书 --</option>${renderBookOptions()}</select><button id="pw-wi-refresh" class="pw-btn primary pw-wi-refresh-btn"><i class="fa-solid fa-sync"></i></button><button id="pw-wi-add" class="pw-btn primary pw-wi-add-btn"><i class="fa-solid fa-plus"></i></button></div></div><div id="pw-wi-container"></div></div></div>
         <div id="pw-view-api" class="pw-view"><div class="pw-scroll-area"><div class="pw-card-section"><div class="pw-row"><label>API 来源</label><select id="pw-api-source" class="pw-input" style="flex:1;"><option value="main" ${config.apiSource === 'main'?'selected':''}>主 API</option><option value="independent" ${config.apiSource === 'independent'?'selected':''}>独立 API</option></select></div><div id="pw-indep-settings" style="display:${config.apiSource === 'independent' ? 'flex' : 'none'}; flex-direction:column; gap:15px;"><div class="pw-row"><label>URL</label><input type="text" id="pw-api-url" class="pw-input" value="${config.indepApiUrl}" style="flex:1;"></div><div class="pw-row"><label>Key</label><input type="password" id="pw-api-key" class="pw-input" value="${config.indepApiKey}" style="flex:1;"></div><div class="pw-row"><label>Model</label><div style="flex:1; display:flex; gap:5px; width:100%;"><input type="text" id="pw-api-model" class="pw-input" value="${config.indepApiModel}" list="pw-model-list" style="flex:1;"><datalist id="pw-model-list"></datalist><button id="pw-api-fetch" class="pw-btn primary pw-api-fetch-btn" title="获取模型" style="width:auto;"><i class="fa-solid fa-cloud-download-alt"></i></button></div></div></div><div style="text-align:right;"><button id="pw-api-save" class="pw-btn primary" style="width:auto;">保存设置</button></div></div></div></div>
-        <div id="pw-view-history" class="pw-view"><div class="pw-scroll-area">
-            <div class="pw-search-box">
-                <i class="fa-solid fa-search pw-search-icon"></i>
-                <input type="text" id="pw-history-search" class="pw-input pw-search-input" placeholder="搜索历史...">
-                <i class="fa-solid fa-times pw-search-clear" id="pw-history-search-clear" title="清空搜索"></i>
-            </div>
-            <div id="pw-history-list" style="display:flex; flex-direction:column;"></div>
-            <button id="pw-history-clear-all" class="pw-btn danger">清空所有历史</button>
-        </div></div>
+        <div id="pw-view-history" class="pw-view"><div class="pw-scroll-area"><div class="pw-search-box"><i class="fa-solid fa-search pw-search-icon"></i><input type="text" id="pw-history-search" class="pw-input pw-search-input" placeholder="🔍 搜索历史..."><i class="fa-solid fa-times pw-search-clear" id="pw-history-search-clear" title="清空搜索"></i></div><div id="pw-history-list" style="display:flex; flex-direction:column;"></div><button id="pw-history-clear-all" class="pw-btn danger">清空所有历史</button></div></div>
     </div>
     `;
 
@@ -328,13 +322,12 @@ async function openCreatorPopup() {
     renderTagsList();
     renderWiBooks();
     
-    // 恢复状态 (持久化)
     if (savedState.resultText) {
         $('#pw-result-text').val(savedState.resultText);
         $('#pw-result-area').show();
         setTimeout(() => $('#pw-refine-input').trigger('input'), 50);
     }
-    // 恢复勾选状态
+    // 恢复状态
     if (savedState.syncToWorldInfo !== undefined) {
         $('#pw-wi-toggle').prop('checked', savedState.syncToWorldInfo);
     }
@@ -357,15 +350,38 @@ function bindEvents() {
         if($(this).data('tab') === 'history') renderHistoryList(); 
     });
 
-    // 悬浮按钮逻辑
+    // 鼠标坐标追踪 (用于悬浮按钮)
+    $(document).on('mouseup touchend', '#pw-result-text', function(e) {
+        if (e.type === 'touchend') {
+            lastClientX = e.changedTouches[0].clientX;
+            lastClientY = e.changedTouches[0].clientY;
+        } else {
+            lastClientX = e.clientX;
+            lastClientY = e.clientY;
+        }
+        setTimeout(checkSelection, 10);
+    });
+    
     const checkSelection = () => {
         const el = document.getElementById('pw-result-text');
         if (!el) return;
         const hasSelection = el.selectionStart !== el.selectionEnd;
-        if (hasSelection) $('#pw-float-quote-btn').fadeIn(200).css('display', 'flex');
-        else $('#pw-float-quote-btn').fadeOut(200);
+        const $btn = $('#pw-float-quote-btn');
+
+        if (hasSelection) {
+            // [修复] 计算位置：悬浮在鼠标位置附近
+            let top = lastClientY - 45; 
+            let left = lastClientX - 40;
+            // 边界检查
+            if (top < 10) top = lastClientY + 20;
+            if (left + 100 > window.innerWidth) left = window.innerWidth - 110;
+            if (left < 10) left = 10;
+
+            $btn.css({ top: top + 'px', left: left + 'px', display: 'flex' }).fadeIn(150);
+        } else {
+            $btn.fadeOut(150);
+        }
     };
-    $(document).on('touchend mouseup keyup', '#pw-result-text', checkSelection);
 
     $(document).on('click.pw', '#pw-float-quote-btn', function(e) {
         e.preventDefault(); e.stopPropagation();
@@ -377,29 +393,15 @@ function bindEvents() {
         if (selectedText) {
             const $input = $('#pw-refine-input');
             const cur = $input.val();
+            // 换行追加
             const newText = `修改此段 "${selectedText}": `;
             $input.val(cur ? cur + '\n' + newText : newText).focus();
             adjustHeight($input[0]);
             textarea.setSelectionRange(end, end);
-            checkSelection();
+            checkSelection(); // 隐藏按钮
         }
     });
 
-    // 引用按钮 (底部)
-    $(document).on('click.pw', '#pw-insert-selection', function() {
-        const textarea = document.getElementById('pw-result-text');
-        if (!textarea) return;
-        const selectedText = textarea.value.substring(textarea.selectionStart, textarea.selectionEnd).trim();
-        if (selectedText) {
-            const $input = $('#pw-refine-input');
-            const cur = $input.val();
-            const newText = `修改此段 "${selectedText}": `;
-            $input.val(cur ? cur + '\n' + newText : newText).focus();
-            adjustHeight($input[0]);
-        } else { toastr.info("请先划选文字"); }
-    });
-
-    // 保存状态 (包括Checkbox)
     const saveCurrentState = () => {
         saveState({
             request: $('#pw-request').val(),
@@ -501,7 +503,7 @@ function bindEvents() {
         finally { $btn.prop('disabled', false).html('生成设定'); }
     });
 
-    // 保存并覆盖逻辑 (World Info 修复)
+    // 保存并覆盖逻辑
     $(document).on('click.pw', '#pw-btn-apply', async function() {
         const content = $('#pw-result-text').val();
         if (!content) return toastr.warning("内容为空");
@@ -518,31 +520,31 @@ function bindEvents() {
             if (targetBook) {
                 try {
                     const h = getRequestHeaders();
-                    // 1. 获取完整数据
                     const r = await fetch('/api/worldinfo/get', { method: 'POST', headers: h, body: JSON.stringify({ name: targetBook }) });
                     if (r.ok) {
                         const d = await r.json();
                         if (!d.entries) d.entries = {};
                         
                         const entryName = `User: ${name}`;
-                        // 2. 查找或分配 ID
                         let targetId = Object.keys(d.entries).find(uid => d.entries[uid].comment === entryName);
-                        if (!targetId) {
+                        
+                        // 确保 targetId 是数字，如果是 undefined 则新建
+                        if (targetId === undefined) {
                             const ids = Object.keys(d.entries).map(Number);
                             targetId = ids.length ? Math.max(...ids) + 1 : 0;
+                        } else {
+                            targetId = Number(targetId);
                         }
 
-                        // 3. 更新内存对象
                         d.entries[targetId] = { 
-                            uid: Number(targetId), key: [name, "User"], content: content, 
+                            uid: targetId, key: [name, "User"], content: content, 
                             comment: entryName, enabled: true, selective: true 
                         };
                         
-                        // 4. 全量回传
                         await fetch('/api/worldinfo/edit', { method: 'POST', headers: h, body: JSON.stringify({ name: targetBook, data: d }) });
                         toastr.success(TEXT.TOAST_WI_SUCCESS(targetBook));
                     }
-                } catch(e) { console.error("WI Error:", e); }
+                } catch(e) { console.error(e); }
             } else { 
                 toastr.warning(TEXT.TOAST_WI_FAIL); 
             }
