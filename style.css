@@ -1,29 +1,23 @@
 /* =========================================
-   新增：用户面板快捷入口按钮样式
-   ========================================= */
-#pw-quick-btn {
-    /* 强制宽高，防止被 flex 挤压 */
-    width: 30px !important; 
-    height: 30px !important;
-    min-width: 30px !important;
-    
+   Persona 面板按钮集成
+========================================= */
+#pw_persona_tool_btn {
+    /* 确保按钮颜色与魔法棒主题色一致，或者是通用的文本颜色 */
+    color: var(--smart-theme-body-color); 
+    cursor: pointer;
     display: flex;
     align-items: center;
     justify-content: center;
-    cursor: pointer;
-    border-radius: 5px;
-    margin-right: 2px;
-    
-    /* 调试用：如果还看不到，这个红色边框会帮你定位它是否被渲染了 */
-    /* border: 1px solid red; */ 
-}
-
-#pw-quick-btn:hover {
-    background: var(--smart-theme-bg-hover, rgba(255, 255, 255, 0.1));
-}
-
-#pw-quick-btn i {
+    /* 微调一下大小和间距，使其与旁边的铅笔图标一致 */
+    width: 30px; 
+    height: 30px;
+    margin-right: 5px; /* 和铅笔拉开一点距离 */
     font-size: 1.1em;
-    color: #e0af68; /* 金色图标 */
-    filter: drop-shadow(0 0 2px rgba(0,0,0,0.5));
+    opacity: 0.7;
+    transition: opacity 0.2s;
+}
+
+#pw_persona_tool_btn:hover {
+    opacity: 1;
+    color: #e0af68; /* 悬停时变为金黄色，呼应魔法棒 */
 }
