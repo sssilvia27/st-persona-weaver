@@ -4,8 +4,9 @@
 .pw-wrapper {
     display: flex;
     flex-direction: column;
-    height: 80vh; /* 固定高度，确保内部滚动生效 */
-    max-height: 85vh;
+    height: 100%;
+    /* 增加高度限制，防止超出 popup */
+    max-height: 85vh; 
     font-size: 14px;
     color: var(--smart-theme-body-color);
 }
@@ -77,7 +78,7 @@
 .pw-view.active { display: flex; }
 
 /* =========================================
-   信息展示 (只读名字)
+   信息展示
 ========================================= */
 .pw-info-display {
     display: flex;
@@ -115,6 +116,7 @@
     gap: 5px;
     margin-bottom: 10px;
 }
+/* 修改：移除标签的点击手势，仅作展示 */
 .pw-tag-chip {
     display: inline-flex;
     align-items: center;
@@ -123,9 +125,8 @@
     padding: 3px 8px;
     border-radius: 12px;
     font-size: 0.85em;
-    /* cursor: pointer;  去掉手型，因为现在不让点了 */
+    cursor: default; /* 更改为默认鼠标 */
     transition: all 0.2s;
-    opacity: 0.9;
 }
 .pw-tag-val {
     margin-left: 5px;
@@ -154,6 +155,12 @@
 }
 .pw-input:focus, .pw-textarea:focus { border-color: var(--smart-theme-input-color); background-color: rgba(0, 0, 0, 0.3); }
 .pw-textarea { resize: vertical; line-height: 1.5; }
+
+/* 初始请求框：固定一些高度，允许拉伸 */
+#pw-request {
+    flex-shrink: 0; 
+}
+
 .pw-btn {
     display: flex; align-items: center; justify-content: center; gap: 8px;
     padding: 8px 15px; border-radius: 6px;
@@ -171,92 +178,106 @@
 .pw-mini-btn:hover { background: rgba(255,255,255,0.1); opacity: 1; border-color: var(--SmartThemeBorderColor); }
 
 /* =========================================
-   [新] 结果区域 Flex 布局
+   [新] 结果展示区域布局 (Flex Column)
 ========================================= */
 #pw-result-area {
-    display: none; 
-    flex-direction: column; 
-    flex-grow: 1; 
-    overflow: hidden; /* 内部滚动 */
+    display: flex;
+    flex-direction: column;
+    flex-grow: 1; /* 占据剩余所有空间 */
+    overflow: hidden; /* 防止自身滚动 */
     margin-top: 10px;
     border-top: 1px dashed var(--SmartThemeBorderColor);
     padding-top: 10px;
 }
 
-/* =========================================
-   [新] 结果文本框 (填充剩余空间)
-========================================= */
+/* 结果文本框：自适应高度，占据中间部分 */
 .pw-result-textarea {
+    flex-grow: 1;
     width: 100%;
-    flex-grow: 1; /* 撑满剩余高度 */
-    min-height: 150px;
     background: rgba(0, 0, 0, 0.15);
     border: 1px solid var(--SmartThemeBorderColor);
-    border-radius: 6px 6px 0 0; /* 下方直角连接工具栏 */
+    border-radius: 6px;
     color: var(--smart-theme-body-color);
     padding: 12px;
     font-family: inherit;
     font-size: 1.0em;
     line-height: 1.6;
-    resize: none; /* 禁止拖动，由 flex 控制 */
     outline: none;
     white-space: pre-wrap;
+    margin-bottom: 5px;
+    resize: none; /* 在 Flex 布局中禁用 resize，靠 flex-grow */
     overflow-y: auto;
 }
 .pw-result-textarea:focus { background: rgba(0, 0, 0, 0.2); border-color: var(--smart-theme-input-color); }
 
 /* =========================================
-   [新] 润色工具栏 (位于文本框下方)
+   [新] 底部固定区域 (润色栏 + 动作栏)
+   始终在最下方，不随文字滚动
 ========================================= */
+.pw-fixed-bottom {
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    background: var(--smart-theme-bg); /* 防止文字透视 */
+    padding-top: 5px;
+}
+
+/* 润色工具栏 */
 .pw-refine-toolbar {
     display: flex;
     gap: 5px;
-    align-items: center;
+    align-items: flex-end; /* 底部对齐，适应多行输入 */
     background: rgba(0,0,0,0.2);
     padding: 8px;
     border: 1px solid var(--SmartThemeBorderColor);
-    border-top: none; /* 与上方文本框融合 */
-    border-radius: 0 0 6px 6px;
-    flex-shrink: 0; /* 不会被压缩 */
-    flex-wrap: wrap; /* 允许换行 */
+    border-radius: 6px;
 }
-.pw-refine-toolbar input {
+/* 润色输入框 - 支持高度自适应 */
+.pw-refine-textarea {
     flex: 1;
-    min-width: 150px; /* 最小宽度 */
-    border: 1px solid transparent;
-    background: rgba(0,0,0,0.1);
-    border-radius: 4px;
-    padding: 6px;
+    border: none;
+    background: transparent;
+    padding: 4px;
     font-size: 0.9em;
+    font-family: inherit;
     color: inherit;
+    resize: none;
+    max-height: 100px; /* 限制最大高度 */
+    overflow-y: auto;
+    line-height: 1.4;
 }
-.pw-refine-toolbar input:focus { outline: none; border-color: var(--SmartThemeBorderColor); background: rgba(0,0,0,0.2); }
+.pw-refine-textarea:focus { outline: none; }
+.pw-refine-actions {
+    display: flex;
+    gap: 5px;
+    flex-shrink: 0;
+}
+
 .pw-tool-btn {
-    padding: 6px 12px;
+    padding: 6px 10px;
     cursor: pointer;
+    opacity: 0.8;
     border-radius: 4px;
     font-size: 0.9em;
     background: rgba(255,255,255,0.05);
-    border: 1px solid var(--SmartThemeBorderColor);
+    border: 1px solid transparent;
     white-space: nowrap;
     display: flex;
     align-items: center;
     gap: 5px;
 }
-.pw-tool-btn:hover { background: rgba(255,255,255,0.1); color: #e0af68; border-color: #e0af68; }
+.pw-tool-btn:hover { opacity: 1; background: rgba(255,255,255,0.1); border-color: var(--SmartThemeBorderColor); color: #e0af68; }
 
-/* =========================================
-   [新] 底部动作栏 (始终在最下方)
-========================================= */
+/* 底部动作栏 */
 .pw-bottom-actions {
-    margin-top: 10px;
-    padding-top: 10px;
-    flex-shrink: 0;
     display: flex;
     justify-content: space-between;
     align-items: center;
     flex-wrap: wrap;
     gap: 10px;
+    padding-top: 5px;
+    border-top: 1px solid rgba(128,128,128,0.1);
 }
 .pw-bottom-left { display: flex; gap: 10px; align-items: center; }
 .pw-bottom-right { display: flex; gap: 10px; align-items: center; }
@@ -277,41 +298,46 @@
    [新] 对比视图 (Diff View)
 ========================================= */
 .pw-diff-container {
-    display: none; /* 默认隐藏 */
-    flex-direction: column;
-    flex-grow: 1;
+    display: flex;
     gap: 10px;
+    height: 60vh;
     margin-bottom: 10px;
 }
-.pw-diff-row {
-    display: flex;
-    gap: 10px;
-    flex-grow: 1;
-    min-height: 0; /* Flex fix */
-}
-.pw-diff-box {
+.pw-diff-pane {
     flex: 1;
     display: flex;
     flex-direction: column;
-    gap: 5px;
-}
-.pw-diff-label { font-weight: bold; font-size: 0.9em; opacity: 0.8; }
-.pw-diff-text {
-    flex: 1;
-    resize: none;
-    padding: 10px;
-    border-radius: 6px;
     border: 1px solid var(--SmartThemeBorderColor);
-    background: rgba(0,0,0,0.15);
-    color: inherit;
+    border-radius: 6px;
+    background: rgba(0,0,0,0.1);
 }
-.pw-diff-text.old { background: rgba(100,0,0,0.1); border-color: #ff6b6b; opacity: 0.8; }
-.pw-diff-text.new { background: rgba(0,100,0,0.1); border-color: #9ece6a; }
+.pw-diff-header {
+    padding: 8px;
+    font-weight: bold;
+    background: rgba(0,0,0,0.2);
+    border-bottom: 1px solid var(--SmartThemeBorderColor);
+    text-align: center;
+}
+.pw-diff-header.old { color: #ff6b6b; }
+.pw-diff-header.new { color: #9ece6a; }
+.pw-diff-content {
+    flex: 1;
+    padding: 10px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    font-size: 0.95em;
+    line-height: 1.5;
+    outline: none;
+    border: none;
+    background: transparent;
+    color: inherit;
+    resize: none;
+}
 .pw-diff-actions {
     display: flex;
     justify-content: center;
     gap: 15px;
-    padding: 5px;
+    margin-top: 10px;
 }
 
 /* =========================================
@@ -323,6 +349,7 @@
 .pw-wi-controls { display: flex; gap: 8px; width: 100%; }
 .pw-wi-select { flex-grow: 1; width: auto; min-width: 0; }
 .pw-wi-add-btn { flex-shrink: 0; width: auto; padding: 0 15px; }
+
 .pw-wi-book { border: 1px solid var(--SmartThemeBorderColor); border-radius: 6px; margin-bottom: 8px; overflow: hidden; }
 .pw-wi-header { padding: 10px; background: rgba(0,0,0,0.2); cursor: pointer; display: flex; justify-content: space-between; align-items: center; }
 .pw-wi-list { display: none; padding: 10px; border-top: 1px solid var(--SmartThemeBorderColor); }
@@ -331,6 +358,7 @@
 .pw-wi-check { transform: scale(1.2); cursor: pointer; }
 .pw-wi-desc { display: none; margin-top: 8px; padding: 8px; background: rgba(0,0,0,0.3); border-radius: 4px; font-size: 0.9em; white-space: pre-wrap; }
 .pw-wi-close-bar { text-align: center; font-size: 0.8em; opacity: 0.6; cursor: pointer; margin-top: 5px; }
+
 .pw-search-box { position: relative; display: flex; align-items: center; margin-bottom: 10px; }
 .pw-search-input { width: 100%; padding-right: 30px; }
 .pw-search-clear { position: absolute; right: 10px; opacity: 0.5; cursor: pointer; z-index: 2; }
@@ -370,13 +398,16 @@
     .pw-history-item { flex-direction: column; }
     .pw-hist-del-btn { border-left: none; border-top: 1px solid var(--SmartThemeBorderColor); padding: 5px; }
     
+    /* 移动端润色栏适配：输入框占满一行，按钮换行 */
+    .pw-refine-toolbar { flex-wrap: wrap; }
+    .pw-refine-textarea { min-width: 100%; margin-bottom: 5px; }
+    .pw-refine-actions { width: 100%; justify-content: space-between; }
+    .pw-tool-btn { flex: 1; justify-content: center; }
+
     .pw-bottom-actions { flex-direction: column; align-items: stretch; }
     .pw-bottom-left, .pw-bottom-right { justify-content: space-between; }
     
-    /* 移动端润色栏适配：输入框独占一行 */
-    .pw-refine-toolbar input { width: 100%; order: 1; margin-bottom: 5px; }
-    .pw-tool-btn { flex: 1; justify-content: center; order: 2; }
-    
-    /* 移动端 Diff 视图改为上下排列 */
-    .pw-diff-row { flex-direction: column; }
+    /* 移动端对比视图 */
+    .pw-diff-container { flex-direction: column; height: auto; }
+    .pw-diff-pane { height: 200px; }
 }
