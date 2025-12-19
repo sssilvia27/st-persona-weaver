@@ -250,3 +250,55 @@
     .pw-history-item { flex-direction: column; }
     .pw-hist-del-btn { border-left: none; border-top: 1px solid var(--SmartThemeBorderColor); padding: 5px; }
 }
+/* =========================================
+   新增：结果表格与润色区域
+========================================= */
+.pw-result-table-container {
+    background: rgba(0,0,0,0.1);
+    border: 1px solid var(--SmartThemeBorderColor);
+    border-radius: 6px;
+    overflow: hidden;
+    margin-bottom: 10px;
+}
+
+.pw-result-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.9em;
+}
+
+.pw-result-table th, .pw-result-table td {
+    border-bottom: 1px solid var(--SmartThemeBorderColor);
+    padding: 8px;
+    text-align: left;
+}
+
+.pw-result-table th {
+    background: rgba(0,0,0,0.2);
+    color: #e0af68;
+    width: 30%;
+    font-weight: bold;
+}
+
+.pw-result-table input {
+    width: 100%;
+    background: transparent;
+    border: none;
+    color: var(--smart-theme-body-color);
+    font-family: inherit;
+    padding: 4px;
+    border-radius: 4px;
+}
+
+.pw-result-table input:focus {
+    background: rgba(0,0,0,0.2);
+    outline: 1px solid var(--smart-theme-input-color);
+}
+
+.pw-refine-box {
+    display: flex;
+    gap: 8px;
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px dashed var(--SmartThemeBorderColor);
+}
