@@ -11,7 +11,6 @@
     flex-grow: 1; overflow-y: auto; padding-right: 5px;
     display: flex; flex-direction: column; gap: 8px;
     padding-bottom: 10px; min-height: 0;
-    position: relative; /* 关键：作为悬浮按钮的定位基准 */
 }
 
 .pw-scroll-area::-webkit-scrollbar { width: 6px; }
@@ -45,7 +44,6 @@
 }
 .pw-info-item { display: flex; align-items: center; gap: 6px; font-weight: bold; color: #e0af68; font-size: 1.05em; }
 
-/* 标签系统 */
 .pw-tags-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
 .pw-tags-label { font-weight: bold; opacity: 0.8; font-size: 0.85em; }
 .pw-tags-edit-toggle { cursor: pointer; font-size: 0.8em; color: #5b8db8; }
@@ -97,6 +95,7 @@
 /* =========================================
    5. 结果区域与润色栏
 ========================================= */
+/* [关键修改] 相对容器，用于定位悬浮按钮 */
 .pw-relative-container { position: relative; }
 
 .pw-result-textarea {
@@ -131,30 +130,32 @@
 }
 .pw-tool-btn:hover { opacity: 1; background: rgba(255,255,255,0.15); border-color: #e0af68; color: #e0af68; }
 
-/* [核心] 智能悬浮按钮 */
+/* [新增] 悬浮引用按钮 (固定在文本框右上角) */
 .pw-float-quote-btn {
     position: absolute;
-    /* 初始位置，JS会动态计算 top/right */
+    top: 10px; right: 10px; /* 固定在右上角 */
     background: linear-gradient(135deg, #e0af68, #d08f40);
     color: #1a1a1a;
-    padding: 6px 14px;
+    padding: 6px 12px;
     border-radius: 20px;
     font-weight: bold;
     font-size: 0.85em;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+    box-shadow: 0 2px 8px rgba(0,0,0,0.4);
     cursor: pointer;
-    z-index: 999; /* 确保最高层级 */
-    display: none;
-    animation: pw-pop-in 0.15s cubic-bezier(0.175, 0.885, 0.32, 1.275);
-    align-items: center; gap: 6px;
-    white-space: nowrap;
-    border: 2px solid rgba(255,255,255,0.3);
+    z-index: 50;
+    display: none; /* 默认隐藏 */
+    animation: pw-fade-in 0.2s ease-out;
+    align-items: center; gap: 5px;
+    border: 1px solid rgba(255,255,255,0.3);
+    backdrop-filter: blur(4px);
 }
-.pw-float-quote-btn:hover { transform: scale(1.05); }
-@keyframes pw-pop-in { from { transform: scale(0) translateY(5px); opacity: 0; } to { transform: scale(1) translateY(0); opacity: 1; } }
+.pw-float-quote-btn:hover { transform: scale(1.05); box-shadow: 0 4px 12px rgba(0,0,0,0.5); }
+.pw-float-quote-btn:active { transform: scale(0.95); }
+
+@keyframes pw-fade-in { from { opacity: 0; transform: translateY(-5px); } to { opacity: 1; transform: translateY(0); } }
 
 /* =========================================
-   6. 结构化 Diff 对比视图
+   6. Diff 对比视图
 ========================================= */
 .pw-diff-container {
     display: flex; flex-direction: column; gap: 8px;
@@ -261,7 +262,7 @@
     position: relative; display: flex; align-items: center; margin-bottom: 10px;
     background: rgba(0,0,0,0.2); border-radius: 6px; border: 1px solid var(--SmartThemeBorderColor);
 }
-.pw-search-icon { position: absolute; left: 10px; opacity: 0.5; pointer-events: none; color: var(--smart-theme-body-color); font-size: 0.9em;}
+.pw-search-icon { position: absolute; left: 10px; opacity: 0.5; pointer-events: none; color: var(--smart-theme-body-color); }
 .pw-search-input { width: 100%; padding-left: 32px !important; padding-right: 30px; border: none; background: transparent; }
 .pw-search-clear { position: absolute; right: 10px; opacity: 0.5; cursor: pointer; z-index: 2; }
 
