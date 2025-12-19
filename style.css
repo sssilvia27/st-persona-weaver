@@ -250,55 +250,57 @@
     .pw-history-item { flex-direction: column; }
     .pw-hist-del-btn { border-left: none; border-top: 1px solid var(--SmartThemeBorderColor); padding: 5px; }
 }
+/* ... 保留之前的通用样式 (pw-wrapper, pw-header, pw-tabs 等) ... */
+/* ... 请保留 pw-info-display 等样式 ... */
+
 /* =========================================
-   新增：结果表格与润色区域
+   修改：结果展示区域 (文本列表模式)
 ========================================= */
-.pw-result-table-container {
-    background: rgba(0,0,0,0.1);
+
+/* 结果区域的容器 */
+.pw-result-container {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-top: 10px;
+    border-top: 2px solid var(--SmartThemeBorderColor);
+    padding-top: 15px;
+}
+
+/* 那个灰色的文本框，模仿你的截图风格 */
+.pw-result-textarea {
+    width: 100%;
+    min-height: 200px; /* 足够高，显示列表 */
+    background: rgba(0, 0, 0, 0.15); /*稍微深一点的背景 */
     border: 1px solid var(--SmartThemeBorderColor);
-    border-radius: 6px;
-    overflow: hidden;
-    margin-bottom: 10px;
-}
-
-.pw-result-table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 0.9em;
-}
-
-.pw-result-table th, .pw-result-table td {
-    border-bottom: 1px solid var(--SmartThemeBorderColor);
-    padding: 8px;
-    text-align: left;
-}
-
-.pw-result-table th {
-    background: rgba(0,0,0,0.2);
-    color: #e0af68;
-    width: 30%;
-    font-weight: bold;
-}
-
-.pw-result-table input {
-    width: 100%;
-    background: transparent;
-    border: none;
+    border-radius: 8px;
     color: var(--smart-theme-body-color);
-    font-family: inherit;
-    padding: 4px;
-    border-radius: 4px;
+    padding: 12px;
+    font-family: inherit; /* 或者用 monospace 看起来更像代码/数据 */
+    font-size: 1.0em;
+    line-height: 1.6;
+    resize: vertical;
+    outline: none;
+    white-space: pre-wrap; /* 保留换行 */
 }
 
-.pw-result-table input:focus {
-    background: rgba(0,0,0,0.2);
-    outline: 1px solid var(--smart-theme-input-color);
+.pw-result-textarea:focus {
+    background: rgba(0, 0, 0, 0.2);
+    border-color: var(--smart-theme-input-color);
 }
 
+/* 润色区域 */
 .pw-refine-box {
     display: flex;
     gap: 8px;
-    margin-top: 10px;
-    padding-top: 10px;
-    border-top: 1px dashed var(--SmartThemeBorderColor);
+    align-items: center;
+}
+
+/* 底部保存栏 */
+.pw-save-bar {
+    background: rgba(0,0,0,0.1);
+    padding: 10px;
+    border-radius: 8px;
+    border: 1px solid var(--SmartThemeBorderColor);
+    margin-top: 5px;
 }
