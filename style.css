@@ -95,8 +95,7 @@
 /* =========================================
    5. 结果区域与润色栏
 ========================================= */
-/* [关键修改] 相对容器，用于定位悬浮按钮 */
-.pw-relative-container { position: relative; }
+.pw-relative-container { position: relative; } /* 保留，虽然按钮改为fixed，但结构需要 */
 
 .pw-result-textarea {
     width: 100%; min-height: 250px; background: rgba(0, 0, 0, 0.15);
@@ -130,32 +129,33 @@
 }
 .pw-tool-btn:hover { opacity: 1; background: rgba(255,255,255,0.15); border-color: #e0af68; color: #e0af68; }
 
-/* [新增] 悬浮引用按钮 (固定在文本框右上角) */
+/* [修改] 悬浮引用按钮 (跟随鼠标/手指) */
 .pw-float-quote-btn {
-    position: absolute;
-    top: 10px; right: 10px; /* 固定在右上角 */
+    position: fixed; /* 改为 fixed，相对于视口定位 */
+    /* top/left 由 JS 动态计算 */
     background: linear-gradient(135deg, #e0af68, #d08f40);
     color: #1a1a1a;
     padding: 6px 12px;
-    border-radius: 20px;
+    border-radius: 6px; /* 方一点，像系统菜单 */
     font-weight: bold;
     font-size: 0.85em;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+    box-shadow: 0 4px 15px rgba(0,0,0,0.6);
     cursor: pointer;
-    z-index: 50;
-    display: none; /* 默认隐藏 */
-    animation: pw-fade-in 0.2s ease-out;
+    z-index: 9999; /* 确保最顶层 */
+    display: none;
+    animation: pw-pop-in 0.15s cubic-bezier(0.175, 0.885, 0.32, 1.275);
     align-items: center; gap: 5px;
     border: 1px solid rgba(255,255,255,0.3);
     backdrop-filter: blur(4px);
+    pointer-events: auto;
 }
-.pw-float-quote-btn:hover { transform: scale(1.05); box-shadow: 0 4px 12px rgba(0,0,0,0.5); }
+.pw-float-quote-btn:hover { transform: scale(1.05); }
 .pw-float-quote-btn:active { transform: scale(0.95); }
 
-@keyframes pw-fade-in { from { opacity: 0; transform: translateY(-5px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes pw-pop-in { from { transform: scale(0.8); opacity: 0; } to { transform: scale(1); opacity: 1; } }
 
 /* =========================================
-   6. Diff 对比视图
+   6. 结构化 Diff 对比视图
 ========================================= */
 .pw-diff-container {
     display: flex; flex-direction: column; gap: 8px;
@@ -194,7 +194,6 @@
 }
 .pw-diff-opt:hover { border-color: #555; }
 
-/* 单视图模式 */
 .pw-diff-opt.single-view { cursor: default; opacity: 0.7; border-style: dotted; background: #222; }
 .pw-diff-opt.single-view:hover { border-color: #333; }
 
