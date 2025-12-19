@@ -56,7 +56,7 @@ let availableWorldBooks = [];
 let isEditingTags = false; 
 
 // ============================================================================
-// 2. 核心逻辑函数 (存储、写入、API)
+// 2. 核心逻辑函数
 // ============================================================================
 
 function loadData() {
@@ -89,7 +89,7 @@ function injectStyles() {
     if ($(`#${styleId}`).length) return;
 }
 
-// [核心] 暴力写入 Persona 到 SillyTavern 内存和 UI
+// [核心] 暴力写入 Persona
 async function forceSavePersona(name, description, title) {
     const context = getContext();
     if (!context.powerUserSettings.personas) context.powerUserSettings.personas = {};
@@ -100,6 +100,7 @@ async function forceSavePersona(name, description, title) {
 
     context.powerUserSettings.persona_selected = name;
 
+    // 尝试更新 UI (如果存在)
     const $nameInput = $('#your_name');
     const $descInput = $('#persona_description');
     
@@ -115,7 +116,16 @@ async function forceSavePersona(name, description, title) {
     return true;
 }
 
-// 获取所有可用世界书名
+// [修复] 使用 window.SillyTavern 以防模块作用域问题
+async function executeSlash(command) {
+    const st = window.SillyTavern || {};
+    if (st.executeSlashCommandsWithOptions) {
+        await st.executeSlashCommandsWithOptions(command, { quiet: true });
+    } else {
+        console.warn("[PW] Slash command API not found!");
+    }
+}
+
 async function loadAvailableWorldBooks() {
     availableWorldBooks = [];
     try {
@@ -132,7 +142,6 @@ async function loadAvailableWorldBooks() {
     availableWorldBooks = [...new Set(availableWorldBooks)].filter(x => x).sort();
 }
 
-// 获取当前上下文绑定的世界书
 async function getContextWorldBooks(extras = []) {
     const context = getContext();
     const books = new Set(extras); 
@@ -193,7 +202,7 @@ async function runGeneration(data, apiConfig) {
     const context = getContext();
     const char = context.characters[context.characterId];
     
-    // 从 DOM 获取只读的当前名字信息 (确保准确性)
+    // 从 DOM 获取只读名字信息 (确保准确)
     const currentName = $('#pw-display-name').text().trim() || "User";
     const currentTitle = $('#pw-display-title').text().trim() || "";
 
@@ -206,7 +215,6 @@ async function runGeneration(data, apiConfig) {
     
     if (data.mode === 'refine') {
         // === 润色模式 ===
-        // 将当前的文本列表发给 AI，让它理解并修改
         systemPrompt = `You are a creative writing assistant optimizing a User Persona.
 Target Character: ${char.name}
 Scenario: ${char.scenario || "None"}
@@ -223,12 +231,12 @@ ${data.currentText}
 [Task]:
 1. Update the Persona Data based on the user's request.
 2. Maintain the "Key: Value" list format.
-3. Ensure consistency (e.g. updating Age might affect Occupation).
+3. Ensure consistency.
 4. User Name: "${currentName}" (Immutable).
 
 [Response Format]:
 Return ONLY a JSON object representing the Key-Value pairs.
-Example: {"Gender": "Female", "Age": "20", "Personality": "..."}
+Example: {"Gender": "Female", "Age": "20", ...}
 `;
     } else {
         // === 初次生成模式 ===
@@ -244,8 +252,8 @@ ${data.request}
 
 [Task]:
 1. Create a detailed Persona for "${currentName}" (Title: ${currentTitle}).
-2. Use "Key: Value" format for traits.
-3. Recommended Keys to include: ${targetKeys}.
+2. Use "Key: Value" format.
+3. Recommended Keys: ${targetKeys}.
 
 [Response Format]:
 Return ONLY a JSON object (Key-Value pairs).
@@ -274,7 +282,6 @@ Example: {"Gender": "Male", "Personality": "Stoic", ...}
         responseContent = await context.generateQuietPrompt(systemPrompt, false, false, "System");
     }
 
-    // 解析 JSON
     try {
         const jsonMatch = responseContent.match(/\{[\s\S]*\}/);
         if (!jsonMatch) throw new Error("No JSON found in response");
@@ -285,7 +292,6 @@ Example: {"Gender": "Male", "Personality": "Stoic", ...}
     }
 }
 
-// [辅助] 将 JSON 转为 文本列表格式
 function convertJsonToText(data) {
     return Object.entries(data)
         .map(([k, v]) => `${k}: ${v}`)
@@ -307,10 +313,12 @@ async function openCreatorPopup() {
     const savedState = loadState();
     const config = { ...defaultSettings, ...extension_settings[extensionName], ...savedState.localConfig };
     
-    // [修复] 从核心配置获取当前选中的 Persona 信息
-    const currentPersonaId = SillyTavern.powerUserSettings.persona_selected;
+    // [修复] 使用 context.powerUserSettings 而不是 SillyTavern.powerUserSettings
+    // 之前报错就是因为 SillyTavern 在这里可能不是全局对象或者引用错误
+    const settings = context.powerUserSettings || {};
+    const currentPersonaId = settings.persona_selected;
     const currentName = currentPersonaId || "User";
-    const currentTitle = SillyTavern.powerUserSettings.persona_titles?.[currentPersonaId] || "";
+    const currentTitle = settings.persona_titles?.[currentPersonaId] || "";
 
     const wiOptions = availableWorldBooks.length > 0 
         ? availableWorldBooks.map(b => `<option value="${b}">${b}</option>`).join('')
@@ -333,7 +341,6 @@ async function openCreatorPopup() {
         <div id="pw-view-editor" class="pw-view active">
             <div class="pw-scroll-area">
                 
-                <!-- 1. 只读信息展示 -->
                 <div class="pw-info-display">
                     <div class="pw-info-item">
                         <i class="fa-solid fa-user"></i>
@@ -345,7 +352,6 @@ async function openCreatorPopup() {
                     </div>
                 </div>
 
-                <!-- 2. 输入区域 -->
                 <div>
                     <div class="pw-tags-header">
                         <span class="pw-tags-label">基础设定 (点击标签填入)</span>
@@ -360,7 +366,6 @@ async function openCreatorPopup() {
                     <button id="pw-btn-gen" class="pw-btn gen"><i class="fa-solid fa-bolt"></i> 生成设定</button>
                 </div>
 
-                <!-- 3. 结果展示区域 (文本列表模式) -->
                 <div id="pw-result-area" class="pw-result-container" style="display:none;">
                     <div style="font-weight:bold; color:#5b8db8; margin-bottom:5px;"><i class="fa-solid fa-list-ul"></i> 设定详情 (可直接修改)</div>
                     
@@ -388,7 +393,6 @@ async function openCreatorPopup() {
             </div>
         </div>
 
-        <!-- Tab: Context (WI) -->
         <div id="pw-view-context" class="pw-view">
             <div class="pw-scroll-area">
                 <div class="pw-card-section">
@@ -404,7 +408,6 @@ async function openCreatorPopup() {
             </div>
         </div>
 
-        <!-- Tab: API -->
         <div id="pw-view-api" class="pw-view">
             <div class="pw-scroll-area">
                 <div class="pw-card-section">
@@ -440,7 +443,6 @@ async function openCreatorPopup() {
             </div>
         </div>
 
-        <!-- Tab: History -->
         <div id="pw-view-history" class="pw-view">
             <div class="pw-scroll-area">
                 <div class="pw-search-box">
@@ -456,14 +458,10 @@ async function openCreatorPopup() {
 
     callPopup(html, 'text', '', { wide: true, large: true, okButton: "关闭" });
 
-    // 绑定事件（使用 document 委托）
     bindEvents();
-    
-    // 初始化子组件
     renderTagsList();
     renderWiBooks();
     
-    // 恢复状态
     if (savedState.resultText) {
         $('#pw-result-text').val(savedState.resultText);
         $('#pw-result-area').show();
@@ -477,7 +475,6 @@ async function openCreatorPopup() {
 function bindEvents() {
     $(document).off('.pw');
 
-    // 自动保存状态
     const saveCurrentState = () => {
         saveState({
             request: $('#pw-request').val(),
@@ -495,7 +492,6 @@ function bindEvents() {
     };
     $(document).on('input.pw change.pw', '#pw-request, #pw-result-text, .pw-input', saveCurrentState);
 
-    // Tab 切换
     $(document).on('click.pw', '.pw-tab', function() {
         $('.pw-tab').removeClass('active');
         $(this).addClass('active');
@@ -505,7 +501,6 @@ function bindEvents() {
         if(tab === 'history') renderHistoryList(); 
     });
 
-    // 清空与快照
     $(document).on('click.pw', '#pw-clear', function() {
         if(confirm("清空输入内容？")) {
             $('#pw-request').val('');
@@ -531,7 +526,6 @@ function bindEvents() {
         toastr.success(TEXT.TOAST_SNAPSHOT);
     });
 
-    // --- 1. 生成逻辑 (初次) ---
     $(document).on('click.pw', '#pw-btn-gen', async function() {
         const req = $('#pw-request').val();
         if (!req) return toastr.warning("请输入一些设定要求");
@@ -568,7 +562,6 @@ function bindEvents() {
         }
     });
 
-    // --- 2. 润色逻辑 (二次) ---
     $(document).on('click.pw', '#pw-btn-refine', async function() {
         const refineReq = $('#pw-refine-input').val();
         if (!refineReq) return toastr.warning("请输入润色意见");
@@ -582,7 +575,7 @@ function bindEvents() {
             const config = {
                 mode: 'refine',
                 request: refineReq,
-                currentText: currentRawText, // 发送文本给 AI
+                currentText: currentRawText, 
                 apiSource: $('#pw-api-source').val(),
                 indepApiUrl: $('#pw-api-url').val(),
                 indepApiKey: $('#pw-api-key').val(),
@@ -604,7 +597,6 @@ function bindEvents() {
         }
     });
 
-    // --- 3. 保存并应用 ---
     $(document).on('click.pw', '#pw-btn-apply', async function() {
         const name = $('#pw-display-name').text();
         const title = $('#pw-display-title').text();
@@ -613,22 +605,18 @@ function bindEvents() {
         let finalContent = $('#pw-result-text').val();
         
         if (format === 'paragraph') {
-            // 简单的换行处理，或者保持原样让用户自己决定
             finalContent = finalContent.replace(/\n/g, '. ');
         }
 
-        // 1. 保存到 Persona
         try {
             await forceSavePersona(name, finalContent, title === "无头衔" ? "" : title);
             toastr.success(TEXT.TOAST_SAVE_SUCCESS(name));
         } catch (e) { toastr.error(e.message); return; }
 
-        // 2. 保存到世界书
         if ($('#pw-wi-toggle').is(':checked')) {
             await saveToWorldInfo(name, title, finalContent);
         }
 
-        // 保存到历史
         saveHistory({
             request: $('#pw-request').val(),
             timestamp: new Date().toLocaleString(),
@@ -639,16 +627,13 @@ function bindEvents() {
         $('.popup_close').click();
     });
 
-    // 标签系统开关
     $(document).on('click.pw', '#pw-toggle-edit-tags', () => {
         isEditingTags = !isEditingTags;
         renderTagsList();
     });
 
-    // API 切换
     $(document).on('change.pw', '#pw-api-source', function() { $('#pw-indep-settings').toggle($(this).val() === 'independent'); });
     
-    // API 获取模型
     $(document).on('click.pw', '#pw-api-fetch', async function() {
         const btn = $(this);
         btn.html('<i class="fas fa-spinner fa-spin"></i>');
@@ -663,7 +648,6 @@ function bindEvents() {
     
     $(document).on('click.pw', '#pw-api-save', () => { saveCurrentState(); toastr.success(TEXT.TOAST_SAVE_API); });
 
-    // 历史搜索与清空
     $(document).on('input.pw', '#pw-history-search', renderHistoryList);
     $(document).on('click.pw', '#pw-history-search-clear', function() { $('#pw-history-search').val('').trigger('input'); });
     $(document).on('click.pw', '#pw-history-clear-all', function() {
@@ -675,7 +659,6 @@ function bindEvents() {
         }
     });
     
-    // 世界书添加
     $(document).on('click.pw', '#pw-wi-add', () => {
         const val = $('#pw-wi-select').val();
         if (val && !window.pwExtraBooks.includes(val)) {
@@ -723,12 +706,11 @@ const renderTagsList = () => {
                 const prefix = (cur && !cur.endsWith('\n')) ? '\n' : '';
                 $text.val(cur + prefix + insert).focus();
                 $text[0].scrollTop = $text[0].scrollHeight;
-                saveData(); // 触发一下状态保存
+                saveData(); 
             });
             $container.append($chip);
         }
     });
-    // ... 添加和完成按钮 ...
     const $addBtn = $(`<div class="pw-tag-add-btn"><i class="fa-solid fa-plus"></i> ${isEditingTags ? '新增' : '标签'}</div>`);
     $addBtn.on('click', () => { tagsCache.push({ name: "", value: "" }); saveData(); if (!isEditingTags) isEditingTags = true; renderTagsList(); });
     $container.append($addBtn);
@@ -836,7 +818,6 @@ const renderHistoryList = () => {
     const filtered = historyCache.filter(item => {
         if (!search) return true;
         const name = (item.data.name || "").toLowerCase();
-        // 兼容新旧数据字段 (resultText vs description)
         const content = (item.data.resultText || item.data.description || "").toLowerCase();
         return name.includes(search) || content.includes(search);
     });
@@ -868,7 +849,7 @@ const renderHistoryList = () => {
         $el.on('click', function(e) {
             if ($(e.target).closest('.pw-hist-del-btn').length) return;
             $('#pw-request').val(item.request);
-            $('#pw-result-text').val(previewText); // 恢复文本
+            $('#pw-result-text').val(previewText); 
             $('#pw-result-area').show();
             $('.pw-tab[data-tab="editor"]').click();
         });
@@ -887,7 +868,7 @@ const renderHistoryList = () => {
 };
 
 // ============================================================================
-// 初始化 (按钮注入)
+// 初始化
 // ============================================================================
 
 function addPersonaButton() {
@@ -910,10 +891,8 @@ function addPersonaButton() {
 jQuery(async () => {
     injectStyles();
     
-    // 立即尝试添加
     addPersonaButton();
 
-    // 监听 DOM 变化防止按钮消失
     const observer = new MutationObserver(() => {
         if ($(`#${BUTTON_ID}`).length === 0 && $('.persona_controls_buttons_block').length > 0) {
             addPersonaButton();
