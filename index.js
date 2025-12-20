@@ -4,10 +4,11 @@ import { saveSettingsDebounced, callPopup, getRequestHeaders } from "../../../..
 const extensionName = "st-persona-weaver";
 const STORAGE_KEY_HISTORY = 'pw_history_v20';
 const STORAGE_KEY_STATE = 'pw_state_v20'; 
-const STORAGE_KEY_TEMPLATE_KEYS = 'pw_template_keys_v14'; 
-const STORAGE_KEY_PROMPTS = 'pw_prompts_v2'; // Prompt 版本升级
+const STORAGE_KEY_TEMPLATE_KEYS = 'pw_template_keys_v15'; // 更新版本号重置 Key
+const STORAGE_KEY_PROMPTS = 'pw_prompts_v1';
 const BUTTON_ID = 'pw_persona_tool_btn';
 
+// [需求2] 纯 Key 列表，用于 Prompt 引导
 const defaultTemplateKeys = [
     { name: "gender", value: "" },
     { name: "identity", value: "" },
@@ -31,6 +32,7 @@ const defaultTemplateKeys = [
     { name: "NSFW_information", value: "" }
 ];
 
+// 完整模版 (用于插入到输入框)
 const fullTemplateText = 
 `gender:
 identity:
@@ -147,15 +149,16 @@ NSFW_information:
   Limits:
     -`;
 
-// [需求1] 使用 {{format}} 注入模版骨架
+// [需求1] Prompt 强调模版结构
 const defaultSystemPromptInitial = 
 `Creating User Persona for {{user}} (Target: {{char}}).
 {{wi}}
+[Required Fields]:
+{{tags}}
+
 Instruction: {{input}}
-Task: Fill in the character details strictly following the format below.
-Required Format:
-{{format}}
-Response: ONLY the filled data in the required format.`;
+Task: Generate character details strictly strictly following the provided YAML/Key-Value structure. Ensure ALL keys from [Required Fields] are addressed if relevant.
+Response: ONLY the generated YAML data.`;
 
 const defaultSystemPromptRefine = 
 `Optimizing User Persona for {{char}}.
@@ -163,7 +166,7 @@ const defaultSystemPromptRefine =
 [Current Data]:
 """{{current}}"""
 [Instruction]: "{{input}}"
-Task: Modify the data based on instruction. If text is quoted, focus on that part. Maintain the key-value format.
+Task: Modify the data based on instruction. Maintain strict "Key: Value" or YAML format.
 Response: ONLY the modified full data list.`;
 
 const defaultSettings = {
@@ -176,21 +179,21 @@ const TEXT = {
     PANEL_TITLE: "用户设定编织者 Pro",
     BTN_TITLE: "打开设定生成器",
     TOAST_SAVE_SUCCESS: (name) => `Persona "${name}" 已保存并覆盖！`,
-    TOAST_WI_SUCCESS: (book) => `已实时更新世界书: ${book}`,
+    TOAST_WI_SUCCESS: (book) => `已写入世界书: ${book}`,
     TOAST_WI_FAIL: "当前角色未绑定世界书，无法同步",
     TOAST_WI_ERROR: "TavernHelper API 未加载，无法写入世界书",
     TOAST_SNAPSHOT: "已存入草稿箱"
 };
 
 let historyCache = [];
-let templateKeysCache = [];
+let templateKeysCache = []; 
 let promptsCache = { initial: defaultSystemPromptInitial, refine: defaultSystemPromptRefine };
 let availableWorldBooks = []; 
 let isEditingTags = false; 
-let checkInterval = null;
+let checkInterval = null; 
 
 // ============================================================================
-// 1. 核心数据解析逻辑 (支持中文冒号)
+// 1. 核心数据解析逻辑 [需求3: 中英文冒号兼容]
 // ============================================================================
 
 function parseTextToMap(text) {
@@ -201,13 +204,13 @@ function parseTextToMap(text) {
     lines.forEach((line, index) => {
         if (!line.trim()) return;
         
-        // [需求3] 同时匹配中文和英文冒号
+        // 匹配中文或英文冒号
         const match = line.match(/[:：]/);
         if (!match) return;
+        
         const idx = match.index;
-
         let rawKey = line.substring(0, idx).trim();
-        // 清洗 Key
+        // 剔除所有符号
         let cleanKey = rawKey.replace(/[^\u4e00-\u9fa5a-zA-Z0-9\s]/g, '').trim(); 
         let val = line.substring(idx + 1).trim();
 
@@ -388,45 +391,62 @@ async function getContextWorldBooks(extras = []) {
     return Array.from(books).filter(Boolean);
 }
 
+// [核心修复] 世界书 Loading - 混合策略
 async function getWorldBookEntries(bookName) {
-    let entriesData = null;
-    if (window.TavernHelper && typeof window.TavernHelper.getLorebookEntries === 'function') {
-        try {
-             const entries = await window.TavernHelper.getLorebookEntries(bookName);
-             return entries.map(e => ({
-                uid: e.uid,
-                displayName: e.comment || (Array.isArray(e.keys) ? e.keys.join(', ') : e.keys) || "无标题",
-                content: e.content || "",
-                enabled: e.enabled
-             }));
-        } catch(e) {}
-    }
+    let entries = [];
+    let loaded = false;
 
+    // 策略 1: SillyTavern 原生方法 (最推荐)
     if (window.SillyTavern && typeof window.SillyTavern.loadWorldInfo === 'function') {
         try {
             const data = await window.SillyTavern.loadWorldInfo(bookName);
-            if (data) entriesData = data.entries;
-        } catch (e) { console.warn("[PW] ST loadWorldInfo error:", e); }
+            if (data && data.entries) {
+                entries = Object.values(data.entries).map(e => ({
+                    uid: e.uid,
+                    displayName: e.comment || (Array.isArray(e.key) ? e.key.join(', ') : e.key) || "无标题",
+                    content: e.content || "",
+                    enabled: !e.disable && e.enabled !== false
+                }));
+                loaded = true;
+            }
+        } catch (e) { console.warn("[PW] ST loadWorldInfo fail:", e); }
     }
-    if (!entriesData) {
+
+    // 策略 2: API Fetch 降级
+    if (!loaded) {
         try {
             const headers = getRequestHeaders();
             const response = await fetch('/api/worldinfo/get', { method: 'POST', headers, body: JSON.stringify({ name: bookName }) });
             if (response.ok) {
                 const data = await response.json();
-                entriesData = data.entries;
+                if (data && data.entries) {
+                    entries = Object.values(data.entries).map(e => ({
+                        uid: e.uid,
+                        displayName: e.comment || (Array.isArray(e.key) ? e.key.join(', ') : e.key) || "无标题",
+                        content: e.content || "",
+                        enabled: !e.disable && e.enabled !== false
+                    }));
+                    loaded = true;
+                }
             }
-        } catch (e) { console.error("[PW] API fetch error:", e); }
+        } catch (e) { console.error("[PW] API fetch fail:", e); }
     }
-    if (entriesData) {
-        return Object.values(entriesData).map(e => ({
-            uid: e.uid,
-            displayName: e.comment || (Array.isArray(e.key) ? e.key.join(', ') : e.key) || "无标题",
-            content: e.content || "",
-            enabled: !e.disable && e.enabled !== false
-        }));
+
+    // 策略 3: TavernHelper (最后的尝试)
+    if (!loaded && window.TavernHelper && typeof window.TavernHelper.getLorebookEntries === 'function') {
+        try {
+             const helperEntries = await window.TavernHelper.getLorebookEntries(bookName);
+             entries = helperEntries.map(e => ({
+                uid: e.uid,
+                displayName: e.comment || (Array.isArray(e.keys) ? e.keys.join(', ') : e.keys) || "无标题",
+                content: e.content || "",
+                enabled: e.enabled
+             }));
+             loaded = true;
+        } catch(e) {}
     }
-    return [];
+
+    return entries;
 }
 
 async function runGeneration(data, apiConfig) {
@@ -440,8 +460,7 @@ async function runGeneration(data, apiConfig) {
         wiText = `\n[Context from World Info]:\n${data.wiContext.join('\n')}\n`;
     }
 
-    // [需求1] 构建 YAML 骨架作为 Format 要求
-    const formatSkeleton = templateKeysCache.map(t => `${t.name}: ${t.value || ''}`).join('\n');
+    const tagsList = templateKeysCache.map(t => t.name).join(', ');
     
     let systemTemplate = data.mode === 'refine' ? promptsCache.refine : promptsCache.initial;
     
@@ -449,8 +468,7 @@ async function runGeneration(data, apiConfig) {
         .replace(/{{user}}/g, currentName)
         .replace(/{{char}}/g, charName)
         .replace(/{{wi}}/g, wiText)
-        .replace(/{{tags}}/g, templateKeysCache.map(t=>t.name).join(', ')) // 兼容旧变量
-        .replace(/{{format}}/g, formatSkeleton) // [需求1] 注入格式
+        .replace(/{{tags}}/g, tagsList)
         .replace(/{{input}}/g, data.request)
         .replace(/{{current}}/g, data.currentText || "");
 
@@ -466,6 +484,34 @@ async function runGeneration(data, apiConfig) {
         responseContent = await context.generateQuietPrompt(systemPrompt, false, false, "System");
     }
     return responseContent.replace(/```[a-z]*\n?/g, '').replace(/```/g, '').trim();
+}
+
+// [需求4] API 测试函数
+async function testApiConnection() {
+    const url = $('#pw-api-url').val();
+    const key = $('#pw-api-key').val();
+    const model = $('#pw-api-model').val();
+    
+    if (!url || !key) return toastr.warning("请先填写 URL 和 Key");
+    
+    const $btn = $('#pw-api-test-btn').html('<i class="fas fa-spinner fa-spin"></i>');
+    try {
+        const res = await fetch(`${url.replace(/\/$/, '')}/chat/completions`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` },
+            body: JSON.stringify({
+                model: model || 'gpt-3.5-turbo',
+                messages: [{ role: 'user', content: 'Hi' }],
+                max_tokens: 5
+            })
+        });
+        if(res.ok) toastr.success("连接成功！");
+        else throw new Error(`Status: ${res.status}`);
+    } catch(e) {
+        toastr.error("连接失败: " + e.message);
+    } finally {
+        $btn.html('<i class="fa-solid fa-plug"></i> 测试');
+    }
 }
 
 // ============================================================================
@@ -509,11 +555,11 @@ async function openCreatorPopup() {
                 <div class="pw-info-display"><div class="pw-info-item"><i class="fa-solid fa-user"></i><span id="pw-display-name">${currentName}</span></div></div>
 
                 <div>
-                    <div class="pw-tags-header">
-                        <span class="pw-tags-label">模版字段管理 (点击填入)</span>
-                        <div class="pw-tags-actions">
-                            <span class="pw-insert-template-btn" id="pw-btn-insert-template" title="插入完整人设模版"><i class="fa-solid fa-file-invoice"></i> 插入模版</span>
-                            <span class="pw-tags-edit-toggle" id="pw-toggle-edit-tags">编辑字段</span>
+                    <div class="pw-template-header">
+                        <span class="pw-template-label">模版结构管理 (影响生成结构)</span>
+                        <div class="pw-template-actions">
+                            <span class="pw-insert-btn" id="pw-btn-insert-template" title="将完整YAML模版插入输入框"><i class="fa-solid fa-file-invoice"></i> 插入模版</span>
+                            <span class="pw-edit-toggle" id="pw-toggle-edit-tags">编辑字段</span>
                         </div>
                     </div>
                     <div class="pw-tags-container" id="pw-tags-list"></div>
@@ -562,17 +608,18 @@ async function openCreatorPopup() {
         <div id="pw-view-api" class="pw-view">
             <div class="pw-scroll-area">
                 <div class="pw-card-section">
-                    <div class="pw-row"><label>API 来源</label><select id="pw-api-source" class="pw-input" style="flex:1;"><option value="main" ${config.apiSource === 'main'?'selected':''}>主 API</option><option value="independent" ${config.apiSource === 'independent'?'selected':''}>独立 API</option></select></div>
+                    <div class="pw-row pw-api-row"><label class="pw-api-label">API 来源</label><select id="pw-api-source" class="pw-input" style="flex:1;"><option value="main" ${config.apiSource === 'main'?'selected':''}>主 API</option><option value="independent" ${config.apiSource === 'independent'?'selected':''}>独立 API</option></select></div>
                     <div id="pw-indep-settings" style="display:${config.apiSource === 'independent' ? 'flex' : 'none'}; flex-direction:column; gap:15px;">
-                        <div class="pw-row"><label>URL</label><input type="text" id="pw-api-url" class="pw-input" value="${config.indepApiUrl}" style="flex:1;"></div>
-                        <div class="pw-row"><label>Key</label><input type="password" id="pw-api-key" class="pw-input" value="${config.indepApiKey}" style="flex:1;"></div>
-                        <!-- [需求4] 模型和测试按钮 -->
-                        <div class="pw-row"><label>Model</label>
-                            <div style="flex:1; display:flex; gap:5px; width:100%; flex-wrap: wrap;">
-                                <input type="text" id="pw-api-model" class="pw-input" value="${config.indepApiModel}" list="pw-model-list" style="flex:1; min-width: 120px;">
+                        <div class="pw-row pw-api-row"><label class="pw-api-label">URL</label><input type="text" id="pw-api-url" class="pw-input" value="${config.indepApiUrl}" style="flex:1;"></div>
+                        <div class="pw-row pw-api-row"><label class="pw-api-label">Key</label><input type="password" id="pw-api-key" class="pw-input" value="${config.indepApiKey}" style="flex:1;"></div>
+                        <div class="pw-row pw-api-row">
+                            <label class="pw-api-label">Model</label>
+                            <div style="flex:1; display:flex; gap:5px; width:100%;">
+                                <input type="text" id="pw-api-model" class="pw-input" value="${config.indepApiModel}" list="pw-model-list" style="flex:1;">
                                 <datalist id="pw-model-list"></datalist>
-                                <button id="pw-api-fetch" class="pw-btn primary" title="获取模型列表" style="width:auto;"><i class="fa-solid fa-cloud-download-alt"></i></button>
-                                <button id="pw-api-test" class="pw-btn primary" title="测试连接" style="width:auto; color: #9ece6a;"><i class="fa-solid fa-plug"></i></button>
+                                <!-- [需求4] 手机适配 & 测试按钮 -->
+                                <button id="pw-api-fetch" class="pw-btn primary pw-api-fetch-btn" title="获取模型" style="width:auto;"><i class="fa-solid fa-cloud-download-alt"></i></button>
+                                <button id="pw-api-test-btn" class="pw-btn primary" title="测试连接" style="width:auto;"><i class="fa-solid fa-plug"></i> 测试</button>
                             </div>
                         </div>
                     </div>
@@ -583,7 +630,7 @@ async function openCreatorPopup() {
                     <div class="pw-var-btns">
                         <div class="pw-var-btn" data-ins="{{user}}">User名</div>
                         <div class="pw-var-btn" data-ins="{{char}}">Char名</div>
-                        <div class="pw-var-btn" data-ins="{{format}}">模版骨架</div>
+                        <div class="pw-var-btn" data-ins="{{tags}}">模版字段</div>
                         <div class="pw-var-btn" data-ins="{{input}}">用户要求</div>
                         <div class="pw-var-btn" data-ins="{{wi}}">世界书内容</div>
                     </div>
@@ -640,13 +687,16 @@ function bindEvents() {
         if($(this).data('tab') === 'history') renderHistoryList(); 
     });
 
-    // [需求2] 插入完整模版
+    // 插入完整模版
     $(document).on('click.pw', '#pw-btn-insert-template', function() {
         const cur = $('#pw-request').val();
         const newVal = cur ? (cur + '\n\n' + fullTemplateText) : fullTemplateText;
         $('#pw-request').val(newVal).focus();
         toastr.success("完整模版已插入");
     });
+
+    // API 测试按钮事件
+    $(document).on('click.pw', '#pw-api-test-btn', testApiConnection);
 
     $(document).on('click.pw', '.pw-var-btn', function() {
         const ins = $(this).data('ins');
@@ -867,31 +917,7 @@ function bindEvents() {
 
     $(document).on('click.pw', '#pw-toggle-edit-tags', () => { isEditingTags = !isEditingTags; renderTagsList(); });
     $(document).on('change.pw', '#pw-api-source', function() { $('#pw-indep-settings').toggle($(this).val() === 'independent'); });
-    
-    // [需求4] API 测试逻辑
-    $(document).on('click.pw', '#pw-api-test', async function() {
-        const url = $('#pw-api-url').val();
-        const key = $('#pw-api-key').val();
-        const $btn = $(this).prop('disabled', true).html('<i class="fas fa-spinner fa-spin"></i>');
-        
-        try {
-            const res = await fetch(`${url.replace(/\/$/, '')}/models`, { 
-                method: 'GET', 
-                headers: { 'Authorization': `Bearer ${key}` } 
-            });
-            if (res.ok) {
-                toastr.success("连接成功！API 工作正常。");
-            } else {
-                throw new Error(res.statusText);
-            }
-        } catch (e) {
-            toastr.error(`连接失败: ${e.message}`);
-        } finally {
-            $btn.prop('disabled', false).html('<i class="fa-solid fa-plug"></i>');
-        }
-    });
-
-    $(document).on('click.pw', '#pw-api-fetch', async function() { /* same fetch logic */ });
+    $(document).on('click.pw', '#pw-api-fetch', async function() { /* same */ });
     
     $(document).on('click.pw', '#pw-api-save', () => { 
         promptsCache.initial = $('#pw-prompt-initial').val();
@@ -920,7 +946,7 @@ function bindEvents() {
     $(document).on('click.pw', '#pw-history-clear-all', function() { if(confirm("清空?")){historyCache=[];saveData();renderHistoryList();} });
 }
 
-// ... 辅助渲染函数 ...
+// ... 辅助渲染函数 (Tags改为TemplateKeys) ...
 const renderTagsList = () => {
     const $container = $('#pw-tags-list').empty();
     const $toggleBtn = $('#pw-toggle-edit-tags');
@@ -929,15 +955,12 @@ const renderTagsList = () => {
     
     templateKeysCache.forEach((tag, index) => {
         if (isEditingTags) {
-            const $row = $(`<div class="pw-tag-edit-row"><input class="pw-tag-edit-input t-name" value="${tag.name}" placeholder="字段Key"><input class="pw-tag-edit-input t-val" value="${tag.value}" placeholder="预填内容"><div class="pw-tag-del-btn"><i class="fa-solid fa-trash"></i></div></div>`);
-            $row.find('input').on('input', function() { tag.name = $row.find('.t-name').val(); tag.value = $row.find('.t-val').val(); saveData(); });
+            const $row = $(`<div class="pw-tag-edit-row"><input class="pw-tag-edit-input t-name" value="${tag.name}" placeholder="字段Key"><div class="pw-tag-del-btn"><i class="fa-solid fa-trash"></i></div></div>`);
+            $row.find('input').on('input', function() { tag.name = $row.find('.t-name').val(); saveData(); });
             $row.find('.pw-tag-del-btn').on('click', () => { if (confirm("删除?")) { templateKeysCache.splice(index, 1); saveData(); renderTagsList(); } });
             $container.append($row);
         } else {
-            const valShow = tag.value.length > 5 ? tag.value.substring(0,5) + ".." : tag.value;
-            const html = valShow ? `${tag.name}: <span class="pw-tag-val">${valShow}</span>` : tag.name;
-            const $chip = $(`<div class="pw-tag-chip"><span>${html}</span></div>`);
-            
+            const $chip = $(`<div class="pw-tag-chip"><span>${tag.name}</span></div>`);
             $chip.on('click', () => {
                 const $text = $('#pw-request');
                 const cur = $text.val();
@@ -958,6 +981,7 @@ const renderTagsList = () => {
     }
 };
 
+// History 和 WiBooks 渲染函数保持与上个版本一致...
 const renderHistoryList = () => {
     loadData();
     const $list = $('#pw-history-list').empty();
@@ -1024,7 +1048,7 @@ function initInterval() {
         if ($(`#${BUTTON_ID}`).length === 0 && $('.persona_controls_buttons_block').length > 0) {
             addPersonaButton();
         }
-    }, 1500);
+    }, 1500); 
 }
 
 jQuery(async () => {
