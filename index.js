@@ -60,7 +60,7 @@ const defaultYamlTemplate =
   生活相关:
   爱好特长:
 
-NSFW_成人内容:
+NSFW相关内容:
   性相关特征:
     性经验: 
     性取向: 
