@@ -409,12 +409,11 @@ async function openCreatorPopup() {
                             <span class="pw-tags-edit-toggle" id="pw-toggle-edit-template">编辑模版</span>
                         </div>
                     </div>
-                    <!-- 模版芯片区域 -->
+                    
                     <div class="pw-tags-container" id="pw-template-chips"></div>
-                    <!-- 模版编辑器 & 快捷键 -->
+                    
                     <div class="pw-template-editor-area" id="pw-template-editor">
                         <textarea id="pw-template-text" class="pw-template-textarea">${currentTemplate}</textarea>
-                        <!-- 快捷键栏底部 -->
                         <div class="pw-template-footer">
                             <div class="pw-shortcut-bar">
                                 <div class="pw-shortcut-btn" data-key="  ">下一层</div>
@@ -521,7 +520,8 @@ async function openCreatorPopup() {
     `;
 
     callPopup(html, 'text', '', { wide: true, large: true, okButton: "关闭" });
-    bindEvents();
+    
+    // [Fix] 不在每次打开时绑定事件，只初始化视图
     renderTemplateChips(); 
     renderWiBooks();
     
@@ -533,12 +533,13 @@ async function openCreatorPopup() {
 }
 
 // ============================================================================
-// 4. 事件绑定
+// 4. 事件绑定 - 单例模式 [彻底防卡死]
 // ============================================================================
 
-function bindEvents() {
-    $(document).off('.pw');
+function bindGlobalEvents() {
+    $(document).off('.pw'); // 清除所有旧的 .pw 命名空间事件
 
+    // Tab 切换
     $(document).on('click.pw', '.pw-tab', function() {
         $('.pw-tab').removeClass('active'); $(this).addClass('active');
         $('.pw-view').removeClass('active');
@@ -546,6 +547,7 @@ function bindEvents() {
         if($(this).data('tab') === 'history') renderHistoryList(); 
     });
 
+    // 模版编辑器逻辑
     $(document).on('click.pw', '#pw-toggle-edit-template', () => {
         isEditingTemplate = !isEditingTemplate;
         if(isEditingTemplate) {
@@ -571,6 +573,7 @@ function bindEvents() {
         toastr.success("模版已更新");
     });
 
+    // 编辑器快捷键
     $(document).on('click.pw', '.pw-shortcut-btn', function() {
         const key = $(this).data('key');
         const $text = $('#pw-template-text');
@@ -598,7 +601,7 @@ function bindEvents() {
         }
     });
 
-    // [优化] 防卡死选区检查
+    // 选区检测防抖
     let selectionTimeout;
     const checkSelection = () => {
         clearTimeout(selectionTimeout);
@@ -612,7 +615,7 @@ function bindEvents() {
             } else {
                 if ($btn.is(':visible')) $btn.stop(true, true).fadeOut(200);
             }
-        }, 100); 
+        }, 150); // 150ms 防抖
     };
     $(document).on('touchend mouseup keyup', '#pw-result-text', checkSelection);
 
@@ -625,11 +628,10 @@ function bindEvents() {
         if (selectedText) {
             const $input = $('#pw-refine-input');
             const cur = $input.val();
-            // [文案]
+            // [文案更新]
             const newText = `对 "${selectedText}" 的修改意见为：`;
             $input.val(cur ? cur + '\n' + newText : newText).focus();
             
-            // 优化：使用 requestAnimationFrame 处理高度调整，防止布局抖动
             requestAnimationFrame(() => {
                 const el = $input[0];
                 el.style.height = 'auto';
@@ -637,7 +639,7 @@ function bindEvents() {
             });
 
             textarea.setSelectionRange(end, end);
-            checkSelection();
+            checkSelection(); // 触发关闭
         }
     });
 
@@ -670,7 +672,7 @@ function bindEvents() {
     };
     $(document).on('input.pw change.pw', '#pw-request, #pw-result-text, #pw-wi-toggle, .pw-input, .pw-select', saveCurrentState);
 
-    // Diff Tabs
+    // Diff Tabs 切换
     $(document).on('click.pw', '.pw-diff-tab', function() {
         $('.pw-diff-tab').removeClass('active');
         $(this).addClass('active');
@@ -687,6 +689,7 @@ function bindEvents() {
         }
     });
 
+    // 润色请求
     $(document).on('click.pw', '#pw-btn-refine', async function() {
         const refineReq = $('#pw-refine-input').val();
         if (!refineReq) return toastr.warning("请输入润色意见");
@@ -742,6 +745,7 @@ function bindEvents() {
                 toastr.info("无修改，但您可以在“新文本原文”中手动编辑");
             }
             
+            // 默认显示 Diff Tab
             $('.pw-diff-tab[data-view="diff"]').click();
             $('#pw-diff-overlay').fadeIn();
             $('#pw-refine-input').val('');
@@ -749,13 +753,7 @@ function bindEvents() {
         finally { $btn.removeClass('fa-spinner fa-spin').addClass('fa-magic'); }
     });
 
-    $(document).on('click.pw', '.pw-diff-opt:not(.single-view)', function() {
-        $(this).siblings().removeClass('selected'); $(this).addClass('selected');
-        const val = decodeURIComponent($(this).data('val')); 
-        $(this).closest('.pw-diff-row').find('.pw-diff-custom-input').val(val);
-    });
-
-    // [需求2] 保存逻辑
+    // 智能保存：根据 Tab 决定数据源
     $(document).on('click.pw', '#pw-diff-confirm', function() {
         const activeTab = $('.pw-diff-tab.active').data('view');
         
@@ -778,11 +776,18 @@ function bindEvents() {
 
     $(document).on('click.pw', '#pw-diff-cancel', () => $('#pw-diff-overlay').fadeOut());
 
+    $(document).on('click.pw', '.pw-diff-opt:not(.single-view)', function() {
+        $(this).siblings().removeClass('selected'); $(this).addClass('selected');
+        const val = decodeURIComponent($(this).data('val')); 
+        $(this).closest('.pw-diff-row').find('.pw-diff-custom-input').val(val);
+    });
+
     $(document).on('click.pw', '#pw-btn-gen', async function() {
         const req = $('#pw-request').val();
         if (!req) return toastr.warning("请输入要求");
         const $btn = $(this).prop('disabled', true).html('<i class="fas fa-spinner fa-spin"></i>');
         
+        // 重置
         $('#pw-refine-input').val('');
         $('#pw-result-text').val('');
         
@@ -803,7 +808,6 @@ function bindEvents() {
         finally { $btn.prop('disabled', false).html('生成设定'); }
     });
 
-    // [需求3] 提示文案
     $(document).on('click.pw', '#pw-wi-sync-btn', function() {
         $(this).toggleClass('active');
         const isActive = $(this).hasClass('active');
@@ -1009,9 +1013,13 @@ function addPersonaButton() {
     container.prepend(newButton);
 }
 
+// [防卡死核心] 智能轮询
 function startPolling() {
     if (pollInterval) clearInterval(pollInterval);
     pollInterval = setInterval(() => {
+        // 如果页面不可见，跳过检测（省电/防卡）
+        if (document.hidden) return;
+
         const container = $('.persona_controls_buttons_block');
         const btn = $(`#${BUTTON_ID}`);
         if (container.length > 0 && btn.length === 0) {
@@ -1022,6 +1030,7 @@ function startPolling() {
 
 jQuery(async () => {
     injectStyles();
+    bindGlobalEvents(); // [Fix] 只在初始化时绑定一次事件！
     addPersonaButton();
     startPolling();
 });
