@@ -2,8 +2,8 @@ import { extension_settings, getContext } from "../../../extensions.js";
 import { saveSettingsDebounced, callPopup, getRequestHeaders } from "../../../../script.js";
 
 const extensionName = "st-persona-weaver";
-const STORAGE_KEY_HISTORY = 'pw_history_v20';
-const STORAGE_KEY_STATE = 'pw_state_v20'; 
+const STORAGE_KEY_HISTORY = 'pw_history_v21'; // 版本升级清理
+const STORAGE_KEY_STATE = 'pw_state_v21'; 
 const STORAGE_KEY_TAGS = 'pw_tags_v12';
 const BUTTON_ID = 'pw_persona_tool_btn';
 
@@ -24,7 +24,7 @@ const TEXT = {
     PANEL_TITLE: "用户设定编织者 Pro",
     BTN_TITLE: "打开设定生成器",
     TOAST_SAVE_SUCCESS: (name) => `Persona "${name}" 已保存并覆盖！`,
-    TOAST_WI_SUCCESS: (book) => `已写入角色绑定的世界书: ${book}`,
+    TOAST_WI_SUCCESS: (book) => `已写入世界书: ${book}`,
     TOAST_WI_FAIL: "当前角色未绑定世界书，无法同步保存条目",
     TOAST_SNAPSHOT: "已存入历史记录"
 };
@@ -55,6 +55,7 @@ function parseTextToMap(text) {
     return map;
 }
 
+// 收集所有勾选的 WI 内容
 async function collectActiveWorldInfoContent() {
     let content = [];
     try {
@@ -64,6 +65,7 @@ async function collectActiveWorldInfoContent() {
         
         for (const bookName of allBooks) {
             const entries = await getWorldBookEntries(bookName);
+            // 关键：逻辑没有变，只要是 enabled 就发给 LLM
             const enabledEntries = entries.filter(e => e.enabled);
             if (enabledEntries.length > 0) {
                 content.push(`\n--- World Book: ${bookName} ---`);
@@ -77,7 +79,7 @@ async function collectActiveWorldInfoContent() {
 }
 
 // ============================================================================
-// 2. 系统函数
+// 2. 存储与系统函数
 // ============================================================================
 
 function loadData() {
@@ -244,6 +246,9 @@ async function openCreatorPopup() {
         return `<option disabled>未找到世界书</option>`;
     };
 
+    // 默认不勾选，除非用户手动勾了并保存过状态
+    const wiChecked = savedState.wiChecked ? 'checked' : '';
+
     const html = `
     <div class="pw-wrapper">
         <div class="pw-header">
@@ -261,7 +266,7 @@ async function openCreatorPopup() {
                 <div class="pw-info-display"><div class="pw-info-item"><i class="fa-solid fa-user"></i><span id="pw-display-name">${currentName}</span></div></div>
 
                 <div>
-                    <div class="pw-tags-header"><span class="pw-tags-label">快速设定 (点击填入)</span><span class="pw-tags-edit-toggle" id="pw-toggle-edit-tags">编辑标签</span></div>
+                    <div class="pw-tags-header"><span class="pw-tags-label">快速设定 (点击填入生成框)</span><span class="pw-tags-edit-toggle" id="pw-toggle-edit-tags">编辑标签</span></div>
                     <div class="pw-tags-container" id="pw-tags-list"></div>
                 </div>
 
@@ -271,9 +276,7 @@ async function openCreatorPopup() {
                 <div id="pw-result-area" style="display:none; margin-top:15px;">
                     <div class="pw-relative-container">
                         <div style="font-weight:bold; color:#5b8db8; margin-bottom:5px;"><i class="fa-solid fa-list-ul"></i> 设定详情</div>
-                        
-                        <!-- 悬浮引用按钮 -->
-                        <div id="pw-float-quote-btn" class="pw-float-quote-btn"><i class="fa-solid fa-pen-to-square"></i> 引用选中</div>
+                        <div id="pw-float-quote-btn" class="pw-float-quote-btn"><i class="fa-solid fa-pen-to-square"></i> 修改此段</div>
                     </div>
                     
                     <textarea id="pw-result-text" class="pw-result-textarea" placeholder="生成的结果将显示在这里..."></textarea>
@@ -293,7 +296,7 @@ async function openCreatorPopup() {
                     <div class="pw-mini-btn" id="pw-snapshot"><i class="fa-solid fa-save"></i> 存入历史</div>
                 </div>
                 <div class="pw-footer-right">
-                    <label class="pw-wi-check-container" title="仅同步到角色绑定的世界书"><input type="checkbox" id="pw-wi-toggle"><span>同步进世界书</span></label>
+                    <label class="pw-wi-check-container" title="仅同步到角色绑定的世界书"><input type="checkbox" id="pw-wi-toggle" ${wiChecked}><span>同步进世界书</span></label>
                     <button id="pw-btn-apply" class="pw-btn save">保存并覆盖当前设定</button>
                 </div>
             </div>
@@ -313,7 +316,7 @@ async function openCreatorPopup() {
         <div id="pw-view-history" class="pw-view"><div class="pw-scroll-area">
             <div class="pw-search-box">
                 <i class="fa-solid fa-search pw-search-icon"></i>
-                <input type="text" id="pw-history-search" class="pw-input pw-search-input" placeholder="搜索历史...">
+                <input type="text" id="pw-history-search" class="pw-search-input" placeholder="搜索历史...">
                 <i class="fa-solid fa-times pw-search-clear" id="pw-history-search-clear" title="清空搜索"></i>
             </div>
             <div id="pw-history-list" style="display:flex; flex-direction:column;"></div>
@@ -327,10 +330,12 @@ async function openCreatorPopup() {
     renderTagsList();
     renderWiBooks();
     
+    // 恢复状态 (包括润色意见)
     if (savedState.resultText) {
         $('#pw-result-text').val(savedState.resultText);
         $('#pw-result-area').show();
-        setTimeout(() => $('#pw-refine-input').trigger('input'), 50); // 恢复高度
+        if(savedState.refineRequest) $('#pw-refine-input').val(savedState.refineRequest);
+        setTimeout(() => $('#pw-refine-input').trigger('input'), 50);
     }
 }
 
@@ -351,7 +356,7 @@ function bindEvents() {
         if($(this).data('tab') === 'history') renderHistoryList(); 
     });
 
-    // [新增] 悬浮引用按钮逻辑
+    // 悬浮引用逻辑
     const checkSelection = () => {
         const el = document.getElementById('pw-result-text');
         if (!el) return;
@@ -359,11 +364,8 @@ function bindEvents() {
         if (hasSelection) $('#pw-float-quote-btn').fadeIn(200).css('display', 'flex');
         else $('#pw-float-quote-btn').fadeOut(200);
     };
-    
-    // 监听选区变化 (touchend for mobile, keyup/mouseup for pc)
     $(document).on('touchend mouseup keyup', '#pw-result-text', checkSelection);
 
-    // 点击悬浮按钮引用
     $(document).on('click.pw', '#pw-float-quote-btn', function(e) {
         e.preventDefault(); e.stopPropagation();
         const textarea = document.getElementById('pw-result-text');
@@ -374,20 +376,23 @@ function bindEvents() {
         if (selectedText) {
             const $input = $('#pw-refine-input');
             const cur = $input.val();
-            const newText = `将 "${selectedText}" 修改为: `;
+            // 修改文案
+            const newText = `修改此段 "${selectedText}": `;
             $input.val(cur ? cur + '\n' + newText : newText).focus();
             adjustHeight($input[0]);
-            // 清除选择并隐藏按钮
             textarea.setSelectionRange(end, end);
             checkSelection();
         }
     });
 
+    // 自动保存
     const saveCurrentState = () => {
         saveState({
             request: $('#pw-request').val(),
             resultText: $('#pw-result-text').val(),
+            refineRequest: $('#pw-refine-input').val(), // 保存润色草稿
             hasResult: $('#pw-result-area').is(':visible'),
+            wiChecked: $('#pw-wi-toggle').is(':checked'), // 保存勾选状态
             localConfig: {
                 apiSource: $('#pw-api-source').val(),
                 indepApiUrl: $('#pw-api-url').val(),
@@ -397,9 +402,9 @@ function bindEvents() {
             }
         });
     };
-    $(document).on('input.pw change.pw', '#pw-request, #pw-result-text, .pw-input', saveCurrentState);
+    $(document).on('input.pw change.pw', '#pw-request, #pw-result-text, #pw-refine-input, #pw-wi-toggle', saveCurrentState);
 
-    // 润色逻辑
+    // 润色 (Diff)
     $(document).on('click.pw', '#pw-btn-refine', async function() {
         const refineReq = $('#pw-refine-input').val();
         if (!refineReq) return toastr.warning("请输入润色意见");
@@ -464,7 +469,7 @@ function bindEvents() {
         });
         $('#pw-result-text').val(finalLines.join('\n'));
         $('#pw-diff-overlay').fadeOut();
-        saveCurrentState();
+        saveCurrentState(); // 立即保存
         toastr.success("修改已应用");
     });
 
@@ -486,7 +491,7 @@ function bindEvents() {
         finally { $btn.prop('disabled', false).html('生成设定'); }
     });
 
-    // 保存并覆盖逻辑 (World Info 修复)
+    // [核心修复] 保存到世界书
     $(document).on('click.pw', '#pw-btn-apply', async function() {
         const content = $('#pw-result-text').val();
         if (!content) return toastr.warning("内容为空");
@@ -497,35 +502,49 @@ function bindEvents() {
 
         if ($('#pw-wi-toggle').is(':checked')) {
             const context = getContext();
-            const char = context.characters[context.characterId];
-            const targetBook = char?.data?.character_book?.name || char?.data?.extensions?.world || char?.world;
+            const boundBooks = await getContextWorldBooks();
+            let targetBook = boundBooks[0]; // 严格使用绑定书
 
             if (targetBook) {
                 try {
                     const h = getRequestHeaders();
+                    // 1. 获取完整书内容
                     const r = await fetch('/api/worldinfo/get', { method: 'POST', headers: h, body: JSON.stringify({ name: targetBook }) });
                     if (r.ok) {
                         const d = await r.json();
                         if (!d.entries) d.entries = {};
                         
                         const entryName = `User: ${name}`;
-                        // 查找现有 ID 或新建
+                        
+                        // 2. 查找现有 ID
                         let targetId = Object.keys(d.entries).find(uid => d.entries[uid].comment === entryName);
+                        
+                        // 3. 如果没找到，计算最大ID
                         if (!targetId) {
                             const ids = Object.keys(d.entries).map(Number);
                             targetId = ids.length ? Math.max(...ids) + 1 : 0;
                         }
 
+                        // 4. 写入对象 (确保 uid 是数字)
                         d.entries[targetId] = { 
-                            uid: Number(targetId), key: [name, "User"], content: content, 
-                            comment: entryName, enabled: true, selective: true 
+                            uid: Number(targetId), 
+                            key: [name, "User"], 
+                            content: content, 
+                            comment: entryName, 
+                            enabled: true, 
+                            selective: true 
                         };
                         
-                        // [关键] 回传整个数据对象，确保保存成功
-                        await fetch('/api/worldinfo/edit', { method: 'POST', headers: h, body: JSON.stringify({ name: targetBook, data: d }) });
-                        toastr.success(TEXT.TOAST_WI_SUCCESS(targetBook));
+                        // 5. 回传整个数据对象
+                        const saveR = await fetch('/api/worldinfo/edit', { method: 'POST', headers: h, body: JSON.stringify({ name: targetBook, data: d }) });
+                        
+                        if (saveR.ok) {
+                            toastr.success(TEXT.TOAST_WI_SUCCESS(targetBook));
+                        } else {
+                            toastr.error("保存世界书失败，API返回错误");
+                        }
                     }
-                } catch(e) { console.error("WI Error:", e); }
+                } catch(e) { console.error("WI Error:", e); toastr.error("保存世界书出错: " + e.message); }
             } else { 
                 toastr.warning(TEXT.TOAST_WI_FAIL); 
             }
@@ -534,10 +553,10 @@ function bindEvents() {
     });
 
     $(document).on('click.pw', '#pw-clear', function() {
-        if(confirm("确定清空？")) { $('#pw-request').val(''); $('#pw-result-area').hide(); $('#pw-result-text').val(''); saveCurrentState(); }
+        if(confirm("确定清空？")) { $('#pw-request').val(''); $('#pw-result-area').hide(); $('#pw-result-text').val(''); $('#pw-refine-input').val(''); saveCurrentState(); }
     });
     
-    // 存入历史 (持久化 + 标题)
+    // 存入历史 (持久化 + 标题编辑)
     $(document).on('click.pw', '#pw-snapshot', function() {
         const text = $('#pw-result-text').val();
         if (!text) return toastr.warning("内容为空");
@@ -555,7 +574,7 @@ function bindEvents() {
         toastr.success(TEXT.TOAST_SNAPSHOT);
     });
 
-    // 历史标题修改
+    // 历史标题保存
     $(document).on('blur.pw', '.pw-hist-title-edit', function() {
         const newTitle = $(this).val();
         const index = $(this).data('index');
@@ -583,7 +602,7 @@ function bindEvents() {
     $(document).on('click.pw', '#pw-history-clear-all', function() { if(confirm("清空?")){historyCache=[];saveData();renderHistoryList();} });
 }
 
-// 辅助渲染
+// ... 辅助渲染函数 ...
 const renderTagsList = () => {
     const $container = $('#pw-tags-list').empty();
     const $toggleBtn = $('#pw-toggle-edit-tags');
@@ -607,6 +626,7 @@ const renderTagsList = () => {
             $container.append($chip);
         }
     });
+    // ... add buttons ...
     const $addBtn = $(`<div class="pw-tag-add-btn"><i class="fa-solid fa-plus"></i> ${isEditingTags ? '新增' : '标签'}</div>`);
     $addBtn.on('click', () => { tagsCache.push({ name: "", value: "" }); saveData(); if (!isEditingTags) isEditingTags = true; renderTagsList(); });
     $container.append($addBtn);
@@ -666,5 +686,4 @@ jQuery(async () => {
     addPersonaButton();
     const observer = new MutationObserver(() => { if ($(`#${BUTTON_ID}`).length === 0 && $('.persona_controls_buttons_block').length > 0) addPersonaButton(); });
     observer.observe(document.body, { childList: true, subtree: true });
-    console.log(`${extensionName} v18 loaded.`);
 });
