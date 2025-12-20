@@ -46,9 +46,9 @@
 
 .pw-template-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
 .pw-template-label { font-weight: bold; opacity: 0.8; font-size: 0.85em; }
-.pw-template-actions { display: flex; gap: 10px; align-items: center; }
+.pw-template-actions { display: flex; gap: 12px; align-items: center; }
 
-/* 模版操作按钮 */
+/* 模版操作按钮 - 更加友好的样式 */
 .pw-action-link { cursor: pointer; font-size: 0.85em; display: flex; align-items: center; gap: 4px; transition: opacity 0.2s; }
 .pw-action-link:hover { opacity: 0.8; }
 .pw-action-link.insert { color: #9ece6a; font-weight: bold; }
@@ -68,15 +68,17 @@
 
 /* 初始请求框 / 模版编辑框 */
 #pw-request {
-    min-height: 250px; 
+    min-height: 300px; 
     transition: min-height 0.3s ease, height 0.3s ease;
-    font-family: 'Consolas', 'Monaco', monospace; /* 方便看对齐 */
+    font-family: 'Consolas', 'Monaco', monospace; /* 代码字体方便看 YAML 缩进 */
     font-size: 0.9em;
+    white-space: pre; /* 保留空格 */
+    overflow-x: auto;
 }
 /* 生成后变小 */
 #pw-request.minimized {
-    min-height: 80px;
-    height: 80px !important;
+    min-height: 100px;
+    height: 100px !important;
 }
 /* 编辑模版模式下高亮边框 */
 #pw-request.editing-mode {
@@ -110,12 +112,14 @@
 
 .pw-result-textarea {
     width: 100%; 
-    min-height: 350px; 
+    min-height: 400px; 
     background: rgba(0, 0, 0, 0.15);
     border: 1px solid var(--SmartThemeBorderColor); border-radius: 6px 6px 0 0; 
     color: var(--smart-theme-body-color); padding: 12px;
-    font-family: inherit; font-size: 1.0em; line-height: 1.6;
-    resize: vertical; outline: none; white-space: pre-wrap; margin-bottom: 0;
+    font-family: 'Consolas', 'Monaco', monospace; /* YAML 友好字体 */
+    font-size: 0.95em; line-height: 1.6;
+    resize: vertical; outline: none; white-space: pre; margin-bottom: 0;
+    overflow-x: auto;
 }
 
 .pw-refine-toolbar {
@@ -136,17 +140,18 @@
 }
 .pw-refine-input:focus { outline: none; background: rgba(0,0,0,0.3); }
 
-/* 竖向润色按钮 */
+/* [需求3] 竖向润色按钮 */
 .pw-tool-btn-vertical {
-    width: 36px; cursor: pointer; opacity: 0.9;
+    width: 40px; cursor: pointer; opacity: 0.9;
     background: rgba(255,255,255,0.08); border-left: 1px solid var(--SmartThemeBorderColor); 
     color: #e0af68;
     display: flex; align-items: center; justify-content: center;
-    font-weight: bold; font-size: 1em;
+    font-weight: bold; font-size: 1.1em;
     writing-mode: vertical-lr; /* 竖排文字 */
     letter-spacing: 4px;
-    padding: 5px 0;
+    padding: 10px 0;
     border-radius: 0 0 6px 0;
+    transition: all 0.2s;
 }
 .pw-tool-btn-vertical:hover { opacity: 1; background: rgba(224, 175, 104, 0.15); }
 
@@ -174,7 +179,7 @@
 .pw-float-quote-btn:active { transform: scale(0.95); }
 
 /* =========================================
-   6. 结构化 Diff 对比视图
+   6. 结构化 Diff 对比视图 (优化对齐)
 ========================================= */
 .pw-diff-container {
     display: flex; flex-direction: column; gap: 8px;
@@ -185,7 +190,11 @@
 .pw-diff-header { font-size: 1.1em; font-weight: bold; color: #e0af68; text-align: center; margin-bottom: 2px; padding-bottom: 8px; border-bottom: 1px solid #333; }
 .pw-diff-scroll { flex: 1; overflow-y: auto; padding-right: 5px; display: flex; flex-direction: column; gap: 10px; }
 .pw-diff-row { background: #222; border: 1px solid #3a3a3a; border-radius: 6px; padding: 8px; display: flex; flex-direction: column; gap: 6px; }
-.pw-diff-attr-name { font-weight: bold; color: #9ece6a; font-size: 0.95em; padding-bottom: 3px; border-bottom: 1px dashed #333; }
+/* 增加路径显示，支持 > 符号 */
+.pw-diff-attr-name { 
+    font-weight: bold; color: #9ece6a; font-size: 0.9em; padding-bottom: 3px; border-bottom: 1px dashed #333; 
+    word-break: break-all;
+}
 .pw-diff-options { display: flex; gap: 8px; }
 .pw-diff-opt { flex: 1; padding: 6px 8px; border: 1px solid #333; border-radius: 4px; cursor: pointer; position: relative; background: #1a1a1a; transition: all 0.1s; min-width: 0; }
 .pw-diff-opt:hover { border-color: #555; }
@@ -239,7 +248,7 @@
 .pw-wi-sync-toggle.active { opacity: 1; border-color: #9ece6a; color: #9ece6a; background: rgba(158, 206, 106, 0.1); }
 
 /* =========================================
-   8. Prompt编辑器, 历史 & API 适配
+   8. Prompt编辑器, 历史 & API 适配 [需求4]
 ========================================= */
 .pw-prompt-editor-block { margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--SmartThemeBorderColor); }
 .pw-prompt-label { font-weight: bold; margin-bottom: 5px; display: block; color: #e0af68; }
@@ -263,12 +272,19 @@
 .pw-hist-action-btn:hover { opacity: 1; color: #5b8db8; }
 .pw-hist-action-btn.del:hover { color: #ff6b6b; }
 
-/* API 页面 Flex 适配 */
+/* [需求4] API 页面 Flex 适配 & 按钮可点击性优化 */
 .pw-api-flex-row { 
-    display: flex; gap: 5px; width: 100%; align-items: center; 
-    flex-wrap: wrap; /* 关键：允许换行 */
+    display: flex; gap: 8px; width: 100%; align-items: center; 
+    flex-wrap: wrap; /* 允许换行 */
 }
-.pw-api-input-group { flex: 1; min-width: 150px; display: flex; gap: 5px; }
+.pw-api-input-group { 
+    flex: 1; min-width: 150px; display: flex; gap: 5px; 
+    position: relative; /* 确保定位上下文 */
+    z-index: 10;
+}
+.pw-api-fetch-btn {
+    flex-shrink: 0; width: 40px !important; z-index: 20; cursor: pointer;
+}
 
 /* 其他列表样式保持不变 */
 .pw-card-section { background: rgba(0, 0, 0, 0.2); border: 1px solid var(--SmartThemeBorderColor); border-radius: 8px; padding: 10px; display: flex; flex-direction: column; gap: 8px; }
