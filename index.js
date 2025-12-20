@@ -211,7 +211,7 @@ function saveState(data) { localStorage.setItem(STORAGE_KEY_STATE, JSON.stringif
 function loadState() { try { return JSON.parse(localStorage.getItem(STORAGE_KEY_STATE)) || {}; } catch { return {}; } }
 
 function injectStyles() {
-    const styleId = 'persona-weaver-css-v24';
+    const styleId = 'persona-weaver-css-v23';
     if ($(`#${styleId}`).length) return;
 }
 
@@ -409,12 +409,12 @@ async function openCreatorPopup() {
                             <span class="pw-tags-edit-toggle" id="pw-toggle-edit-template">编辑模版</span>
                         </div>
                     </div>
-                    
+                    <!-- 模版芯片区域 -->
                     <div class="pw-tags-container" id="pw-template-chips"></div>
-                    
+                    <!-- 模版编辑器 & 快捷键 -->
                     <div class="pw-template-editor-area" id="pw-template-editor">
                         <textarea id="pw-template-text" class="pw-template-textarea">${currentTemplate}</textarea>
-                        <!-- [需求1] 快捷键栏底部背景区分 -->
+                        <!-- 快捷键栏底部 -->
                         <div class="pw-template-footer">
                             <div class="pw-shortcut-bar">
                                 <div class="pw-shortcut-btn" data-key="  ">下一层</div>
@@ -451,8 +451,7 @@ async function openCreatorPopup() {
                     <div class="pw-compact-btn" id="pw-snapshot" title="存入草稿 (Drafts)"><i class="fa-solid fa-save"></i></div>
                 </div>
                 <div class="pw-footer-group" style="flex:1; justify-content:flex-end;">
-                    <!-- [需求3] 默认关闭 (wiChecked) -->
-                    <div class="pw-wi-sync-toggle ${wiChecked ? 'active' : ''}" id="pw-wi-sync-btn" title="开关：是否同步写入世界书"><i class="fa-solid fa-book-medical"></i></div>
+                    <div class="pw-wi-sync-toggle ${wiChecked ? 'active' : ''}" id="pw-wi-sync-btn" title="同时存入/更新世界书 (仅限角色绑定的世界书)"><i class="fa-solid fa-book-medical"></i></div>
                     <div class="pw-footer-main-btn" id="pw-btn-apply"><i class="fa-solid fa-check"></i> 保存并覆盖</div>
                 </div>
             </div>
@@ -479,11 +478,7 @@ async function openCreatorPopup() {
             </div>
         </div>
 
-        <!-- [修复] 悬浮按钮放在Wrapper外，并注入body -->
-        <!-- 暂时在这里声明，JS中会移动它 -->
-        <div id="pw-float-quote-btn-placeholder" style="display:none;">
-            <div id="pw-float-quote-btn" class="pw-float-quote-btn"><i class="fa-solid fa-pen-to-square"></i> 对...的修改意见为：</div>
-        </div>
+        <div id="pw-float-quote-btn" class="pw-float-quote-btn"><i class="fa-solid fa-pen-to-square"></i> 修改此段</div>
 
         <div id="pw-view-context" class="pw-view"><div class="pw-scroll-area"><div class="pw-card-section"><div class="pw-wi-controls"><select id="pw-wi-select" class="pw-input pw-wi-select"><option value="">-- 添加参考/目标世界书 --</option>${renderBookOptions()}</select><button id="pw-wi-refresh" class="pw-btn primary pw-wi-refresh-btn"><i class="fa-solid fa-sync"></i></button><button id="pw-wi-add" class="pw-btn primary pw-wi-add-btn"><i class="fa-solid fa-plus"></i></button></div></div><div id="pw-wi-container"></div></div></div>
         
@@ -525,15 +520,7 @@ async function openCreatorPopup() {
     </div>
     `;
 
-    // 1. 打开弹窗
     callPopup(html, 'text', '', { wide: true, large: true, okButton: "关闭" });
-    
-    // 2. [关键修复] 将悬浮按钮移动到 body，确保 position: fixed 生效，且不受 overflow: hidden 影响
-    const $floatBtn = $('#pw-float-quote-btn');
-    if($floatBtn.length) {
-        $floatBtn.appendTo('body');
-    }
-
     bindEvents();
     renderTemplateChips(); 
     renderWiBooks();
@@ -551,12 +538,6 @@ async function openCreatorPopup() {
 
 function bindEvents() {
     $(document).off('.pw');
-
-    // 监听弹窗关闭，清理悬浮按钮
-    const cleanup = () => {
-        $('#pw-float-quote-btn').remove(); 
-    };
-    $(document).on('click', '.popup_close, .popup_check_button', cleanup);
 
     $(document).on('click.pw', '.pw-tab', function() {
         $('.pw-tab').removeClass('active'); $(this).addClass('active');
@@ -617,7 +598,7 @@ function bindEvents() {
         }
     });
 
-    // [关键修复] 防抖 + 动画停止，解决卡死问题
+    // [优化] 防卡死选区检查
     let selectionTimeout;
     const checkSelection = () => {
         clearTimeout(selectionTimeout);
@@ -626,14 +607,12 @@ function bindEvents() {
             if (!el) return;
             const hasSelection = el.selectionStart !== el.selectionEnd;
             const $btn = $('#pw-float-quote-btn');
-            
             if (hasSelection) {
-                // stop(true, true) 清除所有排队的动画，防止闪烁和卡顿
-                $btn.stop(true, true).fadeIn(200).css('display', 'flex');
+                if (!$btn.is(':visible')) $btn.stop(true, true).fadeIn(200).css('display', 'flex');
             } else {
-                $btn.stop(true, true).fadeOut(200);
+                if ($btn.is(':visible')) $btn.stop(true, true).fadeOut(200);
             }
-        }, 150); // 150ms 延迟
+        }, 100); 
     };
     $(document).on('touchend mouseup keyup', '#pw-result-text', checkSelection);
 
@@ -646,13 +625,29 @@ function bindEvents() {
         if (selectedText) {
             const $input = $('#pw-refine-input');
             const cur = $input.val();
-            // [需求2] 文案更新
+            // [文案]
             const newText = `对 "${selectedText}" 的修改意见为：`;
             $input.val(cur ? cur + '\n' + newText : newText).focus();
+            
+            // 优化：使用 requestAnimationFrame 处理高度调整，防止布局抖动
+            requestAnimationFrame(() => {
+                const el = $input[0];
+                el.style.height = 'auto';
+                el.style.height = (el.scrollHeight) + 'px';
+            });
+
             textarea.setSelectionRange(end, end);
-            checkSelection(); // 立即检查状态，隐藏按钮
+            checkSelection();
         }
     });
+
+    const adjustHeight = (el) => { 
+        requestAnimationFrame(() => {
+            el.style.height = 'auto'; 
+            el.style.height = (el.scrollHeight) + 'px'; 
+        });
+    };
+    $(document).on('input.pw', '#pw-refine-input', function() { adjustHeight(this); });
 
     let saveTimeout;
     const saveCurrentState = () => {
@@ -675,6 +670,7 @@ function bindEvents() {
     };
     $(document).on('input.pw change.pw', '#pw-request, #pw-result-text, #pw-wi-toggle, .pw-input, .pw-select', saveCurrentState);
 
+    // Diff Tabs
     $(document).on('click.pw', '.pw-diff-tab', function() {
         $('.pw-diff-tab').removeClass('active');
         $(this).addClass('active');
@@ -759,6 +755,7 @@ function bindEvents() {
         $(this).closest('.pw-diff-row').find('.pw-diff-custom-input').val(val);
     });
 
+    // [需求2] 保存逻辑
     $(document).on('click.pw', '#pw-diff-confirm', function() {
         const activeTab = $('.pw-diff-tab.active').data('view');
         
@@ -806,11 +803,11 @@ function bindEvents() {
         finally { $btn.prop('disabled', false).html('生成设定'); }
     });
 
-    // [需求3] WI Toggle Toast
+    // [需求3] 提示文案
     $(document).on('click.pw', '#pw-wi-sync-btn', function() {
         $(this).toggleClass('active');
         const isActive = $(this).hasClass('active');
-        toastr.info(isActive ? "已开启：设定将同步写入世界书" : "已关闭：仅覆盖当前角色卡设定，不修改世界书");
+        toastr.info(isActive ? "已开启：设定将同步写入世界书" : "已关闭：仅覆盖当前人设，不修改世界书");
         saveCurrentState();
     });
 
@@ -935,7 +932,7 @@ function bindEvents() {
     $(document).on('click.pw', '#pw-history-clear-all', function() { if(confirm("清空?")){historyCache=[];saveData();renderHistoryList();} });
 }
 
-// 渲染模版块 Chips (基于 YAML)
+// ... 辅助渲染函数 ...
 const renderTemplateChips = () => {
     const $container = $('#pw-template-chips').empty();
     const blocks = parseYamlToBlocks(currentTemplate);
