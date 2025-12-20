@@ -1,14 +1,13 @@
-import { extension_settings, getContext } from "../../../extensions.js";
+、import { extension_settings, getContext } from "../../../extensions.js";
 import { saveSettingsDebounced, callPopup, getRequestHeaders } from "../../../../script.js";
 
 const extensionName = "st-persona-weaver";
 const STORAGE_KEY_HISTORY = 'pw_history_v20';
 const STORAGE_KEY_STATE = 'pw_state_v20'; 
-const STORAGE_KEY_TEMPLATE = 'pw_template_v1'; // 新：存储 YAML 模版字符串
+const STORAGE_KEY_TEMPLATE = 'pw_template_v1'; 
 const STORAGE_KEY_PROMPTS = 'pw_prompts_v2';
 const BUTTON_ID = 'pw_persona_tool_btn';
 
-// [需求2] 默认 YAML 模版，不再是简单的 Tag 数组
 const defaultYamlTemplate = 
 `年龄: 
 性别: 
@@ -109,49 +108,58 @@ let currentTemplate = defaultYamlTemplate;
 let promptsCache = { initial: defaultSystemPromptInitial, refine: defaultSystemPromptRefine };
 let availableWorldBooks = []; 
 let isEditingTemplate = false; 
-let pollInterval = null; // [需求1] 轮询句柄
+let pollInterval = null; 
 
 // ============================================================================
-// 1. 核心数据解析逻辑 (YAML 块级解析) [需求2, 7]
+// 1. 核心数据解析逻辑 (YAML 块级解析 v2 - 智能缩进检测) [需求3, 7]
 // ============================================================================
 
-// 将 YAML 文本解析为 { Key: "Key: ...nested content..." } 的 Map
-// 用于 Diff 对比时，按第一层级分割
 function parseYamlToBlocks(text) {
     const map = new Map();
     if (!text) return map;
     
     const lines = text.split('\n');
+    if (lines.length === 0) return map;
+
+    // 1. 检测最小缩进 (Base Indentation)
+    // 防止 AI 整体缩进导致无法识别顶层 Key
+    let baseIndent = Infinity;
+    const topLevelCandidateRegex = /^\s*([^:\s\-]+?)[：:]/;
+    
+    for (const line of lines) {
+        if (!line.trim()) continue; // 跳过空行
+        const match = line.match(topLevelCandidateRegex);
+        if (match) {
+            // 计算当前行的缩进空格数
+            const indent = line.search(/\S/);
+            if (indent < baseIndent) baseIndent = indent;
+        }
+    }
+    if (baseIndent === Infinity) baseIndent = 0; // 没找到任何 Key，默认为 0
+
     let currentKey = null;
     let currentBuffer = [];
-
-    // 正则匹配顶层 Key (无缩进，以 : 或 ： 结尾)
-    // 排除以 - 开头的列表项，只匹配 Key
-    const topLevelKeyRegex = /^([^:\s\-]+?)[:：]\s*(.*)$/;
 
     lines.forEach((line, index) => {
         // 跳过纯空行，除非在 block 内部
         if (!line.trim() && !currentKey) return;
 
-        // 检查是否是顶层 Key (无缩进)
-        const match = line.match(topLevelKeyRegex);
-        
-        // 如果是新的顶层 Key (且不是缩进的行)
-        if (match && !line.startsWith(' ')) {
+        const currentIndent = line.search(/\S/);
+        const match = line.match(topLevelCandidateRegex);
+
+        // 判断是否为顶层 Key: 必须匹配 Key 格式，且缩进等于最小缩进
+        if (match && currentIndent === baseIndent) {
             // 保存之前的 block
             if (currentKey) {
                 map.set(currentKey, currentBuffer.join('\n'));
             }
             // 开始新的 block
-            currentKey = match[1].trim(); // Key name (e.g. "外貌")
-            currentBuffer = [line]; // 包含 Key 这一行
+            currentKey = match[1].trim(); 
+            currentBuffer = [line]; 
         } else {
-            // 属于当前 block 的内容 (缩进行或空行)
+            // 属于当前 block 的内容
             if (currentKey) {
                 currentBuffer.push(line);
-            } else {
-                // 还没有 Key 的杂项 (头部注释等)
-                // 可以选择忽略或存入特殊的 Key
             }
         }
     });
@@ -163,7 +171,6 @@ function parseYamlToBlocks(text) {
     return map;
 }
 
-// 模糊匹配 Key 的辅助函数
 function findMatchingKey(targetKey, map) {
     if (map.has(targetKey)) return targetKey;
     for (const key of map.keys()) {
@@ -199,7 +206,6 @@ async function collectActiveWorldInfoContent() {
 function loadData() {
     try { historyCache = JSON.parse(localStorage.getItem(STORAGE_KEY_HISTORY)) || []; } catch { historyCache = []; }
     try { 
-        // [需求2] 加载模版字符串
         const t = localStorage.getItem(STORAGE_KEY_TEMPLATE);
         currentTemplate = t || defaultYamlTemplate; 
     } catch { currentTemplate = defaultYamlTemplate; }
@@ -338,7 +344,6 @@ async function getWorldBookEntries(bookName) {
              }));
         } catch(e) {}
     }
-    // Fallback logic omitted for brevity, same as previous
     return [];
 }
 
@@ -359,7 +364,7 @@ async function runGeneration(data, apiConfig) {
         .replace(/{{user}}/g, currentName)
         .replace(/{{char}}/g, charName)
         .replace(/{{wi}}/g, wiText)
-        .replace(/{{tags}}/g, currentTemplate) // 传入完整模版
+        .replace(/{{tags}}/g, currentTemplate)
         .replace(/{{input}}/g, data.request)
         .replace(/{{current}}/g, data.currentText || "");
 
@@ -428,20 +433,26 @@ async function openCreatorPopup() {
                     <div class="pw-tags-container" id="pw-template-chips"></div>
                     <!-- 模版纯文本编辑区域 -->
                     <div class="pw-template-editor-area" id="pw-template-editor">
+                        <!-- [需求4] 快捷工具栏 -->
+                        <div class="pw-template-toolbar">
+                            <div class="pw-tool-shortcut" data-insert="  ">缩进(2格)</div>
+                            <div class="pw-tool-shortcut" data-insert="- ">-</div>
+                            <div class="pw-tool-shortcut" data-insert=": ">:</div>
+                        </div>
                         <textarea id="pw-template-text" class="pw-template-textarea">${currentTemplate}</textarea>
-                        <div style="text-align:right;"><button class="pw-mini-btn" id="pw-save-template">保存模版</button></div>
+                        <div style="text-align:right; padding:5px;"><button class="pw-mini-btn" id="pw-save-template">保存模版</button></div>
                     </div>
                 </div>
 
                 <textarea id="pw-request" class="pw-textarea" placeholder="在此输入要求，或点击上方模版块插入结构..." style="min-height:200px;">${savedState.request || ''}</textarea>
-                <button id="pw-btn-gen" class="pw-btn gen">生成设定 (YAML)</button>
+                <!-- [需求1] 按钮文字修正 -->
+                <button id="pw-btn-gen" class="pw-btn gen">生成设定</button>
 
                 <div id="pw-result-area" style="display:none; margin-top:15px;">
                     <div class="pw-relative-container">
                         <textarea id="pw-result-text" class="pw-result-textarea" placeholder="生成的结果将显示在这里..."></textarea>
                     </div>
                     
-                    <!-- [需求8] 润色栏左右布局 -->
                     <div class="pw-refine-toolbar">
                         <textarea id="pw-refine-input" class="pw-refine-input" placeholder="输入润色意见..."></textarea>
                         <div class="pw-refine-btn-vertical" id="pw-btn-refine" title="执行润色">
@@ -477,7 +488,6 @@ async function openCreatorPopup() {
 
         <div id="pw-view-context" class="pw-view"><div class="pw-scroll-area"><div class="pw-card-section"><div class="pw-wi-controls"><select id="pw-wi-select" class="pw-input pw-wi-select"><option value="">-- 添加参考/目标世界书 --</option>${renderBookOptions()}</select><button id="pw-wi-refresh" class="pw-btn primary pw-wi-refresh-btn"><i class="fa-solid fa-sync"></i></button><button id="pw-wi-add" class="pw-btn primary pw-wi-add-btn"><i class="fa-solid fa-plus"></i></button></div></div><div id="pw-wi-container"></div></div></div>
         
-        <!-- [需求4] API 页面优化 -->
         <div id="pw-view-api" class="pw-view">
             <div class="pw-scroll-area">
                 <div class="pw-card-section">
@@ -485,25 +495,36 @@ async function openCreatorPopup() {
                     <div id="pw-indep-settings" style="display:${config.apiSource === 'independent' ? 'flex' : 'none'}; flex-direction:column; gap:15px;">
                         <div class="pw-row"><label>URL</label><input type="text" id="pw-api-url" class="pw-input" value="${config.indepApiUrl}" style="flex:1;" placeholder="http://.../v1"></div>
                         <div class="pw-row"><label>Key</label><input type="password" id="pw-api-key" class="pw-input" value="${config.indepApiKey}" style="flex:1;"></div>
-                        <!-- [需求4] 模型选择优化 -->
-                        <div class="pw-row"><label>Model</label><div style="flex:1; display:flex; gap:5px; width:100%;"><input type="text" id="pw-api-model" class="pw-input" value="${config.indepApiModel}" list="pw-model-list" style="flex:1;"><datalist id="pw-model-list"></datalist><button id="pw-api-fetch" class="pw-btn primary pw-api-fetch-btn" title="刷新模型列表" style="width:auto;"><i class="fa-solid fa-sync"></i></button></div></div>
+                        <!-- [需求5] 下拉框选择模型 -->
+                        <div class="pw-row"><label>Model</label><div style="flex:1; display:flex; gap:5px; width:100%;">
+                            <select id="pw-api-model" class="pw-input" style="flex:1;">
+                                <option value="${config.indepApiModel}">${config.indepApiModel}</option>
+                            </select>
+                            <button id="pw-api-fetch" class="pw-btn primary pw-api-fetch-btn" title="刷新模型列表" style="width:auto;"><i class="fa-solid fa-sync"></i></button>
+                        </div></div>
                         <div style="text-align:right;"><button id="pw-api-test" class="pw-btn" style="width:auto; font-size:0.9em;"><i class="fa-solid fa-plug"></i> 测试连接</button></div>
                     </div>
                 </div>
 
                 <div class="pw-card-section pw-prompt-editor-block">
-                    <div style="display:flex; justify-content:space-between;"><span class="pw-prompt-label">初始生成指令 (System Prompt)</span><button class="pw-mini-btn" id="pw-reset-prompts" style="font-size:0.7em;">恢复默认</button></div>
-                    <!-- [需求6] 变量插入按钮 -->
+                    <!-- [需求6] 分离的重置按钮 -->
+                    <div style="display:flex; justify-content:space-between; align-items:center;">
+                        <span class="pw-prompt-label">初始生成指令</span>
+                        <button class="pw-mini-btn" id="pw-reset-prompt-initial" style="font-size:0.7em;">恢复默认</button>
+                    </div>
                     <div class="pw-var-btns">
-                        <div class="pw-var-btn" data-ins="{{user}}">User名</div>
-                        <div class="pw-var-btn" data-ins="{{char}}">Char名</div>
-                        <div class="pw-var-btn" data-ins="{{tags}}">模版内容</div>
-                        <div class="pw-var-btn" data-ins="{{input}}">用户要求</div>
-                        <div class="pw-var-btn" data-ins="{{wi}}">世界书内容</div>
+                        <div class="pw-var-btn" data-ins="{{user}}">User</div>
+                        <div class="pw-var-btn" data-ins="{{char}}">Char</div>
+                        <div class="pw-var-btn" data-ins="{{tags}}">模版</div>
+                        <div class="pw-var-btn" data-ins="{{input}}">要求</div>
+                        <div class="pw-var-btn" data-ins="{{wi}}">世界书</div>
                     </div>
                     <textarea id="pw-prompt-initial" class="pw-textarea" style="height:150px; font-size:0.85em;">${promptsCache.initial}</textarea>
                     
-                    <span class="pw-prompt-label" style="margin-top:10px;">润色指令 (System Prompt)</span>
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-top:10px;">
+                        <span class="pw-prompt-label">润色指令</span>
+                        <button class="pw-mini-btn" id="pw-reset-prompt-refine" style="font-size:0.7em;">恢复默认</button>
+                    </div>
                     <div class="pw-var-btns">
                         <div class="pw-var-btn" data-ins="{{current}}">当前文本</div>
                         <div class="pw-var-btn" data-ins="{{input}}">润色意见</div>
@@ -520,7 +541,7 @@ async function openCreatorPopup() {
 
     callPopup(html, 'text', '', { wide: true, large: true, okButton: "关闭" });
     bindEvents();
-    renderTemplateChips(); // 渲染模版块
+    renderTemplateChips(); 
     renderWiBooks();
     
     if (savedState.resultText) {
@@ -544,7 +565,6 @@ function bindEvents() {
         if($(this).data('tab') === 'history') renderHistoryList(); 
     });
 
-    // [需求2] 模版编辑器逻辑
     $(document).on('click.pw', '#pw-toggle-edit-template', () => {
         isEditingTemplate = !isEditingTemplate;
         if(isEditingTemplate) {
@@ -556,6 +576,18 @@ function bindEvents() {
             $('#pw-template-chips').css('display', 'flex');
             $('#pw-toggle-edit-template').text("编辑模版").css('color', '#5b8db8');
         }
+    });
+
+    // [需求4] 编辑器快捷键插入
+    $(document).on('click.pw', '.pw-tool-shortcut', function() {
+        const text = $(this).data('insert');
+        const $el = $('#pw-template-text');
+        const start = $el[0].selectionStart;
+        const end = $el[0].selectionEnd;
+        const val = $el.val();
+        $el.val(val.substring(0, start) + text + val.substring(end));
+        $el[0].selectionStart = $el[0].selectionEnd = start + text.length;
+        $el.focus();
     });
 
     $(document).on('click.pw', '#pw-save-template', () => {
@@ -622,7 +654,7 @@ function bindEvents() {
                     apiSource: $('#pw-api-source').val(),
                     indepApiUrl: $('#pw-api-url').val(),
                     indepApiKey: $('#pw-api-key').val(),
-                    indepApiModel: $('#pw-api-model').val(),
+                    indepApiModel: $('#pw-api-model').val(), // 这里的 value 是 select 的值
                     extraBooks: window.pwExtraBooks || []
                 }
             });
@@ -630,7 +662,6 @@ function bindEvents() {
     };
     $(document).on('input.pw change.pw', '#pw-request, #pw-result-text, #pw-wi-toggle, .pw-input', saveCurrentState);
 
-    // [需求7] Diff 逻辑：基于 YAML Block 解析
     $(document).on('click.pw', '#pw-btn-refine', async function() {
         const refineReq = $('#pw-refine-input').val();
         if (!refineReq) return toastr.warning("请输入润色意见");
@@ -642,7 +673,7 @@ function bindEvents() {
             const config = { mode: 'refine', request: refineReq, currentText: oldText, wiContext: wiContent, apiSource: $('#pw-api-source').val(), indepApiUrl: $('#pw-api-url').val(), indepApiKey: $('#pw-api-key').val(), indepApiModel: $('#pw-api-model').val() };
             const responseText = await runGeneration(config, config);
             
-            // 使用 Block Parser
+            // 使用新版 Block Parser
             const oldMap = parseYamlToBlocks(oldText);
             const newMap = parseYamlToBlocks(responseText);
             const allKeys = [...new Set([...oldMap.keys(), ...newMap.keys()])];
@@ -656,7 +687,6 @@ function bindEvents() {
                 const valOld = oldMap.get(matchedKeyInOld) || "";
                 const valNew = newMap.get(matchedKeyInNew) || "";
                 
-                // 忽略空格差异
                 const isChanged = valOld.trim() !== valNew.trim();
                 if (isChanged) changeCount++;
                 if (!valOld && !valNew) return;
@@ -677,7 +707,7 @@ function bindEvents() {
 
             if (changeCount === 0) toastr.info("AI 认为无需修改");
             $('#pw-diff-overlay').fadeIn();
-            $('#pw-refine-input').val('');
+            // 润色后不清空输入框，方便微调
         } catch (e) { toastr.error(e.message); }
         finally { $btn.removeClass('fa-spinner fa-spin').addClass('fa-magic'); }
     });
@@ -692,7 +722,7 @@ function bindEvents() {
         let finalLines = [];
         $('.pw-diff-row').each(function() {
             const val = $(this).find('.pw-diff-custom-input').val().trim();
-            if (val) finalLines.push(val); // 整个块直接放入
+            if (val) finalLines.push(val); 
         });
         $('#pw-result-text').val(finalLines.join('\n\n'));
         $('#pw-diff-overlay').fadeOut();
@@ -710,12 +740,18 @@ function bindEvents() {
             const wiContent = await collectActiveWorldInfoContent();
             const config = { mode: 'initial', request: req, wiContext: wiContent, apiSource: $('#pw-api-source').val(), indepApiUrl: $('#pw-api-url').val(), indepApiKey: $('#pw-api-key').val(), indepApiModel: $('#pw-api-model').val() };
             const text = await runGeneration(config, config);
+            
+            // [需求2] 重新生成直接覆盖结果
             $('#pw-result-text').val(text);
             $('#pw-result-area').fadeIn();
             $('#pw-request').addClass('minimized');
+            
+            // [需求2] 仅清空润色框的输入（可选），保留润色框本身显示
+            $('#pw-refine-input').val(''); 
+            
             saveCurrentState();
         } catch (e) { toastr.error(e.message); } 
-        finally { $btn.prop('disabled', false).html('生成设定 (YAML)'); }
+        finally { $btn.prop('disabled', false).html('生成设定'); }
     });
 
     $(document).on('click.pw', '#pw-wi-sync-btn', function() {
@@ -776,13 +812,12 @@ function bindEvents() {
 
     $(document).on('change.pw', '#pw-api-source', function() { $('#pw-indep-settings').toggle($(this).val() === 'independent'); });
     
-    // [需求4] 修复 Fetch Models (处理 CORS 和 URL)
+    // Fetch Models & Update Select
     $(document).on('click.pw', '#pw-api-fetch', async function() { 
         const url = $('#pw-api-url').val().replace(/\/$/, '');
         const key = $('#pw-api-key').val();
         const $btn = $(this).find('i').addClass('fa-spin');
         try {
-            // 尝试多个常见路径
             const endpoints = [url.includes('v1') ? `${url}/models` : `${url}/v1/models`, `${url}/models`];
             let data = null;
             for(const ep of endpoints) {
@@ -794,18 +829,21 @@ function bindEvents() {
             if(!data) throw new Error("连接失败或无法获取模型列表");
             
             const models = (data.data || data).map(m => m.id).sort();
-            const $dl = $('#pw-model-list').empty();
-            models.forEach(m => $dl.append(`<option value="${m}">`));
+            const $select = $('#pw-api-model').empty();
+            models.forEach(m => $select.append(`<option value="${m}">${m}</option>`));
+            
+            // 自动选中第一个
+            if(models.length > 0) $select.val(models[0]).trigger('change');
+            
             toastr.success(`获取到 ${models.length} 个模型`);
         } catch(e) { toastr.error(e.message); }
         finally { $btn.removeClass('fa-spin'); }
     });
 
-    // [需求4] 测试连接
     $(document).on('click.pw', '#pw-api-test', async function() {
         const url = $('#pw-api-url').val().replace(/\/$/, '');
         const key = $('#pw-api-key').val();
-        const model = $('#pw-api-model').val() || 'gpt-3.5-turbo';
+        const model = $('#pw-api-model').val();
         const $btn = $(this).html('<i class="fas fa-spinner fa-spin"></i> 测试中...');
         try {
             const ep = url.includes('v1') ? `${url}/chat/completions` : `${url}/v1/chat/completions`;
@@ -825,11 +863,18 @@ function bindEvents() {
         saveData(); 
         toastr.success("设置与Prompt已保存"); 
     });
-    $(document).on('click.pw', '#pw-reset-prompts', () => {
-        if(confirm("重置所有 Prompt 为默认？")) {
+
+    // [需求6] 分离的重置按钮逻辑
+    $(document).on('click.pw', '#pw-reset-prompt-initial', () => {
+        if(confirm("恢复初始生成指令为默认？")) {
             $('#pw-prompt-initial').val(defaultSystemPromptInitial);
+            toastr.info("初始指令已恢复，请保存");
+        }
+    });
+    $(document).on('click.pw', '#pw-reset-prompt-refine', () => {
+        if(confirm("恢复润色指令为默认？")) {
             $('#pw-prompt-refine').val(defaultSystemPromptRefine);
-            toastr.info("已恢复默认，请点击保存");
+            toastr.info("润色指令已恢复，请保存");
         }
     });
 
@@ -852,16 +897,12 @@ const renderTemplateChips = () => {
     const blocks = parseYamlToBlocks(currentTemplate);
     
     blocks.forEach((content, key) => {
-        // Chip 只显示 Key
         const $chip = $(`<div class="pw-tag-chip"><i class="fa-solid fa-cube" style="opacity:0.5; margin-right:4px;"></i><span>${key}</span></div>`);
-        
         $chip.on('click', () => {
             const $text = $('#pw-request');
             const cur = $text.val();
             const prefix = (cur && !cur.endsWith('\n')) ? '\n\n' : '';
-            // 插入整个 Block 内容
             $text.val(cur + prefix + content).focus();
-            // 滚动到底部
             $text.scrollTop($text[0].scrollHeight);
         });
         $container.append($chip);
@@ -928,7 +969,6 @@ function addPersonaButton() {
     container.prepend(newButton);
 }
 
-// [需求1] 使用定时轮询代替 MutationObserver
 function startPolling() {
     if (pollInterval) clearInterval(pollInterval);
     pollInterval = setInterval(() => {
@@ -937,11 +977,11 @@ function startPolling() {
         if (container.length > 0 && btn.length === 0) {
             addPersonaButton();
         }
-    }, 2000); // 每2秒检查一次
+    }, 2000); 
 }
 
 jQuery(async () => {
     injectStyles();
     addPersonaButton();
     startPolling();
-});
+});、
