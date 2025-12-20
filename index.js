@@ -4,29 +4,37 @@ import { saveSettingsDebounced, callPopup, getRequestHeaders } from "../../../..
 const extensionName = "st-persona-weaver";
 const STORAGE_KEY_HISTORY = 'pw_history_v20';
 const STORAGE_KEY_STATE = 'pw_state_v20'; 
-const STORAGE_KEY_TAGS = 'pw_tags_v13'; // 更新版本号以重置标签
+const STORAGE_KEY_TEMPLATE_KEYS = 'pw_template_keys_v14'; // [需求2] 重命名为 Template Keys
 const STORAGE_KEY_PROMPTS = 'pw_prompts_v1';
 const BUTTON_ID = 'pw_persona_tool_btn';
 
-// [需求6] 默认标签更新为用户提供的模版Key
-const defaultTags = [
-    { name: "name", value: "" },
+// [需求2] 默认模版字段，与下方 YAML 对应
+const defaultTemplateKeys = [
     { name: "gender", value: "" },
     { name: "identity", value: "" },
+    { name: "date_of_birth", value: "" },
+    { name: "zodiac_sign", value: "" },
+    { name: "mbti", value: "" },
+    { name: "sexual_orientation", value: "" },
     { name: "appearance", value: "" },
-    { name: "personality", value: "" },
-    { name: "background", value: "" },
+    { name: "family_background", value: "" },
+    { name: "background_story", value: "" },
     { name: "social_status", value: "" },
     { name: "attire", value: "" },
-    { name: "lifestyle", value: "" },
-    { name: "sexual_orientation", value: "" },
+    { name: "personality", value: "" },
+    { name: "lifestyle_and_habits", value: "" },
+    { name: "work_behaviors", value: "" },
+    { name: "emotional_behaviors", value: "" },
+    { name: "goals/motivation", value: "" },
+    { name: "weakness", value: "" },
+    { name: "skills", value: "" },
+    { name: "relationship", value: "" },
     { name: "NSFW_information", value: "" }
 ];
 
-// 完整模版字符串
+// 完整模版字符串 (去除 Name)
 const fullTemplateText = 
-`name:
-gender:
+`gender:
 identity:
 - 
 date_of_birth:
@@ -144,13 +152,10 @@ NSFW_information:
 const defaultSystemPromptInitial = 
 `Creating User Persona for {{user}} (Target: {{char}}).
 {{wi}}
-Traits: {{tags}}.
+Template Keys: {{tags}}.
 Instruction: {{input}}
-Task: Generate character details strictly in "Key: Value" format (one per line). Do NOT add extra commentary, headers, or lists.
-Example:
-Age: 25
-Personality: Calm
-Response: ONLY the Key-Value list.`;
+Task: Fill in the character details strictly following "Key: Value" or YAML format. Do NOT add extra commentary.
+Response: ONLY the generated data.`;
 
 const defaultSystemPromptRefine = 
 `Optimizing User Persona for {{char}}.
@@ -158,8 +163,8 @@ const defaultSystemPromptRefine =
 [Current Data]:
 """{{current}}"""
 [Instruction]: "{{input}}"
-Task: Modify the data based on instruction. If text is quoted, focus on that part. Maintain strict "Key: Value" format.
-Response: ONLY the modified full Key-Value list.`;
+Task: Modify the data based on instruction. If text is quoted, focus on that part. Maintain strict "Key: Value" or YAML format.
+Response: ONLY the modified full data list.`;
 
 const defaultSettings = {
     autoSwitchPersona: true, syncToWorldInfo: false,
@@ -178,11 +183,11 @@ const TEXT = {
 };
 
 let historyCache = [];
-let tagsCache = [];
+let templateKeysCache = []; // [需求2] 改名
 let promptsCache = { initial: defaultSystemPromptInitial, refine: defaultSystemPromptRefine };
 let availableWorldBooks = []; 
 let isEditingTags = false; 
-let observer = null; 
+let checkInterval = null; // [需求1] 使用 Interval 替代 Observer
 
 // ============================================================================
 // 1. 核心数据解析逻辑 (Key-Value 强力白名单清洗)
@@ -244,7 +249,7 @@ async function collectActiveWorldInfoContent() {
 
 function loadData() {
     try { historyCache = JSON.parse(localStorage.getItem(STORAGE_KEY_HISTORY)) || []; } catch { historyCache = []; }
-    try { tagsCache = JSON.parse(localStorage.getItem(STORAGE_KEY_TAGS)) || defaultTags; } catch { tagsCache = defaultTags; }
+    try { templateKeysCache = JSON.parse(localStorage.getItem(STORAGE_KEY_TEMPLATE_KEYS)) || defaultTemplateKeys; } catch { templateKeysCache = defaultTemplateKeys; }
     try { 
         const p = JSON.parse(localStorage.getItem(STORAGE_KEY_PROMPTS));
         promptsCache = { ...{ initial: defaultSystemPromptInitial, refine: defaultSystemPromptRefine }, ...p };
@@ -252,7 +257,7 @@ function loadData() {
 }
 
 function saveData() {
-    localStorage.setItem(STORAGE_KEY_TAGS, JSON.stringify(tagsCache));
+    localStorage.setItem(STORAGE_KEY_TEMPLATE_KEYS, JSON.stringify(templateKeysCache));
     localStorage.setItem(STORAGE_KEY_HISTORY, JSON.stringify(historyCache));
     localStorage.setItem(STORAGE_KEY_PROMPTS, JSON.stringify(promptsCache));
 }
@@ -431,7 +436,7 @@ async function runGeneration(data, apiConfig) {
         wiText = `\n[Context from World Info]:\n${data.wiContext.join('\n')}\n`;
     }
 
-    const tagsList = tagsCache.map(t => t.name).join(', ');
+    const tagsList = templateKeysCache.map(t => t.name).join(', ');
     
     let systemTemplate = data.mode === 'refine' ? promptsCache.refine : promptsCache.initial;
     
@@ -489,7 +494,6 @@ async function openCreatorPopup() {
                 <div class="pw-tab active" data-tab="editor">编辑</div>
                 <div class="pw-tab" data-tab="context">世界书</div>
                 <div class="pw-tab" data-tab="api">API & Prompt</div>
-                <!-- [需求4] 历史改名为草稿 -->
                 <div class="pw-tab" data-tab="history">草稿</div>
             </div>
         </div>
@@ -500,17 +504,17 @@ async function openCreatorPopup() {
 
                 <div>
                     <div class="pw-tags-header">
-                        <span class="pw-tags-label">快速设定 (点击填入)</span>
+                        <span class="pw-tags-label">模版字段管理 (点击填入)</span>
                         <div class="pw-tags-actions">
-                            <!-- [需求6] 插入模版按钮 -->
+                            <!-- [需求2] 插入完整模版 -->
                             <span class="pw-insert-template-btn" id="pw-btn-insert-template" title="插入完整人设模版"><i class="fa-solid fa-file-invoice"></i> 插入模版</span>
-                            <span class="pw-tags-edit-toggle" id="pw-toggle-edit-tags">编辑标签</span>
+                            <span class="pw-tags-edit-toggle" id="pw-toggle-edit-tags">编辑字段</span>
                         </div>
                     </div>
                     <div class="pw-tags-container" id="pw-tags-list"></div>
                 </div>
 
-                <textarea id="pw-request" class="pw-textarea" placeholder="在此输入初始设定要求..." style="min-height:200px;">${savedState.request || ''}</textarea>
+                <textarea id="pw-request" class="pw-textarea" placeholder="在此输入初始设定要求，或点击上方插入模版..." style="min-height:200px;">${savedState.request || ''}</textarea>
                 <button id="pw-btn-gen" class="pw-btn gen">生成设定</button>
 
                 <div id="pw-result-area" style="display:none; margin-top:15px;">
@@ -518,11 +522,10 @@ async function openCreatorPopup() {
                         <textarea id="pw-result-text" class="pw-result-textarea" placeholder="生成的结果将显示在这里..."></textarea>
                     </div>
                     
+                    <!-- [需求3] 竖向润色按钮布局 -->
                     <div class="pw-refine-toolbar">
                         <textarea id="pw-refine-input" class="pw-refine-input" placeholder="输入润色意见..."></textarea>
-                        <div class="pw-refine-actions">
-                            <div class="pw-tool-btn" id="pw-btn-refine" title="执行润色"><i class="fa-solid fa-magic"></i> 润色</div>
-                        </div>
+                        <div class="pw-refine-btn-vertical" id="pw-btn-refine" title="执行润色">润色</div>
                     </div>
                 </div>
             </div>
@@ -625,13 +628,13 @@ function bindEvents() {
         if($(this).data('tab') === 'history') renderHistoryList(); 
     });
 
-    // [需求6] 插入完整模版
+    // [需求2] 插入完整模版
     $(document).on('click.pw', '#pw-btn-insert-template', function() {
         const cur = $('#pw-request').val();
         // 如果输入框不为空，则追加；否则直接替换
         const newVal = cur ? (cur + '\n\n' + fullTemplateText) : fullTemplateText;
         $('#pw-request').val(newVal).focus();
-        toastr.success("模版已插入");
+        toastr.success("完整模版已插入");
     });
 
     $(document).on('click.pw', '.pw-var-btn', function() {
@@ -695,6 +698,7 @@ function bindEvents() {
     };
     $(document).on('input.pw change.pw', '#pw-request, #pw-result-text, #pw-wi-toggle, .pw-input', saveCurrentState);
 
+    // [需求3] 润色按钮点击事件（注意 ID 未变，CSS 变了）
     $(document).on('click.pw', '#pw-btn-refine', async function() {
         const refineReq = $('#pw-refine-input').val();
         if (!refineReq) return toastr.warning("请输入润色意见");
@@ -809,7 +813,6 @@ function bindEvents() {
         }
     });
     
-    // [需求4] 草稿保存逻辑优化：只要有输入或输出就可以保存
     $(document).on('click.pw', '#pw-snapshot', function() {
         const text = $('#pw-result-text').val();
         const req = $('#pw-request').val();
@@ -887,21 +890,19 @@ function bindEvents() {
 const renderTagsList = () => {
     const $container = $('#pw-tags-list').empty();
     const $toggleBtn = $('#pw-toggle-edit-tags');
-    // [需求2] 按钮文字统一
-    $toggleBtn.text(isEditingTags ? '收起编辑' : '编辑标签');
+    $toggleBtn.text(isEditingTags ? '收起编辑' : '编辑字段');
     $toggleBtn.css('color', isEditingTags ? '#ff6b6b' : '#5b8db8');
-    tagsCache.forEach((tag, index) => {
+    
+    templateKeysCache.forEach((tag, index) => {
         if (isEditingTags) {
-            // [需求1] 增加 Placeholder
-            const $row = $(`<div class="pw-tag-edit-row"><input class="pw-tag-edit-input t-name" value="${tag.name}" placeholder="标签名"><input class="pw-tag-edit-input t-val" value="${tag.value}" placeholder="预填内容"><div class="pw-tag-del-btn"><i class="fa-solid fa-trash"></i></div></div>`);
+            const $row = $(`<div class="pw-tag-edit-row"><input class="pw-tag-edit-input t-name" value="${tag.name}" placeholder="字段Key"><input class="pw-tag-edit-input t-val" value="${tag.value}" placeholder="预填内容"><div class="pw-tag-del-btn"><i class="fa-solid fa-trash"></i></div></div>`);
             $row.find('input').on('input', function() { tag.name = $row.find('.t-name').val(); tag.value = $row.find('.t-val').val(); saveData(); });
-            $row.find('.pw-tag-del-btn').on('click', () => { if (confirm("删除?")) { tagsCache.splice(index, 1); saveData(); renderTagsList(); } });
+            $row.find('.pw-tag-del-btn').on('click', () => { if (confirm("删除?")) { templateKeysCache.splice(index, 1); saveData(); renderTagsList(); } });
             $container.append($row);
         } else {
-            // [需求3] 截断过长内容，且有值才显示冒号
             const valShow = tag.value.length > 5 ? tag.value.substring(0,5) + ".." : tag.value;
             const html = valShow ? `${tag.name}: <span class="pw-tag-val">${valShow}</span>` : tag.name;
-            const $chip = $(`<div class="pw-tag-chip"><i class="fa-solid fa-tag" style="opacity:0.5; margin-right:4px;"></i><span>${html}</span></div>`);
+            const $chip = $(`<div class="pw-tag-chip"><span>${html}</span></div>`);
             
             $chip.on('click', () => {
                 const $text = $('#pw-request');
@@ -913,11 +914,10 @@ const renderTagsList = () => {
             $container.append($chip);
         }
     });
-    const $addBtn = $(`<div class="pw-tag-add-btn"><i class="fa-solid fa-plus"></i> ${isEditingTags ? '新增' : '标签'}</div>`);
-    $addBtn.on('click', () => { tagsCache.push({ name: "", value: "" }); saveData(); if (!isEditingTags) isEditingTags = true; renderTagsList(); });
+    const $addBtn = $(`<div class="pw-tag-add-btn"><i class="fa-solid fa-plus"></i> ${isEditingTags ? '新增' : '字段'}</div>`);
+    $addBtn.on('click', () => { templateKeysCache.push({ name: "", value: "" }); saveData(); if (!isEditingTags) isEditingTags = true; renderTagsList(); });
     $container.append($addBtn);
     
-    // [需求2] 收起编辑
     if (isEditingTags) { 
         const $finishBtn = $(`<div class="pw-tags-finish-bar"><i class="fa-solid fa-chevron-up"></i> 收起编辑</div>`); 
         $finishBtn.on('click', () => { isEditingTags = false; renderTagsList(); }); 
@@ -985,19 +985,18 @@ function addPersonaButton() {
     container.prepend(newButton);
 }
 
-function initObserver() {
-    if (observer) observer.disconnect();
-    observer = new MutationObserver(() => { 
+// [需求1] 使用 Interval 代替 Observer
+function initInterval() {
+    if (checkInterval) clearInterval(checkInterval);
+    checkInterval = setInterval(() => {
         if ($(`#${BUTTON_ID}`).length === 0 && $('.persona_controls_buttons_block').length > 0) {
             addPersonaButton();
         }
-    });
-    const target = document.querySelector('.persona_controls_buttons_block') || document.body;
-    observer.observe(target, { childList: true, subtree: true });
+    }, 1500); // 1.5秒检查一次，性能开销极低
 }
 
 jQuery(async () => {
     injectStyles();
     addPersonaButton();
-    setTimeout(initObserver, 2000);
+    setTimeout(initInterval, 2000);
 });
