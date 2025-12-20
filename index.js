@@ -14,10 +14,25 @@ const defaultTags = [
     { name: "秘密", value: "" }
 ];
 
+const defaultPrompts = {
+    init: `Creating User Persona for \${currentName} (Target: \${charName}).
+Traits: \${traits}.
+Instruction: \${request}
+Task: Generate details in "Key: Value" format (one per line). Do NOT include any intro/outro text.
+Response: ONLY the Key-Value list text.`,
+    
+    refine: `Optimizing User Persona for \${charName}.
+[Current Data]: """\${currentText}"""
+[Instruction]: "\${request}"
+Task: Modify the data. If text is quoted, focus on that part. Maintain "Key: Value" format.
+Response: ONLY the modified full text list.`
+};
+
 const defaultSettings = {
     autoSwitchPersona: true, syncToWorldInfo: false,
     historyLimit: 50, apiSource: 'main', 
-    indepApiUrl: 'https://api.openai.com/v1', indepApiKey: '', indepApiModel: 'gpt-3.5-turbo'
+    indepApiUrl: 'https://api.openai.com/v1', indepApiKey: '', indepApiModel: 'gpt-3.5-turbo',
+    customPrompts: { ...defaultPrompts }
 };
 
 const TEXT = {
@@ -35,47 +50,30 @@ let availableWorldBooks = [];
 let isEditingTags = false; 
 
 // ============================================================================
-// 1. 核心数据解析逻辑 (模糊匹配增强)
+// 1. 核心解析 (V2: 严格清洗)
 // ============================================================================
 
 function parseTextToMap(text) {
     const map = new Map();
     if (!text) return map;
     const lines = text.split('\n');
-    lines.forEach((line, index) => {
-        // 跳过空行
-        if (!line.trim()) return;
-
-        // 尝试分离 Key: Value
-        const idx = line.indexOf(':');
+    lines.forEach(line => {
+        // 清洗：去除行首的 markdown 列表符、数字编号等 (如 "- ", "* ", "1. ")
+        let cleanLine = line.replace(/^[\s\-\*\d\.]+\s?/, '').trim();
         
+        // 严格模式：必须包含冒号
+        const idx = cleanLine.indexOf(':');
         if (idx !== -1) {
-            const key = line.substring(0, idx).trim();
-            const val = line.substring(idx + 1).trim();
-            if (key) map.set(key, val);
-        } else {
-            // 对于没有 Key 的行 (例如 XML 标签或 Note)，生成一个基于内容的 Hash Key
-            // 这样即使行号变了，只要内容相似，也能大致对上
-            const pseudoKey = `RawLine_${index}`; 
-            map.set(pseudoKey, line.trim());
+            const key = cleanLine.substring(0, idx).trim();
+            const val = cleanLine.substring(idx + 1).trim();
+            // 过滤无效 key
+            if (key && key.length < 50) { 
+                map.set(key, val);
+            }
         }
+        // 不含冒号的行直接丢弃，避免 "Original string part..." 等杂质
     });
     return map;
-}
-
-// 模糊匹配 Key 的辅助函数
-function findMatchingKey(targetKey, map) {
-    if (map.has(targetKey)) return targetKey;
-    // 尝试忽略大小写或去除非关键字符
-    for (const key of map.keys()) {
-        if (key.toLowerCase() === targetKey.toLowerCase()) return key;
-        // 如果是 RawLine，比较内容相似度 (这里简化为直接比较)
-        if (key.startsWith('RawLine') && targetKey.startsWith('RawLine')) {
-            // 简单逻辑：不做深度 Diff，直接视为不同
-            return null; 
-        }
-    }
-    return null;
 }
 
 async function collectActiveWorldInfoContent() {
@@ -178,33 +176,21 @@ async function getContextWorldBooks(extras = []) {
     return Array.from(books).filter(Boolean);
 }
 
-// [核心修复] 使用 SillyTavern.loadWorldInfo 替代 fetch
 async function getWorldBookEntries(bookName) {
-    let entriesData = null;
-    if (window.SillyTavern && typeof window.SillyTavern.loadWorldInfo === 'function') {
-        try {
-            const data = await window.SillyTavern.loadWorldInfo(bookName);
-            if (data) entriesData = data.entries;
-        } catch (e) { console.warn("[PW] ST loadWorldInfo error:", e); }
-    }
-    if (!entriesData) {
-        try {
-            const headers = getRequestHeaders();
-            const response = await fetch('/api/worldinfo/get', { method: 'POST', headers, body: JSON.stringify({ name: bookName }) });
-            if (response.ok) {
-                const data = await response.json();
-                entriesData = data.entries;
-            }
-        } catch (e) { console.error("[PW] API fetch error:", e); }
-    }
-    if (entriesData) {
-        return Object.values(entriesData).map(e => ({
-            uid: e.uid,
-            displayName: e.comment || (Array.isArray(e.key) ? e.key.join(', ') : e.key) || "无标题",
-            content: e.content || "",
-            enabled: !e.disable && e.enabled !== false
-        }));
-    }
+    if (worldInfoCache[bookName]) return worldInfoCache[bookName];
+    try {
+        const headers = getRequestHeaders();
+        const response = await fetch('/api/worldinfo/get', { method: 'POST', headers, body: JSON.stringify({ name: bookName }) });
+        if (response.ok) {
+            const data = await response.json();
+            const entries = Object.values(data.entries || {}).map(e => ({
+                uid: e.uid, displayName: e.comment || (Array.isArray(e.key) ? e.key.join(', ') : e.key),
+                content: e.content, enabled: !e.disable && e.enabled !== false
+            }));
+            worldInfoCache[bookName] = entries;
+            return entries;
+        }
+    } catch {}
     return [];
 }
 
@@ -229,30 +215,33 @@ async function runGeneration(data, apiConfig) {
         wiText = `\n[Context from World Info]:\n${data.wiContext.join('\n')}\n`;
     }
 
-    const systemPrompt = data.mode === 'refine' ? 
-    `Optimizing User Persona for ${charName}.
-    ${wiText}
-    [Current Data]: """${data.currentText}"""
-    [Instruction]: "${data.request}"
-    Task: Modify the data. If text is quoted, focus on that part. Maintain "Key: Value" format.
-    Response: ONLY the modified full text list.` :
-    `Creating User Persona for ${currentName} (Target: ${charName}).
-    ${wiText}
-    Traits: ${tagsCache.map(t => t.name).join(', ')}.
-    Instruction: ${data.request}
-    Task: Generate details in "Key: Value" format (one per line).
-    Response: ONLY the text list.`;
+    const traits = tagsCache.map(t => t.name).join(', ');
+    
+    // 获取自定义或默认 prompt
+    const prompts = apiConfig.customPrompts || defaultPrompts;
+    let template = data.mode === 'refine' ? prompts.refine : prompts.init;
+
+    // 替换变量
+    let systemPrompt = template
+        .replace(/\${charName}/g, charName)
+        .replace(/\${currentName}/g, currentName)
+        .replace(/\${traits}/g, traits)
+        .replace(/\${currentText}/g, data.currentText || '')
+        .replace(/\${request}/g, data.request || '');
+
+    // 附加 WI
+    systemPrompt = `${wiText}\n\n${systemPrompt}`;
 
     let responseContent = "";
     if (apiConfig.apiSource === 'independent') {
         const res = await fetch(`${apiConfig.indepApiUrl.replace(/\/$/, '')}/chat/completions`, {
             method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiConfig.indepApiKey}` },
-            body: JSON.stringify({ model: apiConfig.indepApiModel, messages: [{ role: 'system', content: systemPrompt + "\n" + data.request }], temperature: 0.7 })
+            body: JSON.stringify({ model: apiConfig.indepApiModel, messages: [{ role: 'system', content: systemPrompt }], temperature: 0.7 })
         });
         const json = await res.json();
         responseContent = json.choices[0].message.content;
     } else {
-        responseContent = await context.generateQuietPrompt(systemPrompt + "\n" + data.request, false, false, "System");
+        responseContent = await context.generateQuietPrompt(systemPrompt, false, false, "System");
     }
     return responseContent.replace(/```[a-z]*\n?/g, '').replace(/```/g, '').trim();
 }
@@ -298,7 +287,7 @@ async function openCreatorPopup() {
                 <div class="pw-info-display"><div class="pw-info-item"><i class="fa-solid fa-user"></i><span id="pw-display-name">${currentName}</span></div></div>
 
                 <div>
-                    <div class="pw-tags-header"><span class="pw-tags-label">快速设定 (点击填入生成框)</span><span class="pw-tags-edit-toggle" id="pw-toggle-edit-tags">编辑标签</span></div>
+                    <div class="pw-tags-header"><span class="pw-tags-label">快速设定 (点击填入)</span><span class="pw-tags-edit-toggle" id="pw-toggle-edit-tags">编辑标签</span></div>
                     <div class="pw-tags-container" id="pw-tags-list"></div>
                 </div>
 
@@ -308,7 +297,6 @@ async function openCreatorPopup() {
                 <div id="pw-result-area" style="display:none; margin-top:15px;">
                     <div class="pw-relative-container">
                         <textarea id="pw-result-text" class="pw-result-textarea" placeholder="生成的结果将显示在这里..."></textarea>
-                        <!-- 悬浮引用按钮 -->
                         <div id="pw-float-quote-btn" class="pw-float-quote-btn"><i class="fa-solid fa-pen-to-square"></i> 修改此段</div>
                     </div>
                     
@@ -322,14 +310,10 @@ async function openCreatorPopup() {
             </div>
 
             <div class="pw-footer">
-                <div class="pw-footer-left">
-                    <div class="pw-mini-btn" id="pw-clear"><i class="fa-solid fa-eraser"></i> 清空</div>
-                    <div class="pw-mini-btn" id="pw-snapshot"><i class="fa-solid fa-save"></i> 存入历史</div>
-                </div>
-                <div class="pw-footer-right">
-                    <label class="pw-wi-check-container" title="仅同步到角色绑定的世界书"><input type="checkbox" id="pw-wi-toggle" ${wiChecked ? 'checked' : ''}><span>同步进世界书</span></label>
-                    <button id="pw-btn-apply" class="pw-btn save">保存并覆盖当前设定</button>
-                </div>
+                <div class="pw-mini-btn" id="pw-clear" title="清空"><i class="fa-solid fa-eraser"></i></div>
+                <div class="pw-mini-btn" id="pw-snapshot" title="存入历史"><i class="fa-solid fa-clock-rotate-left"></i></div>
+                <label class="pw-wi-check-container" title="同步到绑定世界书"><input type="checkbox" id="pw-wi-toggle" ${wiChecked ? 'checked' : ''}><span>同步WI</span></label>
+                <button id="pw-btn-apply" class="pw-btn save">保存并覆盖</button>
             </div>
         </div>
 
@@ -343,8 +327,35 @@ async function openCreatorPopup() {
         </div>
 
         <div id="pw-view-context" class="pw-view"><div class="pw-scroll-area"><div class="pw-card-section"><div class="pw-wi-controls"><select id="pw-wi-select" class="pw-input pw-wi-select"><option value="">-- 添加参考/目标世界书 --</option>${renderBookOptions()}</select><button id="pw-wi-refresh" class="pw-btn primary pw-wi-refresh-btn"><i class="fa-solid fa-sync"></i></button><button id="pw-wi-add" class="pw-btn primary pw-wi-add-btn"><i class="fa-solid fa-plus"></i></button></div></div><div id="pw-wi-container"></div></div></div>
-        <div id="pw-view-api" class="pw-view"><div class="pw-scroll-area"><div class="pw-card-section"><div class="pw-row"><label>API 来源</label><select id="pw-api-source" class="pw-input" style="flex:1;"><option value="main" ${config.apiSource === 'main'?'selected':''}>主 API</option><option value="independent" ${config.apiSource === 'independent'?'selected':''}>独立 API</option></select></div><div id="pw-indep-settings" style="display:${config.apiSource === 'independent' ? 'flex' : 'none'}; flex-direction:column; gap:15px;"><div class="pw-row"><label>URL</label><input type="text" id="pw-api-url" class="pw-input" value="${config.indepApiUrl}" style="flex:1;"></div><div class="pw-row"><label>Key</label><input type="password" id="pw-api-key" class="pw-input" value="${config.indepApiKey}" style="flex:1;"></div><div class="pw-row"><label>Model</label><div style="flex:1; display:flex; gap:5px; width:100%;"><input type="text" id="pw-api-model" class="pw-input" value="${config.indepApiModel}" list="pw-model-list" style="flex:1;"><datalist id="pw-model-list"></datalist><button id="pw-api-fetch" class="pw-btn primary pw-api-fetch-btn" title="获取模型" style="width:auto;"><i class="fa-solid fa-cloud-download-alt"></i></button></div></div></div><div style="text-align:right;"><button id="pw-api-save" class="pw-btn primary" style="width:auto;">保存设置</button></div></div></div></div>
-        <div id="pw-view-history" class="pw-view"><div class="pw-scroll-area"><div class="pw-search-box"><i class="fa-solid fa-search pw-search-icon"></i><input type="text" id="pw-history-search" class="pw-input pw-search-input" placeholder="搜索历史..."><i class="fa-solid fa-times pw-search-clear" id="pw-history-search-clear" title="清空搜索"></i></div><div id="pw-history-list" style="display:flex; flex-direction:column;"></div><button id="pw-history-clear-all" class="pw-btn danger">清空所有历史</button></div></div>
+        
+        <div id="pw-view-api" class="pw-view">
+            <div class="pw-scroll-area">
+                <div class="pw-card-section">
+                    <div class="pw-row"><label>API 来源</label><select id="pw-api-source" class="pw-input" style="flex:1;"><option value="main" ${config.apiSource === 'main'?'selected':''}>主 API</option><option value="independent" ${config.apiSource === 'independent'?'selected':''}>独立 API</option></select></div>
+                    <div id="pw-indep-settings" style="display:${config.apiSource === 'independent' ? 'flex' : 'none'}; flex-direction:column; gap:10px;">
+                        <div class="pw-row"><label>URL</label><input type="text" id="pw-api-url" class="pw-input" value="${config.indepApiUrl}" style="flex:1;"></div>
+                        <div class="pw-row"><label>Key</label><input type="password" id="pw-api-key" class="pw-input" value="${config.indepApiKey}" style="flex:1;"></div>
+                        <div class="pw-row"><label>Model</label><input type="text" id="pw-api-model" class="pw-input" value="${config.indepApiModel}" style="flex:1;"></div>
+                    </div>
+                </div>
+
+                <!-- [新增] Prompt 编辑区 -->
+                <div class="pw-card-section">
+                    <div class="pw-row"><label>预设 Prompt 编辑</label></div>
+                    <div class="pw-prompt-config">
+                        <div class="pw-prompt-label">初始生成 Prompt (可用变量: \${traits}, \${request}, \${charName}, \${currentName})</div>
+                        <textarea id="pw-prompt-init" class="pw-prompt-textarea">${config.customPrompts?.init || defaultPrompts.init}</textarea>
+                        
+                        <div class="pw-prompt-label" style="margin-top:10px;">润色 Prompt (可用变量: \${currentText}, \${request}, \${charName})</div>
+                        <textarea id="pw-prompt-refine" class="pw-prompt-textarea">${config.customPrompts?.refine || defaultPrompts.refine}</textarea>
+                    </div>
+                </div>
+
+                <div style="text-align:right;"><button id="pw-api-save" class="pw-btn primary" style="width:auto;">保存设置</button></div>
+            </div>
+        </div>
+
+        <div id="pw-view-history" class="pw-view"><div class="pw-scroll-area"><div class="pw-search-box"><i class="fa-solid fa-search pw-search-icon"></i><input type="text" id="pw-history-search" class="pw-input pw-search-input" placeholder="🔍 搜索历史..."><i class="fa-solid fa-times pw-search-clear" id="pw-history-search-clear" title="清空搜索"></i></div><div id="pw-history-list" style="display:flex; flex-direction:column;"></div><button id="pw-history-clear-all" class="pw-btn danger">清空所有历史</button></div></div>
     </div>
     `;
 
@@ -356,11 +367,7 @@ async function openCreatorPopup() {
     if (savedState.resultText) {
         $('#pw-result-text').val(savedState.resultText);
         $('#pw-result-area').show();
-        // 延迟触发高度调整
-        setTimeout(() => {
-            const el = document.getElementById('pw-refine-input');
-            if(el) { el.style.height = 'auto'; el.style.height = (el.scrollHeight) + 'px'; }
-        }, 100);
+        setTimeout(() => $('#pw-refine-input').trigger('input'), 50);
     }
 }
 
@@ -370,12 +377,8 @@ async function openCreatorPopup() {
 
 function bindEvents() {
     $(document).off('.pw');
-    const adjustHeight = (el) => { 
-        el.style.height = 'auto'; 
-        el.style.height = (el.scrollHeight) + 'px'; 
-    };
+    const adjustHeight = (el) => { el.style.height = 'auto'; el.style.height = (el.scrollHeight) + 'px'; };
 
-    // [关键] 润色框自动增高
     $(document).on('input.pw', '#pw-refine-input', function() { adjustHeight(this); });
 
     $(document).on('click.pw', '.pw-tab', function() {
@@ -385,7 +388,6 @@ function bindEvents() {
         if($(this).data('tab') === 'history') renderHistoryList(); 
     });
 
-    // 悬浮引用逻辑
     const checkSelection = () => {
         const el = document.getElementById('pw-result-text');
         if (!el) return;
@@ -405,13 +407,10 @@ function bindEvents() {
         if (selectedText) {
             const $input = $('#pw-refine-input');
             const cur = $input.val();
-            // 修正文案：将 "..." 修改为:
+            // 文案修正
             const newText = `将 "${selectedText}" 修改为: `;
             $input.val(cur ? cur + '\n' + newText : newText).focus();
-            
-            // 手动触发高度调整
             adjustHeight($input[0]);
-            
             textarea.setSelectionRange(end, end);
             checkSelection();
         }
@@ -428,11 +427,16 @@ function bindEvents() {
                 indepApiUrl: $('#pw-api-url').val(),
                 indepApiKey: $('#pw-api-key').val(),
                 indepApiModel: $('#pw-api-model').val(),
+                // 保存自定义 Prompt
+                customPrompts: {
+                    init: $('#pw-prompt-init').val(),
+                    refine: $('#pw-prompt-refine').val()
+                },
                 extraBooks: window.pwExtraBooks || []
             }
         });
     };
-    $(document).on('input.pw change.pw', '#pw-request, #pw-result-text, #pw-wi-toggle, .pw-input', saveCurrentState);
+    $(document).on('input.pw change.pw', '#pw-request, #pw-result-text, #pw-wi-toggle, .pw-input, .pw-prompt-textarea', saveCurrentState);
 
     // 润色 (Diff)
     $(document).on('click.pw', '#pw-btn-refine', async function() {
@@ -443,7 +447,17 @@ function bindEvents() {
 
         try {
             const wiContent = await collectActiveWorldInfoContent();
-            const config = { mode: 'refine', request: refineReq, currentText: oldText, wiContext: wiContent, apiSource: $('#pw-api-source').val(), indepApiUrl: $('#pw-api-url').val(), indepApiKey: $('#pw-api-key').val(), indepApiModel: $('#pw-api-model').val() };
+            // 读取最新的配置（包含自定义Prompt）
+            const savedConfig = extension_settings[extensionName]?.localConfig || {};
+            const config = { 
+                mode: 'refine', request: refineReq, currentText: oldText, 
+                wiContext: wiContent, 
+                apiSource: $('#pw-api-source').val(), 
+                indepApiUrl: $('#pw-api-url').val(), 
+                indepApiKey: $('#pw-api-key').val(), 
+                indepApiModel: $('#pw-api-model').val(),
+                customPrompts: savedConfig.customPrompts || { ...defaultPrompts }
+            };
             const responseText = await runGeneration(config, config);
             
             const oldMap = parseTextToMap(oldText);
@@ -454,13 +468,9 @@ function bindEvents() {
             let changeCount = 0;
 
             allKeys.forEach(key => {
-                const matchedKeyInOld = findMatchingKey(key, oldMap) || key;
-                const matchedKeyInNew = findMatchingKey(key, newMap) || key;
-
-                const valOld = oldMap.get(matchedKeyInOld) || "";
-                const valNew = newMap.get(matchedKeyInNew) || "";
+                const valOld = oldMap.get(key) || "";
+                const valNew = newMap.get(key) || "";
                 
-                // 去除空白后比较
                 const isChanged = valOld.trim() !== valNew.trim();
                 if (isChanged) changeCount++;
 
@@ -468,7 +478,6 @@ function bindEvents() {
 
                 let optionsHtml = '';
                 if (!isChanged) {
-                    // 无变化：只显示一个框
                     optionsHtml = `<div class="pw-diff-options"><div class="pw-diff-opt single-view selected" data-val="${valNew}"><span class="pw-diff-opt-label">无变更</span><div class="pw-diff-opt-text">${valNew}</div></div></div>`;
                 } else {
                     optionsHtml = `
@@ -478,10 +487,7 @@ function bindEvents() {
                         </div>`;
                 }
 
-                // 如果是 RawLine，标题显示为 "描述段落"
-                const displayKey = key.startsWith('RawLine') || key.startsWith('Info_') ? "其他描述" : key;
-
-                const $row = $(`<div class="pw-diff-row" data-key="${displayKey}"><div class="pw-diff-attr-name">${displayKey}</div>${optionsHtml}<div class="pw-diff-edit-area"><textarea class="pw-diff-custom-input" placeholder="可微调...">${valNew}</textarea></div></div>`);
+                const $row = $(`<div class="pw-diff-row" data-key="${key}"><div class="pw-diff-attr-name">${key}</div>${optionsHtml}<div class="pw-diff-edit-area"><textarea class="pw-diff-custom-input" placeholder="可微调...">${valNew}</textarea></div></div>`);
                 $list.append($row);
             });
 
@@ -503,9 +509,7 @@ function bindEvents() {
             const key = $(this).data('key');
             const val = $(this).find('.pw-diff-custom-input').val().trim();
             if (!val) return;
-            // 如果是特殊描述Key，直接添加值；否则添加 Key: Value
-            if (key === "其他描述" || key.startsWith('Info_')) finalLines.push(val);
-            else finalLines.push(`${key}: ${val}`);
+            if (key.startsWith('Info_')) finalLines.push(val); else finalLines.push(`${key}: ${val}`);
         });
         $('#pw-result-text').val(finalLines.join('\n'));
         $('#pw-diff-overlay').fadeOut();
@@ -522,7 +526,15 @@ function bindEvents() {
         const $btn = $(this).prop('disabled', true).html('<i class="fas fa-spinner fa-spin"></i>');
         try {
             const wiContent = await collectActiveWorldInfoContent();
-            const config = { mode: 'initial', request: req, wiContext: wiContent, apiSource: $('#pw-api-source').val(), indepApiUrl: $('#pw-api-url').val(), indepApiKey: $('#pw-api-key').val(), indepApiModel: $('#pw-api-model').val() };
+            const savedConfig = extension_settings[extensionName]?.localConfig || {};
+            const config = { 
+                mode: 'initial', request: req, wiContext: wiContent, 
+                apiSource: $('#pw-api-source').val(), 
+                indepApiUrl: $('#pw-api-url').val(), 
+                indepApiKey: $('#pw-api-key').val(), 
+                indepApiModel: $('#pw-api-model').val(),
+                customPrompts: savedConfig.customPrompts || { ...defaultPrompts }
+            };
             const text = await runGeneration(config, config);
             $('#pw-result-text').val(text);
             $('#pw-result-area').fadeIn();
@@ -531,7 +543,7 @@ function bindEvents() {
         finally { $btn.prop('disabled', false).html('生成设定'); }
     });
 
-    // 保存并覆盖逻辑 (World Info 修复)
+    // 保存
     $(document).on('click.pw', '#pw-btn-apply', async function() {
         const content = $('#pw-result-text').val();
         if (!content) return toastr.warning("内容为空");
@@ -542,7 +554,7 @@ function bindEvents() {
 
         if ($('#pw-wi-toggle').is(':checked')) {
             const boundBooks = await getContextWorldBooks();
-            let targetBook = boundBooks[0]; // 严格使用绑定书
+            let targetBook = boundBooks[0]; 
 
             if (targetBook) {
                 try {
@@ -566,7 +578,6 @@ function bindEvents() {
                         if (window.SillyTavern && window.SillyTavern.loadWorldInfo) {
                             await window.SillyTavern.loadWorldInfo(targetBook);
                         }
-                        
                         toastr.success(TEXT.TOAST_WI_SUCCESS(targetBook));
                     }
                 } catch(e) { console.error("WI Error:", e); }
@@ -584,32 +595,18 @@ function bindEvents() {
     $(document).on('click.pw', '#pw-snapshot', function() {
         const text = $('#pw-result-text').val();
         if (!text) return toastr.warning("内容为空");
-        const context = getContext();
-        const userName = $('.persona_name').first().text().trim() || "User";
-        const charName = context.characters[context.characterId]?.name || "";
-        const defaultTitle = `${userName} + ${charName} (${new Date().toLocaleDateString()})`;
-        
-        saveHistory({ 
-            request: $('#pw-request').val() || "无", 
-            timestamp: new Date().toLocaleString(), 
-            title: defaultTitle,
-            data: { name: userName, resultText: text } 
-        });
+        saveHistory({ request: $('#pw-request').val() || "无", timestamp: new Date().toLocaleString(), data: { name: "User", resultText: text } });
         toastr.success(TEXT.TOAST_SNAPSHOT);
     });
 
     $(document).on('blur.pw', '.pw-hist-title-edit', function() {
         const newTitle = $(this).val();
         const index = $(this).data('index');
-        if (historyCache[index]) {
-            historyCache[index].title = newTitle;
-            saveData();
-        }
+        if (historyCache[index]) { historyCache[index].title = newTitle; saveData(); }
     });
 
     $(document).on('click.pw', '#pw-toggle-edit-tags', () => { isEditingTags = !isEditingTags; renderTagsList(); });
     $(document).on('change.pw', '#pw-api-source', function() { $('#pw-indep-settings').toggle($(this).val() === 'independent'); });
-    $(document).on('click.pw', '#pw-api-fetch', async function() { /* same */ });
     $(document).on('click.pw', '#pw-api-save', () => { saveData(); toastr.success("API设置已保存(本地)"); });
     $(document).on('click.pw', '#pw-wi-refresh', async () => {
         const btn = $(this); btn.find('i').addClass('fa-spin');
@@ -624,7 +621,7 @@ function bindEvents() {
     $(document).on('click.pw', '#pw-history-clear-all', function() { if(confirm("清空?")){historyCache=[];saveData();renderHistoryList();} });
 }
 
-// ... 辅助渲染函数 ...
+// 辅助渲染
 const renderTagsList = () => {
     const $container = $('#pw-tags-list').empty();
     const $toggleBtn = $('#pw-toggle-edit-tags');
@@ -640,7 +637,6 @@ const renderTagsList = () => {
             const $chip = $(`<div class="pw-tag-chip"><i class="fa-solid fa-tag" style="opacity:0.5; margin-right:4px;"></i><span>${tag.name}</span>${tag.value ? `<span class="pw-tag-val">${tag.value}</span>` : ''}</div>`);
             $chip.on('click', () => {
                 const $text = $('#pw-request');
-                // [修复] 只有输入框有内容时才加换行
                 const cur = $text.val();
                 const prefix = (cur && !cur.endsWith('\n')) ? '\n' : '';
                 $text.val(cur + prefix + (tag.value ? `${tag.name}: ${tag.value}` : `${tag.name}: `)).focus();
@@ -648,7 +644,6 @@ const renderTagsList = () => {
             $container.append($chip);
         }
     });
-    // ... add buttons ...
     const $addBtn = $(`<div class="pw-tag-add-btn"><i class="fa-solid fa-plus"></i> ${isEditingTags ? '新增' : '标签'}</div>`);
     $addBtn.on('click', () => { tagsCache.push({ name: "", value: "" }); saveData(); if (!isEditingTags) isEditingTags = true; renderTagsList(); });
     $container.append($addBtn);
