@@ -4,11 +4,10 @@ import { saveSettingsDebounced, callPopup, getRequestHeaders } from "../../../..
 const extensionName = "st-persona-weaver";
 const STORAGE_KEY_HISTORY = 'pw_history_v20';
 const STORAGE_KEY_STATE = 'pw_state_v20'; 
-const STORAGE_KEY_TEMPLATE_KEYS = 'pw_template_keys_v14'; // [需求2] 重命名为 Template Keys
-const STORAGE_KEY_PROMPTS = 'pw_prompts_v1';
+const STORAGE_KEY_TEMPLATE_KEYS = 'pw_template_keys_v14'; 
+const STORAGE_KEY_PROMPTS = 'pw_prompts_v2'; // Prompt 版本升级
 const BUTTON_ID = 'pw_persona_tool_btn';
 
-// [需求2] 默认模版字段，与下方 YAML 对应
 const defaultTemplateKeys = [
     { name: "gender", value: "" },
     { name: "identity", value: "" },
@@ -32,7 +31,6 @@ const defaultTemplateKeys = [
     { name: "NSFW_information", value: "" }
 ];
 
-// 完整模版字符串 (去除 Name)
 const fullTemplateText = 
 `gender:
 identity:
@@ -149,13 +147,15 @@ NSFW_information:
   Limits:
     -`;
 
+// [需求1] 使用 {{format}} 注入模版骨架
 const defaultSystemPromptInitial = 
 `Creating User Persona for {{user}} (Target: {{char}}).
 {{wi}}
-Template Keys: {{tags}}.
 Instruction: {{input}}
-Task: Fill in the character details strictly following "Key: Value" or YAML format. Do NOT add extra commentary.
-Response: ONLY the generated data.`;
+Task: Fill in the character details strictly following the format below.
+Required Format:
+{{format}}
+Response: ONLY the filled data in the required format.`;
 
 const defaultSystemPromptRefine = 
 `Optimizing User Persona for {{char}}.
@@ -163,7 +163,7 @@ const defaultSystemPromptRefine =
 [Current Data]:
 """{{current}}"""
 [Instruction]: "{{input}}"
-Task: Modify the data based on instruction. If text is quoted, focus on that part. Maintain strict "Key: Value" or YAML format.
+Task: Modify the data based on instruction. If text is quoted, focus on that part. Maintain the key-value format.
 Response: ONLY the modified full data list.`;
 
 const defaultSettings = {
@@ -183,14 +183,14 @@ const TEXT = {
 };
 
 let historyCache = [];
-let templateKeysCache = []; // [需求2] 改名
+let templateKeysCache = [];
 let promptsCache = { initial: defaultSystemPromptInitial, refine: defaultSystemPromptRefine };
 let availableWorldBooks = []; 
 let isEditingTags = false; 
-let checkInterval = null; // [需求1] 使用 Interval 替代 Observer
+let checkInterval = null;
 
 // ============================================================================
-// 1. 核心数据解析逻辑 (Key-Value 强力白名单清洗)
+// 1. 核心数据解析逻辑 (支持中文冒号)
 // ============================================================================
 
 function parseTextToMap(text) {
@@ -200,10 +200,14 @@ function parseTextToMap(text) {
     
     lines.forEach((line, index) => {
         if (!line.trim()) return;
-        const idx = line.indexOf(':');
-        if (idx === -1) return;
+        
+        // [需求3] 同时匹配中文和英文冒号
+        const match = line.match(/[:：]/);
+        if (!match) return;
+        const idx = match.index;
 
         let rawKey = line.substring(0, idx).trim();
+        // 清洗 Key
         let cleanKey = rawKey.replace(/[^\u4e00-\u9fa5a-zA-Z0-9\s]/g, '').trim(); 
         let val = line.substring(idx + 1).trim();
 
@@ -436,7 +440,8 @@ async function runGeneration(data, apiConfig) {
         wiText = `\n[Context from World Info]:\n${data.wiContext.join('\n')}\n`;
     }
 
-    const tagsList = templateKeysCache.map(t => t.name).join(', ');
+    // [需求1] 构建 YAML 骨架作为 Format 要求
+    const formatSkeleton = templateKeysCache.map(t => `${t.name}: ${t.value || ''}`).join('\n');
     
     let systemTemplate = data.mode === 'refine' ? promptsCache.refine : promptsCache.initial;
     
@@ -444,7 +449,8 @@ async function runGeneration(data, apiConfig) {
         .replace(/{{user}}/g, currentName)
         .replace(/{{char}}/g, charName)
         .replace(/{{wi}}/g, wiText)
-        .replace(/{{tags}}/g, tagsList)
+        .replace(/{{tags}}/g, templateKeysCache.map(t=>t.name).join(', ')) // 兼容旧变量
+        .replace(/{{format}}/g, formatSkeleton) // [需求1] 注入格式
         .replace(/{{input}}/g, data.request)
         .replace(/{{current}}/g, data.currentText || "");
 
@@ -506,7 +512,6 @@ async function openCreatorPopup() {
                     <div class="pw-tags-header">
                         <span class="pw-tags-label">模版字段管理 (点击填入)</span>
                         <div class="pw-tags-actions">
-                            <!-- [需求2] 插入完整模版 -->
                             <span class="pw-insert-template-btn" id="pw-btn-insert-template" title="插入完整人设模版"><i class="fa-solid fa-file-invoice"></i> 插入模版</span>
                             <span class="pw-tags-edit-toggle" id="pw-toggle-edit-tags">编辑字段</span>
                         </div>
@@ -522,7 +527,6 @@ async function openCreatorPopup() {
                         <textarea id="pw-result-text" class="pw-result-textarea" placeholder="生成的结果将显示在这里..."></textarea>
                     </div>
                     
-                    <!-- [需求3] 竖向润色按钮布局 -->
                     <div class="pw-refine-toolbar">
                         <textarea id="pw-refine-input" class="pw-refine-input" placeholder="输入润色意见..."></textarea>
                         <div class="pw-refine-btn-vertical" id="pw-btn-refine" title="执行润色">润色</div>
@@ -562,7 +566,15 @@ async function openCreatorPopup() {
                     <div id="pw-indep-settings" style="display:${config.apiSource === 'independent' ? 'flex' : 'none'}; flex-direction:column; gap:15px;">
                         <div class="pw-row"><label>URL</label><input type="text" id="pw-api-url" class="pw-input" value="${config.indepApiUrl}" style="flex:1;"></div>
                         <div class="pw-row"><label>Key</label><input type="password" id="pw-api-key" class="pw-input" value="${config.indepApiKey}" style="flex:1;"></div>
-                        <div class="pw-row"><label>Model</label><div style="flex:1; display:flex; gap:5px; width:100%;"><input type="text" id="pw-api-model" class="pw-input" value="${config.indepApiModel}" list="pw-model-list" style="flex:1;"><datalist id="pw-model-list"></datalist><button id="pw-api-fetch" class="pw-btn primary pw-api-fetch-btn" title="获取模型" style="width:auto;"><i class="fa-solid fa-cloud-download-alt"></i></button></div></div>
+                        <!-- [需求4] 模型和测试按钮 -->
+                        <div class="pw-row"><label>Model</label>
+                            <div style="flex:1; display:flex; gap:5px; width:100%; flex-wrap: wrap;">
+                                <input type="text" id="pw-api-model" class="pw-input" value="${config.indepApiModel}" list="pw-model-list" style="flex:1; min-width: 120px;">
+                                <datalist id="pw-model-list"></datalist>
+                                <button id="pw-api-fetch" class="pw-btn primary" title="获取模型列表" style="width:auto;"><i class="fa-solid fa-cloud-download-alt"></i></button>
+                                <button id="pw-api-test" class="pw-btn primary" title="测试连接" style="width:auto; color: #9ece6a;"><i class="fa-solid fa-plug"></i></button>
+                            </div>
+                        </div>
                     </div>
                 </div>
 
@@ -571,7 +583,7 @@ async function openCreatorPopup() {
                     <div class="pw-var-btns">
                         <div class="pw-var-btn" data-ins="{{user}}">User名</div>
                         <div class="pw-var-btn" data-ins="{{char}}">Char名</div>
-                        <div class="pw-var-btn" data-ins="{{tags}}">标签列表</div>
+                        <div class="pw-var-btn" data-ins="{{format}}">模版骨架</div>
                         <div class="pw-var-btn" data-ins="{{input}}">用户要求</div>
                         <div class="pw-var-btn" data-ins="{{wi}}">世界书内容</div>
                     </div>
@@ -631,7 +643,6 @@ function bindEvents() {
     // [需求2] 插入完整模版
     $(document).on('click.pw', '#pw-btn-insert-template', function() {
         const cur = $('#pw-request').val();
-        // 如果输入框不为空，则追加；否则直接替换
         const newVal = cur ? (cur + '\n\n' + fullTemplateText) : fullTemplateText;
         $('#pw-request').val(newVal).focus();
         toastr.success("完整模版已插入");
@@ -698,7 +709,6 @@ function bindEvents() {
     };
     $(document).on('input.pw change.pw', '#pw-request, #pw-result-text, #pw-wi-toggle, .pw-input', saveCurrentState);
 
-    // [需求3] 润色按钮点击事件（注意 ID 未变，CSS 变了）
     $(document).on('click.pw', '#pw-btn-refine', async function() {
         const refineReq = $('#pw-refine-input').val();
         if (!refineReq) return toastr.warning("请输入润色意见");
@@ -857,7 +867,31 @@ function bindEvents() {
 
     $(document).on('click.pw', '#pw-toggle-edit-tags', () => { isEditingTags = !isEditingTags; renderTagsList(); });
     $(document).on('change.pw', '#pw-api-source', function() { $('#pw-indep-settings').toggle($(this).val() === 'independent'); });
-    $(document).on('click.pw', '#pw-api-fetch', async function() { /* same */ });
+    
+    // [需求4] API 测试逻辑
+    $(document).on('click.pw', '#pw-api-test', async function() {
+        const url = $('#pw-api-url').val();
+        const key = $('#pw-api-key').val();
+        const $btn = $(this).prop('disabled', true).html('<i class="fas fa-spinner fa-spin"></i>');
+        
+        try {
+            const res = await fetch(`${url.replace(/\/$/, '')}/models`, { 
+                method: 'GET', 
+                headers: { 'Authorization': `Bearer ${key}` } 
+            });
+            if (res.ok) {
+                toastr.success("连接成功！API 工作正常。");
+            } else {
+                throw new Error(res.statusText);
+            }
+        } catch (e) {
+            toastr.error(`连接失败: ${e.message}`);
+        } finally {
+            $btn.prop('disabled', false).html('<i class="fa-solid fa-plug"></i>');
+        }
+    });
+
+    $(document).on('click.pw', '#pw-api-fetch', async function() { /* same fetch logic */ });
     
     $(document).on('click.pw', '#pw-api-save', () => { 
         promptsCache.initial = $('#pw-prompt-initial').val();
@@ -908,7 +942,6 @@ const renderTagsList = () => {
                 const $text = $('#pw-request');
                 const cur = $text.val();
                 const prefix = (cur && !cur.endsWith('\n')) ? '\n' : '';
-                // 插入完整值
                 $text.val(cur + prefix + (tag.value ? `${tag.name}: ${tag.value}` : `${tag.name}: `)).focus();
             });
             $container.append($chip);
@@ -985,14 +1018,13 @@ function addPersonaButton() {
     container.prepend(newButton);
 }
 
-// [需求1] 使用 Interval 代替 Observer
 function initInterval() {
     if (checkInterval) clearInterval(checkInterval);
     checkInterval = setInterval(() => {
         if ($(`#${BUTTON_ID}`).length === 0 && $('.persona_controls_buttons_block').length > 0) {
             addPersonaButton();
         }
-    }, 1500); // 1.5秒检查一次，性能开销极低
+    }, 1500);
 }
 
 jQuery(async () => {
