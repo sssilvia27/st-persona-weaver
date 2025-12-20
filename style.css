@@ -59,7 +59,7 @@
 }
 .pw-tag-chip:hover { background: rgba(255, 255, 255, 0.1); border-color: #e0af68; transform: translateY(-1px); }
 
-/* [需求1] 模版编辑器 & 底部快捷键栏 */
+/* 模版编辑器 & 底部快捷键栏 */
 .pw-template-editor-area {
     display: none; flex-direction: column; gap: 0;
     background: rgba(0,0,0,0.2); border-radius: 6px; border: 1px solid var(--SmartThemeBorderColor); overflow: hidden;
@@ -164,24 +164,38 @@
 .pw-refine-btn-vertical:hover { background: rgba(224, 175, 104, 0.1); opacity: 1; }
 .pw-refine-btn-text { writing-mode: vertical-rl; text-orientation: upright; letter-spacing: 2px; }
 
-.pw-float-quote-btn {
+/* [重要修改] 悬浮按钮 (Body级定位) */
+/* 注意：不再依赖父容器的样式，完全基于 viewport */
+.pw-float-quote-btn-fixed {
     position: fixed; 
     top: 20%; right: 0;
+    z-index: 2147483647; /* 最高层级 */
     background: linear-gradient(135deg, #e0af68, #d08f40);
     color: #1a1a1a;
     padding: 8px 12px; 
     border-radius: 20px 0 0 20px; 
     font-weight: bold; font-size: 0.85em; 
     box-shadow: -2px 2px 8px rgba(0,0,0,0.4);
-    cursor: pointer; z-index: 9999; 
-    display: none; align-items: center; gap: 4px;
+    cursor: pointer; 
+    display: flex; align-items: center; gap: 4px;
     border: 1px solid rgba(255,255,255,0.3); border-right: none;
     backdrop-filter: blur(5px);
+    
+    /* 动画控制 */
+    opacity: 0;
+    pointer-events: none;
+    transform: translateX(100%);
+    transition: opacity 0.2s ease, transform 0.2s cubic-bezier(0.18, 0.89, 0.32, 1.28);
 }
-.pw-float-quote-btn:hover { padding-right: 18px; transform: translateX(-2px); }
+.pw-float-quote-btn-fixed.visible {
+    opacity: 1;
+    pointer-events: auto;
+    transform: translateX(0);
+}
+.pw-float-quote-btn-fixed:hover { padding-right: 18px; transform: translateX(-2px); }
 
 /* =========================================
-   6. 结构化 Diff 对比视图 (含 Tabs) [需求4]
+   6. 结构化 Diff 对比视图
 ========================================= */
 .pw-diff-container {
     display: flex; flex-direction: column; gap: 0;
@@ -190,7 +204,6 @@
     box-sizing: border-box; color: #e0e0e0;
 }
 
-/* Tab 头部 */
 .pw-diff-tabs-bar {
     display: flex; border-bottom: 1px solid #333; background: rgba(0,0,0,0.2);
     padding: 5px 5px 0 5px; gap: 5px; flex-shrink: 0;
@@ -205,13 +218,8 @@
 }
 .pw-diff-tab:hover:not(.active) { opacity: 0.9; background: #2a2a2a; }
 
-/* 内容区域 */
 .pw-diff-content-area { flex: 1; overflow: hidden; position: relative; padding: 10px; display: flex; flex-direction: column; }
-
-/* 列表视图 */
 .pw-diff-list-view { display: flex; flex-direction: column; gap: 10px; overflow-y: auto; padding-right: 5px; height: 100%; }
-
-/* [需求4] 原文编辑视图 */
 .pw-diff-raw-view { display: none; flex-direction: column; height: 100%; }
 .pw-diff-raw-textarea {
     flex: 1; width: 100%; background: #111; color: #ccc;
