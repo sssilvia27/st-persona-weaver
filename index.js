@@ -4,16 +4,142 @@ import { saveSettingsDebounced, callPopup, getRequestHeaders } from "../../../..
 const extensionName = "st-persona-weaver";
 const STORAGE_KEY_HISTORY = 'pw_history_v20';
 const STORAGE_KEY_STATE = 'pw_state_v20'; 
-const STORAGE_KEY_TAGS = 'pw_tags_v12';
+const STORAGE_KEY_TAGS = 'pw_tags_v13'; // 更新版本号以重置标签
 const STORAGE_KEY_PROMPTS = 'pw_prompts_v1';
 const BUTTON_ID = 'pw_persona_tool_btn';
 
+// [需求6] 默认标签更新为用户提供的模版Key
 const defaultTags = [
-    { name: "性别", value: "" }, { name: "年龄", value: "" }, { name: "MBTI", value: "" },
-    { name: "职业", value: "" }, { name: "阵营", value: "" }, { name: "外貌", value: "" },
-    { name: "性格", value: "" }, { name: "关系", value: "" }, { name: "XP", value: "" },
-    { name: "秘密", value: "" }
+    { name: "name", value: "" },
+    { name: "gender", value: "" },
+    { name: "identity", value: "" },
+    { name: "appearance", value: "" },
+    { name: "personality", value: "" },
+    { name: "background", value: "" },
+    { name: "social_status", value: "" },
+    { name: "attire", value: "" },
+    { name: "lifestyle", value: "" },
+    { name: "sexual_orientation", value: "" },
+    { name: "NSFW_information", value: "" }
 ];
+
+// 完整模版字符串
+const fullTemplateText = 
+`name:
+gender:
+identity:
+- 
+date_of_birth:
+zodiac_sign:
+mbti:
+sexual_orientation:
+appearance:
+  height:
+  weight:
+  build:
+  body:
+    breast:
+    pussy:
+    ass hole:
+    legs:
+    hip:
+  features:
+    overall:
+    eyes:
+    nose:
+    lips:
+    glasses:
+  hair:
+  skin:
+  odur:
+  distinguishing_marks:
+  overall_impression:
+
+family_background:
+   Father:
+   Mother:
+   Other:
+      - 
+
+background_story:
+  童年(0-12岁):
+    -
+  少年(13-18岁):
+    -
+  青年(19-35岁):
+    -
+  中年(35-至今):
+    -
+  现状:
+    -
+social_status:
+  -
+
+attire:
+  business_formal:
+  business_casual:
+  casual_wear:
+  home_wear:
+
+personality:
+  core_traits:
+    -
+  public_persona:
+    -
+  pravite_persona:
+    -
+  romantic_traits:
+    -
+  advantage:
+    -
+  disadvantage:
+    -
+
+lifestyle_and_habits:
+  residence:
+  personal_habits:
+    -
+  preferences:
+     likes:
+       -
+     dislikes:
+       -
+
+work_behaviors:
+  -
+
+emotional_behaviors:
+  angry:
+  happy:
+
+goals/motivation:
+  -
+
+weakness:
+  -
+
+skills:
+  - 工作: ["",""]
+  - 生活: ["",""]
+  - 爱好: ["",""]
+
+relationship:
+
+NSFW_information:
+  Sex_related traits:
+    first_time:
+    experiences:
+    sexual_knowledge:
+    sexual_orientation:
+      -
+    sexual_role:
+    sexual_habits:
+      -
+    sexual_preference:
+  Kinks:
+    -
+  Limits:
+    -`;
 
 const defaultSystemPromptInitial = 
 `Creating User Persona for {{user}} (Target: {{char}}).
@@ -48,7 +174,7 @@ const TEXT = {
     TOAST_WI_SUCCESS: (book) => `已实时更新世界书: ${book}`,
     TOAST_WI_FAIL: "当前角色未绑定世界书，无法同步",
     TOAST_WI_ERROR: "TavernHelper API 未加载，无法写入世界书",
-    TOAST_SNAPSHOT: "已存入历史记录"
+    TOAST_SNAPSHOT: "已存入草稿箱"
 };
 
 let historyCache = [];
@@ -59,7 +185,7 @@ let isEditingTags = false;
 let observer = null; 
 
 // ============================================================================
-// 1. 核心数据解析逻辑 (Key-Value 强力白名单清洗 [需求6])
+// 1. 核心数据解析逻辑 (Key-Value 强力白名单清洗)
 // ============================================================================
 
 function parseTextToMap(text) {
@@ -73,9 +199,7 @@ function parseTextToMap(text) {
         if (idx === -1) return;
 
         let rawKey = line.substring(0, idx).trim();
-        // [需求6] 剔除 Key 中的所有符号，只保留中文、字母、数字、空格
         let cleanKey = rawKey.replace(/[^\u4e00-\u9fa5a-zA-Z0-9\s]/g, '').trim(); 
-        
         let val = line.substring(idx + 1).trim();
 
         if (cleanKey && val) {
@@ -365,7 +489,8 @@ async function openCreatorPopup() {
                 <div class="pw-tab active" data-tab="editor">编辑</div>
                 <div class="pw-tab" data-tab="context">世界书</div>
                 <div class="pw-tab" data-tab="api">API & Prompt</div>
-                <div class="pw-tab" data-tab="history">历史</div>
+                <!-- [需求4] 历史改名为草稿 -->
+                <div class="pw-tab" data-tab="history">草稿</div>
             </div>
         </div>
 
@@ -374,11 +499,17 @@ async function openCreatorPopup() {
                 <div class="pw-info-display"><div class="pw-info-item"><i class="fa-solid fa-user"></i><span id="pw-display-name">${currentName}</span></div></div>
 
                 <div>
-                    <div class="pw-tags-header"><span class="pw-tags-label">快速设定 (点击填入)</span><span class="pw-tags-edit-toggle" id="pw-toggle-edit-tags">编辑标签</span></div>
+                    <div class="pw-tags-header">
+                        <span class="pw-tags-label">快速设定 (点击填入)</span>
+                        <div class="pw-tags-actions">
+                            <!-- [需求6] 插入模版按钮 -->
+                            <span class="pw-insert-template-btn" id="pw-btn-insert-template" title="插入完整人设模版"><i class="fa-solid fa-file-invoice"></i> 插入模版</span>
+                            <span class="pw-tags-edit-toggle" id="pw-toggle-edit-tags">编辑标签</span>
+                        </div>
+                    </div>
                     <div class="pw-tags-container" id="pw-tags-list"></div>
                 </div>
 
-                <!-- [需求1] 初始高度较大 -->
                 <textarea id="pw-request" class="pw-textarea" placeholder="在此输入初始设定要求..." style="min-height:200px;">${savedState.request || ''}</textarea>
                 <button id="pw-btn-gen" class="pw-btn gen">生成设定</button>
 
@@ -399,12 +530,10 @@ async function openCreatorPopup() {
             <div class="pw-footer">
                 <div class="pw-footer-group">
                     <div class="pw-compact-btn danger" id="pw-clear" title="清空"><i class="fa-solid fa-eraser"></i></div>
-                    <div class="pw-compact-btn" id="pw-snapshot" title="存入历史"><i class="fa-solid fa-save"></i></div>
+                    <div class="pw-compact-btn" id="pw-snapshot" title="存入草稿 (Drafts)"><i class="fa-solid fa-save"></i></div>
                 </div>
                 <div class="pw-footer-group" style="flex:1; justify-content:flex-end;">
-                    <!-- [需求4] Tooltip 提示 -->
                     <div class="pw-wi-sync-toggle ${wiChecked ? 'active' : ''}" id="pw-wi-sync-btn" title="同时存入/更新世界书 (仅限角色绑定的世界书)"><i class="fa-solid fa-book-medical"></i></div>
-                    <!-- [需求5] 保存并覆盖 -->
                     <div class="pw-footer-main-btn" id="pw-btn-apply"><i class="fa-solid fa-check"></i> 保存并覆盖</div>
                 </div>
             </div>
@@ -419,7 +548,6 @@ async function openCreatorPopup() {
             </div>
         </div>
 
-        <!-- [需求2] 悬浮按钮 -->
         <div id="pw-float-quote-btn" class="pw-float-quote-btn"><i class="fa-solid fa-pen-to-square"></i> 修改此段</div>
 
         <div id="pw-view-context" class="pw-view"><div class="pw-scroll-area"><div class="pw-card-section"><div class="pw-wi-controls"><select id="pw-wi-select" class="pw-input pw-wi-select"><option value="">-- 添加参考/目标世界书 --</option>${renderBookOptions()}</select><button id="pw-wi-refresh" class="pw-btn primary pw-wi-refresh-btn"><i class="fa-solid fa-sync"></i></button><button id="pw-wi-add" class="pw-btn primary pw-wi-add-btn"><i class="fa-solid fa-plus"></i></button></div></div><div id="pw-wi-container"></div></div></div>
@@ -469,7 +597,6 @@ async function openCreatorPopup() {
     if (savedState.resultText) {
         $('#pw-result-text').val(savedState.resultText);
         $('#pw-result-area').show();
-        // [需求1] 如果有结果，初始框变小
         $('#pw-request').addClass('minimized');
         setTimeout(() => {
             const el = document.getElementById('pw-refine-input');
@@ -496,6 +623,15 @@ function bindEvents() {
         $('.pw-view').removeClass('active');
         $(`#pw-view-${$(this).data('tab')}`).addClass('active');
         if($(this).data('tab') === 'history') renderHistoryList(); 
+    });
+
+    // [需求6] 插入完整模版
+    $(document).on('click.pw', '#pw-btn-insert-template', function() {
+        const cur = $('#pw-request').val();
+        // 如果输入框不为空，则追加；否则直接替换
+        const newVal = cur ? (cur + '\n\n' + fullTemplateText) : fullTemplateText;
+        $('#pw-request').val(newVal).focus();
+        toastr.success("模版已插入");
     });
 
     $(document).on('click.pw', '.pw-var-btn', function() {
@@ -639,10 +775,7 @@ function bindEvents() {
             const text = await runGeneration(config, config);
             $('#pw-result-text').val(text);
             $('#pw-result-area').fadeIn();
-            
-            // [需求1] 生成后，缩小初始输入框
             $('#pw-request').addClass('minimized');
-            
             saveCurrentState();
         } catch (e) { toastr.error(e.message); } 
         finally { $btn.prop('disabled', false).html('生成设定'); }
@@ -669,25 +802,34 @@ function bindEvents() {
 
     $(document).on('click.pw', '#pw-clear', function() {
         if(confirm("确定清空？")) { 
-            $('#pw-request').val('').removeClass('minimized'); // 恢复高度
+            $('#pw-request').val('').removeClass('minimized'); 
             $('#pw-result-area').hide(); 
             $('#pw-result-text').val(''); 
             saveCurrentState(); 
         }
     });
     
+    // [需求4] 草稿保存逻辑优化：只要有输入或输出就可以保存
     $(document).on('click.pw', '#pw-snapshot', function() {
         const text = $('#pw-result-text').val();
-        if (!text) return toastr.warning("内容为空");
+        const req = $('#pw-request').val();
+        
+        if (!text && !req) return toastr.warning("没有任何内容可保存");
+        
         const context = getContext();
         const userName = $('.persona_name').first().text().trim() || "User";
         const charName = context.characters[context.characterId]?.name || "";
         const defaultTitle = `${userName} + ${charName} (${new Date().toLocaleDateString()})`;
-        saveHistory({ request: $('#pw-request').val() || "无", timestamp: new Date().toLocaleString(), title: defaultTitle, data: { name: userName, resultText: text } });
+        
+        saveHistory({ 
+            request: req || "无", 
+            timestamp: new Date().toLocaleString(), 
+            title: defaultTitle, 
+            data: { name: userName, resultText: text || "(仅有请求，未生成结果)" } 
+        });
         toastr.success(TEXT.TOAST_SNAPSHOT);
     });
 
-    // [需求6] 历史记录交互优化
     $(document).on('click.pw', '.pw-hist-action-btn.edit', function(e) {
         e.stopPropagation();
         const $header = $(this).closest('.pw-hist-header');
@@ -696,12 +838,11 @@ function bindEvents() {
         
         $display.hide();
         $input.show().focus();
-        // 点击外部或回车保存
         const saveEdit = () => {
             const newVal = $input.val();
             $display.text(newVal).show();
             $input.hide();
-            const index = $header.closest('.pw-history-item').find('.pw-hist-action-btn.del').data('index'); // 需要传递index
+            const index = $header.closest('.pw-history-item').find('.pw-hist-action-btn.del').data('index'); 
             if (historyCache[index]) { historyCache[index].title = newVal; saveData(); }
             $(document).off('click.pw-hist-blur');
         };
@@ -743,23 +884,30 @@ function bindEvents() {
 }
 
 // ... 辅助渲染函数 ...
-const renderTagsList = () => { /* 保持不变 */
+const renderTagsList = () => {
     const $container = $('#pw-tags-list').empty();
     const $toggleBtn = $('#pw-toggle-edit-tags');
-    $toggleBtn.text(isEditingTags ? '取消编辑' : '编辑标签');
+    // [需求2] 按钮文字统一
+    $toggleBtn.text(isEditingTags ? '收起编辑' : '编辑标签');
     $toggleBtn.css('color', isEditingTags ? '#ff6b6b' : '#5b8db8');
     tagsCache.forEach((tag, index) => {
         if (isEditingTags) {
-            const $row = $(`<div class="pw-tag-edit-row"><input class="pw-tag-edit-input t-name" value="${tag.name}"><input class="pw-tag-edit-input t-val" value="${tag.value}"><div class="pw-tag-del-btn"><i class="fa-solid fa-trash"></i></div></div>`);
+            // [需求1] 增加 Placeholder
+            const $row = $(`<div class="pw-tag-edit-row"><input class="pw-tag-edit-input t-name" value="${tag.name}" placeholder="标签名"><input class="pw-tag-edit-input t-val" value="${tag.value}" placeholder="预填内容"><div class="pw-tag-del-btn"><i class="fa-solid fa-trash"></i></div></div>`);
             $row.find('input').on('input', function() { tag.name = $row.find('.t-name').val(); tag.value = $row.find('.t-val').val(); saveData(); });
             $row.find('.pw-tag-del-btn').on('click', () => { if (confirm("删除?")) { tagsCache.splice(index, 1); saveData(); renderTagsList(); } });
             $container.append($row);
         } else {
-            const $chip = $(`<div class="pw-tag-chip"><i class="fa-solid fa-tag" style="opacity:0.5; margin-right:4px;"></i><span>${tag.name}</span>${tag.value ? `<span class="pw-tag-val">${tag.value}</span>` : ''}</div>`);
+            // [需求3] 截断过长内容，且有值才显示冒号
+            const valShow = tag.value.length > 5 ? tag.value.substring(0,5) + ".." : tag.value;
+            const html = valShow ? `${tag.name}: <span class="pw-tag-val">${valShow}</span>` : tag.name;
+            const $chip = $(`<div class="pw-tag-chip"><i class="fa-solid fa-tag" style="opacity:0.5; margin-right:4px;"></i><span>${html}</span></div>`);
+            
             $chip.on('click', () => {
                 const $text = $('#pw-request');
                 const cur = $text.val();
                 const prefix = (cur && !cur.endsWith('\n')) ? '\n' : '';
+                // 插入完整值
                 $text.val(cur + prefix + (tag.value ? `${tag.name}: ${tag.value}` : `${tag.name}: `)).focus();
             });
             $container.append($chip);
@@ -768,7 +916,13 @@ const renderTagsList = () => { /* 保持不变 */
     const $addBtn = $(`<div class="pw-tag-add-btn"><i class="fa-solid fa-plus"></i> ${isEditingTags ? '新增' : '标签'}</div>`);
     $addBtn.on('click', () => { tagsCache.push({ name: "", value: "" }); saveData(); if (!isEditingTags) isEditingTags = true; renderTagsList(); });
     $container.append($addBtn);
-    if (isEditingTags) { const $finishBtn = $(`<div class="pw-tags-finish-bar"><i class="fa-solid fa-check"></i> 完成编辑</div>`); $finishBtn.on('click', () => { isEditingTags = false; renderTagsList(); }); $container.append($finishBtn); }
+    
+    // [需求2] 收起编辑
+    if (isEditingTags) { 
+        const $finishBtn = $(`<div class="pw-tags-finish-bar"><i class="fa-solid fa-chevron-up"></i> 收起编辑</div>`); 
+        $finishBtn.on('click', () => { isEditingTags = false; renderTagsList(); }); 
+        $container.append($finishBtn); 
+    }
 };
 
 const renderHistoryList = () => {
@@ -781,13 +935,12 @@ const renderHistoryList = () => {
         const title = (item.title || "").toLowerCase();
         return title.includes(search) || content.includes(search);
     });
-    if (filtered.length === 0) { $list.html('<div style="text-align:center; opacity:0.6; padding:20px;">暂无历史记录</div>'); return; }
+    if (filtered.length === 0) { $list.html('<div style="text-align:center; opacity:0.6; padding:20px;">暂无草稿</div>'); return; }
     
     filtered.forEach((item, index) => {
         const previewText = item.data.resultText || '无内容';
         const displayTitle = item.title || "未命名";
         
-        // [需求6] 历史记录 UI 重构
         const $el = $(`
             <div class="pw-history-item">
                 <div class="pw-hist-main">
@@ -807,7 +960,7 @@ const renderHistoryList = () => {
         $el.on('click', function(e) {
             if ($(e.target).closest('.pw-hist-action-btn, .pw-hist-title-input').length) return;
             $('#pw-request').val(item.request); $('#pw-result-text').val(previewText); $('#pw-result-area').show(); 
-            $('#pw-request').addClass('minimized'); // 载入历史时也缩小输入框
+            $('#pw-request').addClass('minimized'); 
             $('.pw-tab[data-tab="editor"]').click();
         });
         $el.find('.pw-hist-action-btn.del').on('click', function(e) { 
