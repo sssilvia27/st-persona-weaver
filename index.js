@@ -4,87 +4,71 @@ import { saveSettingsDebounced, callPopup, getRequestHeaders } from "../../../..
 const extensionName = "st-persona-weaver";
 const STORAGE_KEY_HISTORY = 'pw_history_v20';
 const STORAGE_KEY_STATE = 'pw_state_v20'; 
-const STORAGE_KEY_TEMPLATE = 'pw_template_v22'; // 升级版本号
+const STORAGE_KEY_TEMPLATE = 'pw_template_v22'; // 更新版本号以加载新模版
 const STORAGE_KEY_PROMPTS = 'pw_prompts_v1';
 const BUTTON_ID = 'pw_persona_tool_btn';
 
-// [需求1] 更新为最新的中文模版
+// [需求1] 全新的中文层级 YAML 模版
 const defaultTemplate = 
-`Nickname: 
-age: 
-gender: 
-height: 
-identity:
-  - 
-background_story:
-  童年(0-12岁):
-  少年(13-18岁):
-  青年(19-35岁):
-  中年(35-至今):
-  现状:
+`年龄: 
+性别: 
+身高: 
+身份:
+背景故事:
+  童年_0_12岁: 
+  少年_13_18岁: 
+  青年_19_35岁: 
+  中年_35至今: 
+  现状: 
 
-social_status: 
-  - 
+社会地位: 
 
-appearance:
-  hair: 
-  eyes: 
-  skin:
-  face_style: 
-  build: 
-    - 
-attire:
-  business_formal:
-  business_casual:
-  casual_wear:
-  home_wear:
+外貌:
+  发型: 
+  眼睛: 
+  肤色: 
+  脸型: 
+  体型: 
 
-archetype: 
+衣着风格:
+  商务正装: 
+  商务休闲: 
+  休闲装: 
+  居家服: 
 
-personality:
-  core_traits: 
-    - : ""
-  romantic_traits: 
-    - : ""
-     
+性格:
+  核心特质:
+  恋爱特质:
 
-lifestyle_behaviors:
-  - 
-  - 
+生活习惯:
 
-work_behaviors:
-  - 
+工作行为:
 
-emotional_behaviors:
-  angry:
-  happy: 
+情绪表现:
+  愤怒时: 
+  高兴时: 
 
-goals:
-  - 
+人生目标:
 
-weakness:
-  - 
+缺点弱点:
 
-likes:
-  - 
+喜好厌恶:
+  喜欢:
+  讨厌:
 
-dislikes:
-  - 
+能力技能:
+  工作相关:
+  生活相关:
+  爱好特长:
 
-skills:
-  - 工作: ["",""]
-  - 生活: ["",""]
-  - 爱好: ["",""]
-
-NSFW_information:
-  Sex_related traits:
-    experiences: 
-    sexual_orientation: 
-    sexual_role: 
-    sexual_habits: 
-      - 
-  Kinks: 
-  Limits:`;
+NSFW_成人内容:
+  性相关特征:
+    性经验: 
+    性取向: 
+    性角色: 
+    性习惯:
+  性癖好:
+  禁忌底线:`;
 
 const defaultSystemPromptInitial = 
 `Creating User Persona for {{user}} (Target: {{char}}).
@@ -130,7 +114,7 @@ let isEditingTemplate = false;
 let observerInterval = null; 
 
 // ============================================================================
-// 1. 核心数据解析逻辑 (YAML 块级解析)
+// 1. 核心数据解析逻辑 (YAML 块级解析 - 支持中文冒号)
 // ============================================================================
 
 function parseYamlBlocks(text) {
@@ -142,16 +126,24 @@ function parseYamlBlocks(text) {
     let buffer = [];
 
     lines.forEach(line => {
+        // 匹配顶级键：开头无空格，包含英文或中文冒号
         const topKeyMatch = line.match(/^([^:\s：]+.*?)[:：]/);
+        
         if (topKeyMatch && !line.trim().startsWith('-')) {
-            if (currentKey) blocks.set(currentKey, buffer.join('\n'));
+            if (currentKey) {
+                blocks.set(currentKey, buffer.join('\n'));
+            }
             currentKey = topKeyMatch[1].trim(); 
-            buffer = [line];
+            buffer = [line]; 
         } else {
-            if (currentKey) buffer.push(line);
+            if (currentKey) {
+                buffer.push(line);
+            }
         }
     });
-    if (currentKey) blocks.set(currentKey, buffer.join('\n'));
+    if (currentKey) {
+        blocks.set(currentKey, buffer.join('\n'));
+    }
     return blocks;
 }
 
@@ -224,7 +216,7 @@ function saveState(data) { localStorage.setItem(STORAGE_KEY_STATE, JSON.stringif
 function loadState() { try { return JSON.parse(localStorage.getItem(STORAGE_KEY_STATE)) || {}; } catch { return {}; } }
 
 function injectStyles() {
-    const styleId = 'persona-weaver-css-v21';
+    const styleId = 'persona-weaver-css-v22';
     if ($(`#${styleId}`).length) return;
 }
 
@@ -343,6 +335,7 @@ async function runGeneration(data, apiConfig) {
         .replace(/{{user}}/g, currentName)
         .replace(/{{char}}/g, charName)
         .replace(/{{wi}}/g, wiText)
+        .replace(/{{tags}}/g, "") 
         .replace(/{{template}}/g, templateCache) 
         .replace(/{{input}}/g, data.request)
         .replace(/{{current}}/g, data.currentText || "");
@@ -408,8 +401,13 @@ async function openCreatorPopup() {
                         </div>
                     </div>
                     
-                    <!-- [需求2] 可视化模版编辑器 -->
-                    <div id="pw-template-gui" class="pw-template-gui-container"></div>
+                    <!-- 模版编辑区 -->
+                    <div id="pw-template-editor-block" class="pw-template-editor-area">
+                        <textarea id="pw-template-text" class="pw-template-textarea">${templateCache}</textarea>
+                        <div style="text-align:right; margin-top:4px;">
+                            <button class="pw-mini-btn" id="pw-save-template" style="display:inline-flex;">保存模版</button>
+                        </div>
+                    </div>
 
                     <!-- 模版键列表 -->
                     <div class="pw-tags-container" id="pw-template-keys-list"></div>
@@ -423,7 +421,6 @@ async function openCreatorPopup() {
                         <textarea id="pw-result-text" class="pw-result-textarea" placeholder="生成的结果将显示在这里..."></textarea>
                     </div>
                     
-                    <!-- [需求3] 润色按钮竖排，高度压缩 -->
                     <div class="pw-refine-toolbar">
                         <textarea id="pw-refine-input" class="pw-refine-input" placeholder="输入润色意见..."></textarea>
                         <div class="pw-refine-actions">
@@ -471,8 +468,8 @@ async function openCreatorPopup() {
                         <div class="pw-row pw-row-wrap">
                             <label style="min-width:60px;">Model</label>
                             <div style="flex:1; display:flex; gap:5px; width:100%;">
-                                <!-- [需求4] 使用 Select 替代 Input List -->
-                                <select id="pw-api-model" class="pw-input" style="flex:1; min-width:0; max-width: 100%;">
+                                <!-- [需求4] 改为 Select -->
+                                <select id="pw-api-model" class="pw-input" style="flex:1; min-width:0;">
                                     <option value="${config.indepApiModel}" selected>${config.indepApiModel}</option>
                                 </select>
                                 <button id="pw-api-fetch" class="pw-btn primary" title="获取模型列表" style="width:auto; padding:6px 10px;"><i class="fa-solid fa-cloud-download-alt"></i></button>
@@ -515,6 +512,12 @@ async function openCreatorPopup() {
 function bindEvents() {
     $(document).off('.pw');
 
+    const adjustHeight = (el) => { 
+        el.style.height = 'auto'; 
+        el.style.height = (el.scrollHeight) + 'px'; 
+    };
+    $(document).on('input.pw', '#pw-refine-input', function() { adjustHeight(this); });
+
     $(document).on('click.pw', '.pw-tab', function() {
         $('.pw-tab').removeClass('active'); $(this).addClass('active');
         $('.pw-view').removeClass('active');
@@ -522,41 +525,19 @@ function bindEvents() {
         if($(this).data('tab') === 'history') renderHistoryList(); 
     });
 
-    // 模版编辑 (GUI) 逻辑
+    // 模版编辑切换
     $(document).on('click.pw', '#pw-toggle-edit-template', function() {
-        const $gui = $('#pw-template-gui');
-        const $list = $('#pw-template-keys-list');
-        const isEditing = $gui.is(':visible');
-        
-        if (isEditing) {
-            // 保存并关闭
-            saveTemplateFromGui();
-            $gui.slideUp(); $list.slideDown();
-            $(this).text('编辑模版');
-            renderTemplateKeys();
-        } else {
-            // 打开编辑
-            renderTemplateGui();
-            $list.slideUp(); $gui.slideDown();
-            $(this).text('保存模版');
-        }
+        $('#pw-template-editor-block').slideToggle();
+        $(this).text($('#pw-template-editor-block').is(':visible') ? '取消' : '编辑模版');
     });
 
-    // GUI 内部交互
-    $(document).on('click.pw', '.pw-tpl-toggle-btn', function() {
-        $(this).closest('.pw-tpl-row').find('.pw-tpl-content-area').slideToggle();
-        const icon = $(this).find('i');
-        if(icon.hasClass('fa-chevron-down')) icon.removeClass('fa-chevron-down').addClass('fa-chevron-up');
-        else icon.removeClass('fa-chevron-up').addClass('fa-chevron-down');
-    });
-    
-    $(document).on('click.pw', '.pw-tpl-del-btn', function() {
-        if(confirm("删除此键？")) $(this).closest('.pw-tpl-row').remove();
-    });
-
-    $(document).on('click.pw', '.pw-tpl-add-btn', function() {
-        const $newRow = createTemplateRow("New Key", "");
-        $(this).before($newRow);
+    $(document).on('click.pw', '#pw-save-template', function() {
+        templateCache = $('#pw-template-text').val();
+        saveData();
+        renderTemplateKeys();
+        $('#pw-template-editor-block').slideUp();
+        $('#pw-toggle-edit-template').text('编辑模版');
+        toastr.success("模版已保存");
     });
 
     $(document).on('click.pw', '#pw-btn-insert-all', function() {
@@ -587,12 +568,13 @@ function bindEvents() {
             const cur = $input.val();
             const newText = `将 "${selectedText}" 修改为: `;
             $input.val(cur ? cur + '\n' + newText : newText).focus();
+            adjustHeight($input[0]); // 触发增高
             textarea.setSelectionRange(end, end);
             checkSelection();
         }
     });
 
-    // 自动保存
+    // 自动保存 (Debounced)
     let saveTimeout;
     const saveCurrentState = () => {
         clearTimeout(saveTimeout);
@@ -617,7 +599,7 @@ function bindEvents() {
     };
     $(document).on('input.pw change.pw', '#pw-request, #pw-result-text, #pw-wi-toggle, .pw-input, #pw-prompt-initial, #pw-prompt-refine', saveCurrentState);
 
-    // 润色 (Diff)
+    // 润色 (Diff) [块级对比]
     $(document).on('click.pw', '#pw-btn-refine', async function() {
         const refineReq = $('#pw-refine-input').val();
         if (!refineReq) return toastr.warning("请输入润色意见");
@@ -660,7 +642,8 @@ function bindEvents() {
 
             if (changeCount === 0) toastr.info("AI 认为无需修改");
             $('#pw-diff-overlay').fadeIn();
-            $('#pw-refine-input').val('');
+            $('#pw-refine-input').val(''); 
+            adjustHeight($('#pw-refine-input')[0]); // 重置高度
         } catch (e) { toastr.error(e.message); }
         finally { $btn.html('润色'); }
     });
@@ -702,7 +685,7 @@ function bindEvents() {
         finally { $btn.prop('disabled', false).html('生成设定'); }
     });
 
-    // API Buttons
+    // API Buttons [需求4] - 下拉框填充
     $(document).on('click.pw', '#pw-api-fetch', async function() {
         const url = $('#pw-api-url').val();
         const key = $('#pw-api-key').val();
@@ -718,8 +701,11 @@ function bindEvents() {
             
             const $select = $('#pw-api-model').empty();
             models.forEach(m => $select.append(`<option value="${m}">${m}</option>`));
-            saveCurrentState();
+            
             toastr.success(`获取到 ${models.length} 个模型`);
+            
+            // 自动保存选择
+            $('#pw-api-model').val(models[0]).trigger('change');
         } catch(e) { toastr.error("获取模型失败: " + e.message); }
         finally { $btn.find('i').removeClass('fa-spin'); }
     });
@@ -806,60 +792,11 @@ function bindEvents() {
     $(document).on('click.pw', '#pw-history-clear-all', function() { if(confirm("清空?")){historyCache=[];saveData();renderHistoryList();} });
 }
 
-// ... 渲染函数 (Keys, History, Wi, GUI) ...
-
-// [需求2] 渲染可视化模版编辑器
-function createTemplateRow(key, content) {
-    const $row = $(`
-        <div class="pw-tpl-row">
-            <div class="pw-tpl-header">
-                <input class="pw-tpl-key-input" value="${key}" placeholder="键名">
-                <div class="pw-tpl-toggle-btn" title="编辑子内容">⬇️ 编辑内容</div>
-                <div class="pw-tpl-del-btn" title="删除">✖</div>
-            </div>
-            <div class="pw-tpl-content-area">
-                <textarea class="pw-tpl-content-input" placeholder="在此输入嵌套层级内容 (支持缩进)">${content}</textarea>
-            </div>
-        </div>
-    `);
-    return $row;
-}
-
-function renderTemplateGui() {
-    const $container = $('#pw-template-gui').empty();
-    const blocks = parseYamlBlocks(templateCache);
-    
-    blocks.forEach((content, key) => {
-        // 从 content 中移除 key 本身那一行，只保留子内容
-        const lines = content.split('\n');
-        lines.shift(); // 移除第一行 (Key)
-        const subContent = lines.join('\n');
-        
-        $container.append(createTemplateRow(key, subContent));
-    });
-    
-    const $addBtn = $(`<div class="pw-tpl-add-btn"><i class="fa-solid fa-plus"></i> 新增键值块</div>`);
-    $container.append($addBtn);
-}
-
-function saveTemplateFromGui() {
-    let newTemplate = "";
-    $('#pw-template-gui .pw-tpl-row').each(function() {
-        const key = $(this).find('.pw-tpl-key-input').val().trim();
-        const content = $(this).find('.pw-tpl-content-input').val();
-        if (key) {
-            newTemplate += `${key}:\n`;
-            if (content) newTemplate += content + '\n';
-            newTemplate += '\n';
-        }
-    });
-    templateCache = newTemplate.trim();
-    saveData();
-}
-
+// ... 渲染函数 ...
 const renderTemplateKeys = () => {
     const $container = $('#pw-template-keys-list').empty();
     const keys = getTemplateKeys(templateCache);
+    
     keys.forEach(key => {
         const $chip = $(`<div class="pw-tag-chip"><i class="fa-solid fa-cube" style="opacity:0.5; margin-right:4px;"></i><span>${key}</span></div>`);
         $chip.on('click', () => {
