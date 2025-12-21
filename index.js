@@ -101,7 +101,7 @@ let pollInterval = null;
 let lastRawResponse = "";
 
 // ============================================================================
-// 1. 核心数据解析逻辑 (【重要修复】Key-Value 分离)
+// 1. 核心数据解析逻辑
 // ============================================================================
 
 function parseYamlToBlocks(text) {
@@ -113,7 +113,7 @@ function parseYamlToBlocks(text) {
 
     const topLevelKeyRegex = /^\s*([^:\s\-]+?)[ \t]*[:：]/;
     
-    // 智能解包逻辑 (防止 LLM 包裹一层根节点)
+    // 智能解包逻辑
     let topKeys = [];
     lines.forEach(line => {
         if (topLevelKeyRegex.test(line) && !line.trim().startsWith('-') && line.search(/\S|$/) === 0) {
@@ -134,17 +134,13 @@ function parseYamlToBlocks(text) {
 
     const flushBuffer = () => {
         if (currentKey && currentBuffer.length > 0) {
-            // 【关键修复逻辑】剥离 Key，只保留 Value
             let valuePart = "";
             const firstLine = currentBuffer[0];
             const match = firstLine.match(topLevelKeyRegex);
             
             if (match) {
-                // 提取第一行冒号后的内容 (例如 "年龄: 22" -> "22")
                 let inlineContent = firstLine.substring(match[0].length).trim();
-                
-                // 剩余行 (Block 内容)
-                let blockContent = currentBuffer.slice(1).join('\n'); // 保留缩进
+                let blockContent = currentBuffer.slice(1).join('\n');
                 
                 if (inlineContent && blockContent) {
                     valuePart = inlineContent + '\n' + blockContent;
@@ -154,22 +150,18 @@ function parseYamlToBlocks(text) {
                     valuePart = blockContent;
                 }
             } else {
-                // 异常情况兜底
                 valuePart = currentBuffer.join('\n');
             }
-            
             map.set(currentKey, valuePart);
         }
     };
 
     lines.forEach((line) => {
         const isTopLevel = topLevelKeyRegex.test(line) && !line.trim().startsWith('-');
-        
-        // 判定缩进：允许0或1个空格的容错
         const indentLevel = line.search(/\S|$/);
-        
+
         if (isTopLevel && indentLevel <= 1) {
-            flushBuffer(); // 遇到新 Key，保存上一个
+            flushBuffer();
             const match = line.match(topLevelKeyRegex);
             currentKey = match[1].trim();
             currentBuffer = [line];
@@ -180,7 +172,7 @@ function parseYamlToBlocks(text) {
         }
     });
 
-    flushBuffer(); // 保存最后一个
+    flushBuffer();
     return map;
 }
 
@@ -249,7 +241,7 @@ function saveState(data) { localStorage.setItem(STORAGE_KEY_STATE, JSON.stringif
 function loadState() { try { return JSON.parse(localStorage.getItem(STORAGE_KEY_STATE)) || {}; } catch { return {}; } }
 
 function injectStyles() {
-    const styleId = 'persona-weaver-css-v36';
+    const styleId = 'persona-weaver-css-v37';
     if ($(`#${styleId}`).length) return;
     
     const css = `
@@ -766,6 +758,14 @@ async function openCreatorPopup() {
 function bindEvents() {
     $(document).off('.pw');
 
+    // 【重要修复】页面可见性改变时重新绑定事件，防止切屏后失效
+    document.addEventListener("visibilitychange", function() {
+        if (!document.hidden) {
+            console.log("[PW] App visible, rebinding events...");
+            bindEvents();
+        }
+    }, { once: true }); 
+
     $(document).on('click.pw', '.pw-tab', function () {
         $('.pw-tab').removeClass('active'); $(this).addClass('active');
         $('.pw-view').removeClass('active');
@@ -994,7 +994,6 @@ function bindEvents() {
         if (isNew) $(this).find('.pw-diff-textarea').prop('readonly', false).focus();
     });
 
-    // 【关键修复逻辑】保存时智能重组：单行用冒号+空格，多行用冒号+换行
     $(document).on('click.pw', '#pw-diff-confirm', function () {
         const activeTab = $('.pw-diff-tab.active').data('view');
         if (activeTab === 'raw') {
@@ -1004,10 +1003,9 @@ function bindEvents() {
             let finalLines = [];
             $('.pw-diff-row').each(function () {
                 const key = $(this).data('key');
-                const val = $(this).find('.pw-diff-card.selected .pw-diff-textarea').val().trimEnd(); // 保留前方缩进
+                const val = $(this).find('.pw-diff-card.selected .pw-diff-textarea').val().trimEnd();
                 
                 if (val && val !== "(删除)" && val !== "(无)") {
-                    // 判断是否为块级内容（包含换行，或者以缩进开头）
                     if (val.includes('\n') || val.startsWith('  ')) {
                         finalLines.push(`${key}:\n${val}`);
                     } else {
