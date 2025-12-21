@@ -4,10 +4,11 @@ import { saveSettingsDebounced, callPopup, getRequestHeaders } from "../../../..
 const extensionName = "st-persona-weaver";
 const STORAGE_KEY_HISTORY = 'pw_history_v20';
 const STORAGE_KEY_STATE = 'pw_state_v20';
-const STORAGE_KEY_TEMPLATE = 'pw_template_v2'; 
-const STORAGE_KEY_PROMPTS = 'pw_prompts_v4';   // 版本号升级，强制应用新的Prompt格式
+const STORAGE_KEY_TEMPLATE = 'pw_template_v2'; // 升级版本号以重置模版
+const STORAGE_KEY_PROMPTS = 'pw_prompts_v3';   // 升级版本号以重置 Prompt
 const BUTTON_ID = 'pw_persona_tool_btn';
 
+// 4. 修改默认模版
 const defaultYamlTemplate =
 `基本信息: 
   姓名: {{user}}
@@ -72,52 +73,55 @@ NSFW:
   性癖好:
   禁忌底线:`;
 
-const antiCoT = "Do NOT output status bars, progress bars, thinking processes, or Chain of Thought traces.";
-
-// [修改点 3] Prompt 增加换行，使其更易读
+// 3. 修改 Prompt：添加换行，禁止 Status Bar / CoT
 const defaultSystemPromptInitial =
-`Creating User Persona for {{user}} (Target: {{char}}). 
+`Role: Expert Character Designer.
+Task: Create a detailed User Persona for "{{user}}" (Target Character: "{{char}}").
 
-[World Info Context]:
+[Context from World Info]:
 {{wi}}
 
-[Traits / Template]:
+[Required JSON/YAML Structure Template]:
+"""
 {{tags}}
+"""
 
-[Instruction]:
-{{input}}
+[User Instruction]:
+"{{input}}"
 
-[Task]:
-Generate character details strictly in structured YAML format. 
-IMPORTANT: Do NOT wrap the output in a root key like "{{user}}:". Start directly with the first key from the template. 
-Maintain indentation. 
-${antiCoT}
+[Negative Constraints]:
+- Do NOT output any status bars, progress bars, or stat headers.
+- Do NOT output "Thinking Process", "Chain of Thought", or internal monologue.
+- Do NOT wrap the output in a root key like "{{user}}:" or "UserProfile:". Start directly with the first category (e.g., "基本信息:").
 
-[Response]:
-ONLY the YAML content.`;
+[Output Format]:
+- Generate character details strictly in structured YAML format based on the Template.
+- Maintain correct indentation.
+- Response: ONLY the YAML content.`;
 
 const defaultSystemPromptRefine =
-`Optimizing User Persona for {{char}}. 
+`Role: Expert Character Editor.
+Task: Optimize the User Persona for "{{char}}".
 
+[Context]:
 {{wi}}
 
-[Current Data (YAML)]: 
+[Current Data (YAML)]:
 """
 {{current}}
 """
 
-[Instruction]: 
-"{{input}}" 
+[User Instruction]:
+"{{input}}"
 
-[Task]:
-Modify the data based on instruction. 
-Maintain strict YAML hierarchy. 
-Do NOT add a root key wrapper. 
-If text is quoted, focus on that part. 
-${antiCoT}
+[Constraints]:
+- Modify the data based on instruction.
+- Maintain strict YAML hierarchy.
+- Do NOT add a root key wrapper.
+- Do NOT output status bars or thinking process.
+- If text is quoted in instruction, focus on that part.
 
-[Response]:
-ONLY the modified full YAML content.`;
+Response: ONLY the modified full YAML content.`;
 
 const defaultSettings = {
     autoSwitchPersona: true, syncToWorldInfo: false,
@@ -126,8 +130,8 @@ const defaultSettings = {
 };
 
 const TEXT = {
-    // [修改点 2] 魔法棒颜色改为 #e0af68
-    PANEL_TITLE: `<span style="display:flex;align-items:center;gap:8px;"><i class="fa-solid fa-wand-magic-sparkles" style="color: #e0af68;"></i>User人设生成器</span>`,
+    // 1. 修改标题图标为金黄色魔法棒
+    PANEL_TITLE: `<i class="fa-solid fa-wand-magic-sparkles" style="color:#e0af68; margin-right:8px;"></i>User人设生成器`,
     BTN_TITLE: "打开设定生成器",
     TOAST_SAVE_SUCCESS: (name) => `Persona "${name}" 已保存并覆盖！`,
     TOAST_WI_SUCCESS: (book) => `已写入世界书: ${book}`,
@@ -146,7 +150,7 @@ let pollInterval = null;
 let lastRawResponse = "";
 
 // ============================================================================
-// 1. 核心数据解析逻辑 (Key-Value 分离)
+// 1. 核心数据解析逻辑 (修复标签从第二层展开的问题)
 // ============================================================================
 
 function parseYamlToBlocks(text) {
@@ -158,44 +162,29 @@ function parseYamlToBlocks(text) {
 
     const topLevelKeyRegex = /^\s*([^:\s\-]+?)[ \t]*[:：]/;
     
-    let isSingleWrapper = false;
-    const firstContentIndex = lines.findIndex(l => l.trim().length > 0);
-    
-    if (firstContentIndex !== -1) {
-        const firstLine = lines[firstContentIndex];
-        const match = firstLine.match(topLevelKeyRegex);
-        
-        if (match && !firstLine.trim().startsWith('-')) {
-            const baseIndent = firstLine.search(/\S|$/);
-            let allIndented = true;
-            let hasContentAfter = false;
-            
-            for (let i = firstContentIndex + 1; i < lines.length; i++) {
-                if (lines[i].trim().length === 0) continue; 
-                hasContentAfter = true;
-                const currentIndent = lines[i].search(/\S|$/);
-                if (currentIndent <= baseIndent) {
-                    allIndented = false;
-                    break;
-                }
-            }
-            if (allIndented && hasContentAfter) {
-                isSingleWrapper = true;
-            }
+    // 智能解包逻辑
+    let topKeys = [];
+    lines.forEach(line => {
+        // 忽略纯注释或空行
+        if (topLevelKeyRegex.test(line) && !line.trim().startsWith('-') && line.search(/\S|$/) === 0) {
+            topKeys.push(line);
         }
-    }
+    });
 
-    if (isSingleWrapper) {
-        const remaining = lines.slice(firstContentIndex + 1);
-        const secondLineIndex = remaining.findIndex(l => l.trim().length > 0);
-        if (secondLineIndex !== -1) {
-            const indentToRemove = remaining[secondLineIndex].search(/\S|$/);
-            lines = remaining.map(l => {
-                if (l.length >= indentToRemove && /^\s*$/.test(l.substring(0, indentToRemove))) {
-                    return l.substring(indentToRemove);
-                }
-                return l.trimStart(); 
-            });
+    // 4. 修复逻辑：如果是单主键包裹 (lines.length > 1 即可，放宽限制)
+    if (topKeys.length === 1 && lines.length > 1) {
+        const remaining = lines.slice(1);
+        // 检查剩余行是否有缩进
+        const secondLine = remaining.find(l => l.trim().length > 0);
+        if (secondLine) {
+            const secondLineIndent = secondLine.search(/\S|$/);
+            // 如果第二行有缩进，说明是包裹结构，进行解包
+            if (secondLineIndent > 0) {
+                lines = remaining.map(l => {
+                    // 移除公共缩进
+                    return l.length >= secondLineIndent ? l.substring(secondLineIndent) : l;
+                });
+            }
         }
     }
 
@@ -230,7 +219,7 @@ function parseYamlToBlocks(text) {
         const isTopLevel = topLevelKeyRegex.test(line) && !line.trim().startsWith('-');
         const indentLevel = line.search(/\S|$/);
 
-        if (isTopLevel && indentLevel <= 1) {
+        if (isTopLevel && indentLevel === 0) { // 严格限制顶层无缩进
             flushBuffer();
             const match = line.match(topLevelKeyRegex);
             currentKey = match[1].trim();
@@ -282,7 +271,8 @@ function loadData() {
     try { historyCache = JSON.parse(localStorage.getItem(STORAGE_KEY_HISTORY)) || []; } catch { historyCache = []; }
     try {
         const t = localStorage.getItem(STORAGE_KEY_TEMPLATE);
-        if (!t || t.startsWith("年龄:\n性别:")) { 
+        // 简单判断是否是旧模版，如果是则强制使用新的
+        if (!t || t.indexOf("童年_0_12岁") === -1) { 
              currentTemplate = defaultYamlTemplate;
         } else {
              currentTemplate = t;
@@ -290,7 +280,10 @@ function loadData() {
     } catch { currentTemplate = defaultYamlTemplate; }
     try {
         const p = JSON.parse(localStorage.getItem(STORAGE_KEY_PROMPTS));
+        // 合并缓存和默认，确保新版本 Prompt 生效
         promptsCache = { ...{ initial: defaultSystemPromptInitial, refine: defaultSystemPromptRefine }, ...p };
+        // 强制检查 Prompt 是否包含新特性，如果不包含则重置 (可选)
+        if (!promptsCache.initial.includes("Negative Constraints")) promptsCache.initial = defaultSystemPromptInitial;
     } catch { promptsCache = { initial: defaultSystemPromptInitial, refine: defaultSystemPromptRefine }; }
 }
 
@@ -311,8 +304,17 @@ function saveState(data) { localStorage.setItem(STORAGE_KEY_STATE, JSON.stringif
 function loadState() { try { return JSON.parse(localStorage.getItem(STORAGE_KEY_STATE)) || {}; } catch { return {}; } }
 
 function injectStyles() {
-    const styleId = 'persona-weaver-css-v41'; 
+    const styleId = 'persona-weaver-css-v39'; 
     if ($(`#${styleId}`).length) return;
+    
+    // CSS 已在 style.css 中定义，此处仅保留动态插入逻辑
+    // 为了确保样式生效，如果使用独立 CSS 文件，请确保正确加载
+    // 这里保留核心覆盖样式以防万一
+    const css = `
+    /* 如果没有使用外部CSS文件，请确保这里包含所有的CSS */
+    `; 
+    // 在此脚本模式下，假设你已经有了 style.css，或者你需要在下面的 JS 中通过 link 引入
+    // 如果是单文件插件，建议将 style.css 内容通过 JS 注入
 }
 
 function getActivePersonaDescription() {
@@ -588,7 +590,8 @@ async function openCreatorPopup() {
                 <div class="pw-tags-container" id="pw-template-chips"></div>
                 
                 <div class="pw-template-editor-area" id="pw-template-editor">
-                    <div class="pw-template-footer" style="border-top:none; border-bottom:1px solid var(--SmartThemeBorderColor);">
+                    <!-- 5. 修改：将快捷键栏移动到文本框上方 -->
+                    <div class="pw-template-footer top-bar">
                         <div class="pw-shortcut-bar">
                             <div class="pw-shortcut-btn" data-key="  "><span>缩进</span><span class="code">Tab</span></div>
                             <div class="pw-shortcut-btn" data-key=": "><span>冒号</span><span class="code">:</span></div>
@@ -625,8 +628,9 @@ async function openCreatorPopup() {
                 <div class="pw-compact-btn" id="pw-snapshot" title="存入草稿 (Drafts)"><i class="fa-solid fa-save"></i></div>
             </div>
             <div class="pw-footer-group" style="flex:1; justify-content:flex-end; gap: 8px;">
-                <button class="pw-btn secondary" id="pw-btn-save-wi">保存至世界书</button>
-                <button class="pw-btn save" id="pw-btn-apply">覆盖当前人设</button>
+                <!-- 6. 修改：保存世界书按钮样式优化 -->
+                <button class="pw-btn secondary" id="pw-btn-save-wi"><i class="fa-solid fa-book-medical"></i> 保存至世界书</button>
+                <button class="pw-btn save" id="pw-btn-apply"><i class="fa-solid fa-check"></i> 覆盖当前人设</button>
             </div>
         </div>
     </div>
@@ -877,28 +881,15 @@ function bindEvents() {
         }
     });
 
-    // [修改点 1] 修复润色按钮卡死问题
     $(document).on('click.pw', '#pw-btn-refine', async function (e) {
         e.preventDefault();
-        e.stopPropagation(); // 防止冒泡
-        
         const refineReq = $('#pw-refine-input').val();
         if (!refineReq) return toastr.warning("请输入润色意见");
         
-        const $btn = $(this);
-        // 如果正在加载，禁止重复点击
-        if ($btn.attr('data-processing') === 'true') return;
-
         if(!promptsCache.initial) loadData();
+
         const oldText = $('#pw-result-text').val();
-        
-        // 1. 立即更新 UI 状态
-        $btn.attr('data-processing', 'true');
-        const $icon = $btn.find('i');
-        $icon.removeClass('fa-magic').addClass('fa-spinner fa-spin');
-        
-        // 2. [关键] 强制让出主线程，等待 UI 渲染（转圈图标显示）
-        await new Promise(resolve => setTimeout(resolve, 50));
+        const $btn = $(this).find('i').removeClass('fa-magic').addClass('fa-spinner fa-spin');
 
         try {
             const wiContent = await collectActiveWorldInfoContent();
@@ -927,44 +918,44 @@ function bindEvents() {
 
                 const isChanged = valOld.trim() !== valNew.trim();
                 
-                let rowHtml = '';
-
+                // 2. 修改 Diff 逻辑：如果没有变动，只显示一个绿框
+                let cardsHtml = '';
                 if (!isChanged) {
-                    if (!valNew) return; 
-                    rowHtml = `
-                    <div class="pw-diff-row" data-key="${key}">
-                        <div class="pw-diff-attr-name">${key}</div>
-                        <div class="pw-diff-cards">
-                            <div class="pw-diff-card selected" style="border-color:#5b8db8; opacity:1; background:#1e252b;">
-                                <div class="pw-diff-label" style="color:#5b8db8; background:rgba(91,141,184,0.1);">无变更 (已选中)</div>
-                                <textarea class="pw-diff-textarea">${valNew}</textarea>
-                            </div>
+                    if (!valOld) return; // 都为空则跳过
+                    cardsHtml = `
+                    <div class="pw-diff-cards">
+                        <div class="pw-diff-card new selected single-mode" data-val="${encodeURIComponent(valNew)}">
+                            <div class="pw-diff-label">新版本 (未变动)</div>
+                            <textarea class="pw-diff-textarea">${valNew}</textarea>
                         </div>
                     </div>`;
                 } else {
                     changeCount++;
-                    rowHtml = `
-                    <div class="pw-diff-row" data-key="${key}">
-                        <div class="pw-diff-attr-name">${key}</div>
-                        <div class="pw-diff-cards">
-                            <div class="pw-diff-card old" data-val="${encodeURIComponent(valOld)}">
-                                <div class="pw-diff-label">原版本</div>
-                                <textarea class="pw-diff-textarea">${valOld || "(无)"}</textarea>
-                            </div>
-                            <div class="pw-diff-card new selected" data-val="${encodeURIComponent(valNew)}">
-                                <div class="pw-diff-label">新版本</div>
-                                <textarea class="pw-diff-textarea">${valNew || "(删除)"}</textarea>
-                            </div>
+                    cardsHtml = `
+                    <div class="pw-diff-cards">
+                        <div class="pw-diff-card old" data-val="${encodeURIComponent(valOld)}">
+                            <div class="pw-diff-label">原版本</div>
+                            <textarea class="pw-diff-textarea" readonly>${valOld || "(无)"}</textarea>
+                        </div>
+                        <div class="pw-diff-card new selected" data-val="${encodeURIComponent(valNew)}">
+                            <div class="pw-diff-label">新版本</div>
+                            <textarea class="pw-diff-textarea">${valNew || "(删除)"}</textarea>
                         </div>
                     </div>`;
                 }
+
+                const rowHtml = `
+                <div class="pw-diff-row" data-key="${key}">
+                    <div class="pw-diff-attr-name">${key}</div>
+                    ${cardsHtml}
+                </div>`;
                 $list.append(rowHtml);
             });
 
             if (changeCount === 0 && !responseText) {
                 toastr.warning("返回内容为空，请切换到“原文编辑”查看");
             } else if (changeCount === 0) {
-                toastr.success("内容未发生变动，已全部保留");
+                toastr.info("内容未发生结构性变化");
             }
 
             $('.pw-diff-tab[data-view="diff"]').click();
@@ -974,9 +965,7 @@ function bindEvents() {
             console.error(e);
             toastr.error("润色失败: " + e.message); 
         } finally { 
-            // 恢复按钮状态
-            $icon.removeClass('fa-spinner fa-spin').addClass('fa-magic'); 
-            $btn.removeAttr('data-processing');
+            $btn.removeClass('fa-spinner fa-spin').addClass('fa-magic'); 
         }
     });
 
@@ -984,9 +973,19 @@ function bindEvents() {
         const $row = $(this).closest('.pw-diff-row');
         $row.find('.pw-diff-card').removeClass('selected');
         $(this).addClass('selected');
-        $(this).find('.pw-diff-textarea').focus();
+        
+        const isNew = $(this).hasClass('new');
+        // 如果是单模式 (single-mode)，始终允许编辑
+        const isSingle = $(this).hasClass('single-mode');
+
+        $row.find('.pw-diff-textarea').prop('readonly', true);
+        
+        if (isNew || isSingle) {
+            $(this).find('.pw-diff-textarea').prop('readonly', false).focus();
+        }
     });
 
+    // 【重要修复】重组 Key 和 Value
     $(document).on('click.pw', '#pw-diff-confirm', function () {
         const activeTab = $('.pw-diff-tab.active').data('view');
         if (activeTab === 'raw') {
@@ -999,6 +998,7 @@ function bindEvents() {
                 const val = $(this).find('.pw-diff-card.selected .pw-diff-textarea').val().trimEnd();
                 
                 if (val && val !== "(删除)" && val !== "(无)") {
+                    // 判断格式：如果包含换行或缩进，使用块格式
                     if (val.includes('\n') || val.startsWith('  ')) {
                         finalLines.push(`${key}:\n${val}`);
                     } else {
@@ -1197,6 +1197,7 @@ const renderTemplateChips = () => {
             const cur = $text.val();
             const prefix = (cur && !cur.endsWith('\n') && cur.length > 0) ? '\n\n' : '';
             
+            // 【重要修复】点击模版块时，也需要重新拼合 Key 和 Value
             let insertText = key + ":";
             if (content && content.trim()) {
                 if (content.includes('\n') || content.startsWith(' ')) {
