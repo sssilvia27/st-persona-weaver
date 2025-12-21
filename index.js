@@ -135,89 +135,103 @@ let pollInterval = null;
 let lastRawResponse = "";
 
 // ============================================================================
+// 工具函数：强制让渡主线程，防止 UI 卡死
+// ============================================================================
+const yieldToBrowser = () => new Promise(resolve => setTimeout(resolve, 0));
+const forcePaint = () => new Promise(resolve => setTimeout(resolve, 50));
+
+// ============================================================================
 // 1. 核心数据解析逻辑
 // ============================================================================
 
 function parseYamlToBlocks(text) {
     const map = new Map();
-    if (!text) return map;
+    if (!text || typeof text !== 'string') return map;
 
-    const cleanText = text.replace(/^```[a-z]*\n?/im, '').replace(/```$/im, '').trim();
-    let lines = cleanText.split('\n');
+    try {
+        const cleanText = text.replace(/^```[a-z]*\n?/im, '').replace(/```$/im, '').trim();
+        let lines = cleanText.split('\n');
 
-    const topLevelKeyRegex = /^\s*([^:\s\-]+?)[ \t]*[:：]/;
-    
-    let topKeysIndices = [];
-    lines.forEach((line, index) => {
-        if (topLevelKeyRegex.test(line) && !line.trim().startsWith('-') && line.search(/\S|$/) === 0) {
-            topKeysIndices.push(index);
+        // 优化正则，防止回溯卡顿
+        const topLevelKeyRegex = /^\s*([^:\s\-]+?)\s*[:：]/;
+        
+        let topKeysIndices = [];
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            // 限制行长度检测，防止超长行卡死正则
+            if (line.length < 200 && topLevelKeyRegex.test(line) && !line.trim().startsWith('-') && line.search(/\S|$/) === 0) {
+                topKeysIndices.push(i);
+            }
         }
-    });
 
-    if (topKeysIndices.length === 1 && lines.length > 2) {
-        const firstLineIndex = topKeysIndices[0];
-        const remainingLines = lines.slice(firstLineIndex + 1);
-        
-        let minIndent = Infinity;
-        let hasContent = false;
-        
-        remainingLines.forEach(l => {
-            if (l.trim().length > 0) {
-                const indent = l.search(/\S|$/);
-                if (indent < minIndent) minIndent = indent;
-                hasContent = true;
+        if (topKeysIndices.length === 1 && lines.length > 2) {
+            const firstLineIndex = topKeysIndices[0];
+            const remainingLines = lines.slice(firstLineIndex + 1);
+            
+            let minIndent = Infinity;
+            let hasContent = false;
+            
+            for (const l of remainingLines) {
+                if (l.trim().length > 0) {
+                    const indent = l.search(/\S|$/);
+                    if (indent < minIndent) minIndent = indent;
+                    hasContent = true;
+                }
+            }
+
+            if (hasContent && minIndent > 0 && minIndent !== Infinity) {
+                lines = remainingLines.map(l => l.length >= minIndent ? l.substring(minIndent) : l);
+            }
+        }
+
+        let currentKey = null;
+        let currentBuffer = [];
+
+        const flushBuffer = () => {
+            if (currentKey && currentBuffer.length > 0) {
+                let valuePart = "";
+                const firstLine = currentBuffer[0];
+                const match = firstLine.match(topLevelKeyRegex);
+                
+                if (match) {
+                    let inlineContent = firstLine.substring(match[0].length).trim();
+                    let blockContent = currentBuffer.slice(1).join('\n');
+                    
+                    if (inlineContent && blockContent) {
+                        valuePart = inlineContent + '\n' + blockContent;
+                    } else if (inlineContent) {
+                        valuePart = inlineContent;
+                    } else {
+                        valuePart = blockContent;
+                    }
+                } else {
+                    valuePart = currentBuffer.join('\n');
+                }
+                map.set(currentKey, valuePart);
+            }
+        };
+
+        lines.forEach((line) => {
+            // 再次保护正则检测
+            const isTopLevel = (line.length < 200) && topLevelKeyRegex.test(line) && !line.trim().startsWith('-');
+            const indentLevel = line.search(/\S|$/);
+
+            if (isTopLevel && indentLevel <= 1) {
+                flushBuffer();
+                const match = line.match(topLevelKeyRegex);
+                currentKey = match[1].trim();
+                currentBuffer = [line];
+            } else {
+                if (currentKey) {
+                    currentBuffer.push(line);
+                }
             }
         });
 
-        if (hasContent && minIndent > 0 && minIndent !== Infinity) {
-            lines = remainingLines.map(l => l.length >= minIndent ? l.substring(minIndent) : l);
-        }
+        flushBuffer();
+    } catch (e) {
+        console.error("[PW] Parse Error:", e);
     }
-
-    let currentKey = null;
-    let currentBuffer = [];
-
-    const flushBuffer = () => {
-        if (currentKey && currentBuffer.length > 0) {
-            let valuePart = "";
-            const firstLine = currentBuffer[0];
-            const match = firstLine.match(topLevelKeyRegex);
-            
-            if (match) {
-                let inlineContent = firstLine.substring(match[0].length).trim();
-                let blockContent = currentBuffer.slice(1).join('\n');
-                
-                if (inlineContent && blockContent) {
-                    valuePart = inlineContent + '\n' + blockContent;
-                } else if (inlineContent) {
-                    valuePart = inlineContent;
-                } else {
-                    valuePart = blockContent;
-                }
-            } else {
-                valuePart = currentBuffer.join('\n');
-            }
-            map.set(currentKey, valuePart);
-        }
-    };
-
-    lines.forEach((line) => {
-        const isTopLevel = topLevelKeyRegex.test(line) && !line.trim().startsWith('-');
-        const indentLevel = line.search(/\S|$/);
-
-        if (isTopLevel && indentLevel <= 1) {
-            flushBuffer();
-            const match = line.match(topLevelKeyRegex);
-            currentKey = match[1].trim();
-            currentBuffer = [line];
-        } else {
-            if (currentKey) {
-                currentBuffer.push(line);
-            }
-        }
-    });
-
-    flushBuffer();
     return map;
 }
 
@@ -229,23 +243,41 @@ function findMatchingKey(targetKey, map) {
     return null;
 }
 
+// 【关键修复】异步分片处理世界书，防止卡死
 async function collectActiveWorldInfoContent() {
     let content = [];
     try {
         const boundBooks = await getContextWorldBooks();
         const manualBooks = window.pwExtraBooks || [];
         const allBooks = [...new Set([...boundBooks, ...manualBooks])];
+        
+        // 限制最大处理数量，防止极端情况
+        if (allBooks.length > 20) {
+            console.warn("[PW] Too many world books, limiting to first 20.");
+            allBooks.length = 20;
+        }
+
         for (const bookName of allBooks) {
-            const entries = await getWorldBookEntries(bookName);
-            const enabledEntries = entries.filter(e => e.enabled);
-            if (enabledEntries.length > 0) {
-                content.push(`\n--- World Book: ${bookName} ---`);
-                enabledEntries.forEach(e => {
-                    content.push(`[Entry: ${e.displayName}]\n${e.content}`);
-                });
+            // 每次循环都让渡控制权，让 UI 有机会响应
+            await yieldToBrowser();
+            
+            try {
+                const entries = await getWorldBookEntries(bookName);
+                const enabledEntries = entries.filter(e => e.enabled);
+                
+                if (enabledEntries.length > 0) {
+                    content.push(`\n--- World Book: ${bookName} ---`);
+                    enabledEntries.forEach(e => {
+                        content.push(`[Entry: ${e.displayName}]\n${e.content}`);
+                    });
+                }
+            } catch (err) {
+                console.warn(`[PW] Failed to read book ${bookName}`, err);
             }
         }
-    } catch (e) { console.error("Error collecting WI content:", e); }
+    } catch (e) { 
+        console.error("Error collecting WI content:", e); 
+    }
     return content;
 }
 
@@ -605,6 +637,10 @@ async function runGeneration(data, apiConfig) {
             responseContent = json.choices[0].message.content;
 
         } else {
+            // 如果 context.generateQuietPrompt 不可用，这里可能会出错
+            if (typeof context.generateQuietPrompt !== 'function') {
+                throw new Error("SillyTavern 版本过旧，不支持 generateQuietPrompt，请使用独立 API。");
+            }
             responseContent = await context.generateQuietPrompt(systemPrompt, false, false, null, "System");
         }
     } finally {
@@ -622,6 +658,7 @@ async function runGeneration(data, apiConfig) {
 async function openCreatorPopup() {
     const context = getContext();
     loadData();
+    // 这里如果世界书太多，也可能卡顿，但不至于卡死
     await loadAvailableWorldBooks();
     const savedState = loadState();
     const config = { ...defaultSettings, ...extension_settings[extensionName], ...savedState.localConfig };
@@ -713,7 +750,6 @@ async function openCreatorPopup() {
                 <div class="pw-compact-btn" id="pw-snapshot" title="存入草稿 (Drafts)"><i class="fa-solid fa-save"></i></div>
             </div>
             <div class="pw-footer-group" style="flex:1; justify-content:flex-end; gap: 8px;">
-                <!-- 底部按钮：移除图标，应用新样式 -->
                 <button class="pw-btn wi" id="pw-btn-save-wi">保存至世界书</button>
                 <button class="pw-btn save" id="pw-btn-apply">覆盖当前人设</button>
             </div>
@@ -975,6 +1011,9 @@ function bindEvents() {
 
         const oldText = $('#pw-result-text').val();
         const $btn = $(this).find('i').removeClass('fa-magic').addClass('fa-spinner fa-spin');
+        
+        // 【关键修复】强制渲染，防止 UI 立即卡死
+        await forcePaint();
 
         try {
             const wiContent = await collectActiveWorldInfoContent();
@@ -1007,7 +1046,6 @@ function bindEvents() {
 
                 let cardsHtml = '';
                 if (!isChanged) {
-                    // 内容未变，显示单绿框。修改点：标题去除了 "(可编辑)"
                     cardsHtml = `
                     <div class="pw-diff-card new selected single-view" data-val="${encodeURIComponent(valNew)}">
                         <div class="pw-diff-label">无变更</div>
@@ -1052,18 +1090,14 @@ function bindEvents() {
         }
     });
 
-    // 修改点：允许任何选中的卡片进行编辑
     $(document).on('click.pw', '.pw-diff-card', function () {
         const $row = $(this).closest('.pw-diff-row');
-        // 单视图本身就是选中的，不需要切换逻辑
         if ($(this).hasClass('single-view')) return;
 
         $row.find('.pw-diff-card').removeClass('selected');
         $(this).addClass('selected');
         
-        // 1. 先把所有框设为只读
         $row.find('.pw-diff-textarea').prop('readonly', true);
-        // 2. 解锁当前选中的框 (无论是 old 还是 new)
         $(this).find('.pw-diff-textarea').prop('readonly', false).focus();
     });
 
@@ -1102,6 +1136,10 @@ function bindEvents() {
         if (!req) return toastr.warning("请输入要求");
         const $btn = $(this);
         $btn.prop('disabled', true).html('<i class="fas fa-spinner fa-spin"></i> 生成中...');
+        
+        // 【关键修复】强制渲染，防止 UI 立即卡死
+        await forcePaint();
+        
         $('#pw-refine-input').val('');
         $('#pw-result-text').val('');
 
