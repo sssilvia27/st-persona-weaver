@@ -8,9 +8,10 @@ const STORAGE_KEY_TEMPLATE = 'pw_template_v1';
 const STORAGE_KEY_PROMPTS = 'pw_prompts_v2';
 const BUTTON_ID = 'pw_persona_tool_btn';
 
-// 【修复5】更新模版结构
+// 【修复3】更新模版，加入姓名
 const defaultYamlTemplate =
 `基本信息: 
+  姓名: {{user}}
   年龄: 
   性别: 
   身高: 
@@ -72,12 +73,53 @@ NSFW:
   性癖好:
   禁忌底线:`;
 
-// 【修复4】Prompt 增加禁止输出状态栏的要求
+// 【修复1】Prompt 结构化优化，强制禁止 HTML 标签
 const defaultSystemPromptInitial =
-`Creating User Persona for {{user}} (Target: {{char}}). {{wi}} Traits / Template:  {{tags}} Instruction: {{input}} Task: Generate character details strictly in structured YAML format. IMPORTANT: Do NOT wrap the output in a root key like "{{user}}:". Start directly with the first key from the template. Do NOT output status bars, thinking process, or progress indicators. Response: ONLY the YAML content.`;
+`### Role
+You are an expert character profile creator tailored for roleplay scenarios.
+
+### Context
+User: {{user}}
+Target Character: {{char}}
+World Info: {{wi}}
+
+### Task
+Generate a detailed user persona based on the provided Template and Traits.
+Template: 
+"""
+{{tags}}
+"""
+Instruction: {{input}}
+
+### Formatting Rules (CRITICAL)
+1. Output MUST be strictly valid structured YAML.
+2. **Do NOT wrap the output in a root key** (like "{{user}}:"). Start directly with "基本信息:".
+3. Maintain the exact indentation hierarchy from the template.
+4. **NO XML tags, NO <details>, NO <think>, NO status bars.**
+5. **NO conversational filler.** Output ONLY the YAML content.`;
 
 const defaultSystemPromptRefine =
-`Optimizing User Persona for {{char}}. {{wi}} [Current Data (YAML)]: """{{current}}""" [Instruction]: "{{input}}" Task: Modify the data based on instruction. Maintain strict YAML hierarchy. Do NOT add a root key wrapper. If text is quoted, focus on that part. Do NOT output status bars. Response: ONLY the modified full YAML content.`;
+`### Role
+You are an expert character profile editor.
+
+### Context
+Target Character: {{char}}
+World Info: {{wi}}
+
+### Task
+Refine the Current Data based on the Instruction.
+Current Data:
+"""
+{{current}}
+"""
+Instruction: "{{input}}"
+
+### Formatting Rules (CRITICAL)
+1. Output MUST be strictly valid structured YAML.
+2. **Do NOT wrap the output in a root key.**
+3. **NO XML tags, NO <details>, NO <think>, NO status bars.**
+4. If modifying a specific part, output the FULL valid YAML structure for the context, or at least the complete parent block.
+5. **NO conversational filler.** Output ONLY the YAML content.`;
 
 const defaultSettings = {
     autoSwitchPersona: true, syncToWorldInfo: false,
@@ -86,7 +128,6 @@ const defaultSettings = {
 };
 
 const TEXT = {
-    // 【修复2】恢复图标样式
     PANEL_TITLE: `<i class="fa-solid fa-wand-magic-sparkles" style="color:#e0af68; margin-right:8px;"></i>User人设生成器`,
     BTN_TITLE: "打开设定生成器",
     TOAST_SAVE_SUCCESS: (name) => `Persona "${name}" 已保存并覆盖！`,
@@ -109,22 +150,24 @@ let lastRawResponse = "";
 // 1. 核心数据解析逻辑
 // ============================================================================
 
-/**
- * 解析 YAML 为块。
- * @param {string} text 文本
- * @param {boolean} isLLMOutput 是否为 LLM 输出。如果是，则尝试智能去皮；如果是模版，则严格保留结构。
- */
 function parseYamlToBlocks(text, isLLMOutput = false) {
     const map = new Map();
     if (!text) return map;
 
-    const cleanText = text.replace(/^```[a-z]*\n?/im, '').replace(/```$/im, '').trim();
+    // 【修复2】强力清洗：去除代码块标记、HTML标签、以及常见的 LLM 废话
+    let cleanText = text
+        .replace(/^```[a-z]*\n?/im, '')
+        .replace(/```$/im, '')
+        .replace(/<details>[\s\S]*?<\/details>/gi, '') // 去除折叠状态栏
+        .replace(/<think>[\s\S]*?<\/think>/gi, '')     // 去除思考过程
+        .replace(/\[状态栏\][\s\S]*/gi, '')             // 去除状态栏文本
+        .trim();
+
     let lines = cleanText.split('\n');
 
     const topLevelKeyRegex = /^\s*([^:\s\-]+?)[ \t]*[:：]/;
     
-    // 【修复1 & 修复5】智能解包逻辑仅针对 LLM 输出启用
-    // 模版解析时 (isLLMOutput=false)，严格尊重用户的缩进，不要因为只有一个 "基本信息" 就把它剥掉
+    // 智能解包逻辑
     if (isLLMOutput) {
         let topKeys = [];
         lines.forEach(line => {
@@ -133,7 +176,6 @@ function parseYamlToBlocks(text, isLLMOutput = false) {
             }
         });
 
-        // 如果只有一个顶层 Key 且内容较长，判定为包裹层，进行剥离
         if (topKeys.length === 1 && lines.length > 3) {
             const remaining = lines.slice(1);
             const secondLineIndent = remaining.find(l => l.trim().length > 0)?.search(/\S|$/) || 0;
@@ -174,8 +216,7 @@ function parseYamlToBlocks(text, isLLMOutput = false) {
         const isTopLevel = topLevelKeyRegex.test(line) && !line.trim().startsWith('-');
         const indentLevel = line.search(/\S|$/);
 
-        // 严格解析顶层 Key (0缩进)
-        if (isTopLevel && indentLevel === 0) {
+        if (isTopLevel && indentLevel === 0) { // 严格顶层
             flushBuffer();
             const match = line.match(topLevelKeyRegex);
             currentKey = match[1].trim();
@@ -256,7 +297,7 @@ function saveState(data) { localStorage.setItem(STORAGE_KEY_STATE, JSON.stringif
 function loadState() { try { return JSON.parse(localStorage.getItem(STORAGE_KEY_STATE)) || {}; } catch { return {}; } }
 
 function injectStyles() {
-    const styleId = 'persona-weaver-css-v38';
+    const styleId = 'persona-weaver-css-v39';
     if ($(`#${styleId}`).length) return;
     
     const css = `
@@ -354,7 +395,6 @@ function injectStyles() {
         resize: none; outline: none; line-height: 1.5; min-height: 80px;
         box-sizing: border-box;
     }
-    /* 【修复3】未选中时禁止输入，但选中后两者均可输入 */
     .pw-diff-card:not(.selected) .pw-diff-textarea { color: #888; pointer-events: none; }
     
     @media screen and (max-width: 600px) {
@@ -573,7 +613,13 @@ async function runGeneration(data, apiConfig) {
     }
     
     lastRawResponse = responseContent;
-    return responseContent.replace(/```[a-z]*\n?/g, '').replace(/```/g, '').trim();
+    // 返回前再次进行一次清洗，防止漏网之鱼
+    return responseContent
+        .replace(/<details>[\s\S]*?<\/details>/gi, '')
+        .replace(/<think>[\s\S]*?<\/think>/gi, '')
+        .replace(/```[a-z]*\n?/g, '')
+        .replace(/```/g, '')
+        .trim();
 }
 
 // ============================================================================
@@ -750,7 +796,7 @@ async function openCreatorPopup() {
 
     callPopup(html, 'text', '', { wide: true, large: true, okButton: "关闭" });
 
-    // 【修复5】模版渲染时，禁止智能去皮，严格按缩进显示模版块
+    // 【修复5】模版渲染：严格按缩进显示
     const $container = $('#pw-template-chips').empty();
     const blocks = parseYamlToBlocks(currentTemplate, false); 
     blocks.forEach((content, key) => {
@@ -832,7 +878,6 @@ function bindEvents() {
         const val = $('#pw-template-text').val();
         currentTemplate = val;
         saveData();
-        // 重新渲染模版块（不使用智能去皮）
         const $container = $('#pw-template-chips').empty();
         const blocks = parseYamlToBlocks(currentTemplate, false);
         blocks.forEach((content, key) => {
@@ -986,6 +1031,7 @@ function bindEvents() {
         const oldText = $('#pw-result-text').val();
         const $btn = $(this).find('i').removeClass('fa-magic').addClass('fa-spinner fa-spin');
 
+        // 【修复4】兜底 try-catch-finally 确保按钮复位
         try {
             const wiContent = await collectActiveWorldInfoContent();
             const modelVal = $('#pw-api-source').val() === 'independent' ? $('#pw-api-model-select').val() : null;
@@ -998,7 +1044,7 @@ function bindEvents() {
 
             $('#pw-diff-raw-textarea').val(lastRawResponse);
 
-            // 【修复1】智能去皮仅针对 LLM 输出 (responseText)
+            // 智能去皮针对 LLM 输出
             const oldMap = parseYamlToBlocks(oldText, true); 
             const newMap = parseYamlToBlocks(responseText, true); 
             const allKeys = [...new Set([...oldMap.keys(), ...newMap.keys()])];
@@ -1012,7 +1058,6 @@ function bindEvents() {
                 const valOld = oldMap.get(matchedKeyInOld) || "";
                 const valNew = newMap.get(matchedKeyInNew) || "";
 
-                // 【修复1】对比时忽略首尾空格
                 const isChanged = valOld.trim() !== valNew.trim();
                 if (isChanged) changeCount++;
                 if (!valOld && !valNew) return;
@@ -1051,14 +1096,14 @@ function bindEvents() {
         }
     });
 
-    // 【修复3】双向编辑
     $(document).on('click.pw', '.pw-diff-card', function () {
         const $row = $(this).closest('.pw-diff-row');
         $row.find('.pw-diff-card').removeClass('selected');
         $(this).addClass('selected');
         
-        // 移除只读，设为可编辑
+        const isNew = $(this).hasClass('new');
         $row.find('.pw-diff-textarea').prop('readonly', true);
+        // 【修复】无论新旧，只要选中即可编辑
         $(this).find('.pw-diff-textarea').prop('readonly', false).focus();
     });
 
@@ -1264,14 +1309,26 @@ function bindEvents() {
 // ... 辅助渲染函数 ...
 const renderTemplateChips = () => {
     const $container = $('#pw-template-chips').empty();
-    const blocks = parseYamlToBlocks(currentTemplate);
+    const blocks = parseYamlToBlocks(currentTemplate, false);
     blocks.forEach((content, key) => {
         const $chip = $(`<div class="pw-tag-chip"><i class="fa-solid fa-cube" style="opacity:0.5; margin-right:4px;"></i><span>${key}</span></div>`);
         $chip.on('click', () => {
             const $text = $('#pw-request');
             const cur = $text.val();
-            const prefix = (cur && !cur.endsWith('\n')) ? '\n\n' : '';
-            $text.val(cur + prefix + content).focus();
+            const prefix = (cur && !cur.endsWith('\n') && cur.length > 0) ? '\n\n' : '';
+            
+            let insertText = key + ":";
+            if (content && content.trim()) {
+                if (content.includes('\n') || content.startsWith(' ')) {
+                    insertText += "\n" + content;
+                } else {
+                    insertText += " " + content;
+                }
+            } else {
+                insertText += " ";
+            }
+
+            $text.val(cur + prefix + insertText).focus();
             $text.scrollTop($text[0].scrollHeight);
         });
         $container.append($chip);
