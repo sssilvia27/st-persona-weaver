@@ -101,7 +101,7 @@ let pollInterval = null;
 let lastRawResponse = "";
 
 // ============================================================================
-// 1. 核心数据解析逻辑
+// 1. 核心数据解析逻辑 (Key-Value 分离)
 // ============================================================================
 
 function parseYamlToBlocks(text) {
@@ -139,6 +139,7 @@ function parseYamlToBlocks(text) {
             const match = firstLine.match(topLevelKeyRegex);
             
             if (match) {
+                // 提取 Value，去除 Key
                 let inlineContent = firstLine.substring(match[0].length).trim();
                 let blockContent = currentBuffer.slice(1).join('\n');
                 
@@ -241,7 +242,7 @@ function saveState(data) { localStorage.setItem(STORAGE_KEY_STATE, JSON.stringif
 function loadState() { try { return JSON.parse(localStorage.getItem(STORAGE_KEY_STATE)) || {}; } catch { return {}; } }
 
 function injectStyles() {
-    const styleId = 'persona-weaver-css-v37';
+    const styleId = 'persona-weaver-css-v38'; // Updated version ID
     if ($(`#${styleId}`).length) return;
     
     const css = `
@@ -758,7 +759,6 @@ async function openCreatorPopup() {
 function bindEvents() {
     $(document).off('.pw');
 
-    // 【重要修复】页面可见性改变时重新绑定事件，防止切屏后失效
     document.addEventListener("visibilitychange", function() {
         if (!document.hidden) {
             console.log("[PW] App visible, rebinding events...");
@@ -994,6 +994,7 @@ function bindEvents() {
         if (isNew) $(this).find('.pw-diff-textarea').prop('readonly', false).focus();
     });
 
+    // 【重要修复】重组 Key 和 Value
     $(document).on('click.pw', '#pw-diff-confirm', function () {
         const activeTab = $('.pw-diff-tab.active').data('view');
         if (activeTab === 'raw') {
@@ -1006,6 +1007,7 @@ function bindEvents() {
                 const val = $(this).find('.pw-diff-card.selected .pw-diff-textarea').val().trimEnd();
                 
                 if (val && val !== "(删除)" && val !== "(无)") {
+                    // 判断格式：如果包含换行或缩进，使用块格式
                     if (val.includes('\n') || val.startsWith('  ')) {
                         finalLines.push(`${key}:\n${val}`);
                     } else {
@@ -1202,8 +1204,21 @@ const renderTemplateChips = () => {
         $chip.on('click', () => {
             const $text = $('#pw-request');
             const cur = $text.val();
-            const prefix = (cur && !cur.endsWith('\n')) ? '\n\n' : '';
-            $text.val(cur + prefix + content).focus();
+            const prefix = (cur && !cur.endsWith('\n') && cur.length > 0) ? '\n\n' : '';
+            
+            // 【重要修复】点击模版块时，也需要重新拼合 Key 和 Value
+            let insertText = key + ":";
+            if (content && content.trim()) {
+                if (content.includes('\n') || content.startsWith(' ')) {
+                    insertText += "\n" + content;
+                } else {
+                    insertText += " " + content;
+                }
+            } else {
+                insertText += " ";
+            }
+
+            $text.val(cur + prefix + insertText).focus();
             $text.scrollTop($text[0].scrollHeight);
         });
         $container.append($chip);
