@@ -5,7 +5,7 @@ const extensionName = "st-persona-weaver";
 const STORAGE_KEY_HISTORY = 'pw_history_v20';
 const STORAGE_KEY_STATE = 'pw_state_v20';
 const STORAGE_KEY_TEMPLATE = 'pw_template_v2';
-const STORAGE_KEY_PROMPTS = 'pw_prompts_v3';
+const STORAGE_KEY_PROMPTS = 'pw_prompts_v3'; // 保持 v3，不强制覆盖用户数据
 const BUTTON_ID = 'pw_persona_tool_btn';
 
 const defaultYamlTemplate =
@@ -89,11 +89,16 @@ Generate character details strictly in structured YAML format.
 3. Do NOT output status bars, progress bars, or Chain of Thought/Reasoning/Thinking process.
 4. Response: ONLY the YAML content.`;
 
+// 【关键修改】润色 Prompt 更新：加入 {{tags}} 并明确迁移指令
 const defaultSystemPromptRefine =
-`Optimizing User Persona for {{char}}.
+`You are an expert Data Converter and Persona Editor.
+Optimizing User Persona for {{char}}.
 {{wi}}
 
-[Current Data (YAML)]:
+[Target Schema / Template]:
+{{tags}}
+
+[Current Data]:
 """
 {{current}}
 """
@@ -102,12 +107,12 @@ const defaultSystemPromptRefine =
 "{{input}}"
 
 [Task]:
-Modify the data based on instruction.
-1. Maintain strict YAML hierarchy.
-2. Do NOT add a root key wrapper.
-3. Do NOT output status bars, progress bars, or Chain of Thought.
-4. If text is quoted in instruction, focus on modifying that specific part.
-5. Response: ONLY the modified full YAML content.`;
+1. Parse [Current Data]. If it is unstructured text or uses a different format, MIGRATE it to fit the [Target Schema].
+2. Apply the [Instruction] to modify or refine the content.
+3. STRICTLY output in valid YAML format following the [Target Schema] structure.
+4. Do NOT add a root key wrapper (like "User:").
+5. Do NOT output status bars, progress bars, or Chain of Thought.
+6. Response: ONLY the final YAML content.`;
 
 const defaultSettings = {
     autoSwitchPersona: true, syncToWorldInfo: false,
@@ -152,13 +157,11 @@ function parseYamlToBlocks(text) {
         const cleanText = text.replace(/^```[a-z]*\n?/im, '').replace(/```$/im, '').trim();
         let lines = cleanText.split('\n');
 
-        // 优化正则，防止回溯卡顿
         const topLevelKeyRegex = /^\s*([^:\s\-]+?)\s*[:：]/;
         
         let topKeysIndices = [];
         for (let i = 0; i < lines.length; i++) {
             const line = lines[i];
-            // 限制行长度检测，防止超长行卡死正则
             if (line.length < 200 && topLevelKeyRegex.test(line) && !line.trim().startsWith('-') && line.search(/\S|$/) === 0) {
                 topKeysIndices.push(i);
             }
@@ -212,7 +215,6 @@ function parseYamlToBlocks(text) {
         };
 
         lines.forEach((line) => {
-            // 再次保护正则检测
             const isTopLevel = (line.length < 200) && topLevelKeyRegex.test(line) && !line.trim().startsWith('-');
             const indentLevel = line.search(/\S|$/);
 
@@ -243,7 +245,6 @@ function findMatchingKey(targetKey, map) {
     return null;
 }
 
-// 【关键修复】异步分片处理世界书，防止卡死
 async function collectActiveWorldInfoContent() {
     let content = [];
     try {
@@ -251,16 +252,13 @@ async function collectActiveWorldInfoContent() {
         const manualBooks = window.pwExtraBooks || [];
         const allBooks = [...new Set([...boundBooks, ...manualBooks])];
         
-        // 限制最大处理数量，防止极端情况
         if (allBooks.length > 20) {
             console.warn("[PW] Too many world books, limiting to first 20.");
             allBooks.length = 20;
         }
 
         for (const bookName of allBooks) {
-            // 每次循环都让渡控制权，让 UI 有机会响应
             await yieldToBrowser();
-            
             try {
                 const entries = await getWorldBookEntries(bookName);
                 const enabledEntries = entries.filter(e => e.enabled);
@@ -296,7 +294,9 @@ function loadData() {
         }
     } catch { currentTemplate = defaultYamlTemplate; }
     try {
+        // 尝试加载用户保存的 Prompt
         const p = JSON.parse(localStorage.getItem(STORAGE_KEY_PROMPTS));
+        // 如果用户有保存，就用用户的，否则用默认（此时默认已经更新为包含 {{tags}} 的版本）
         promptsCache = { ...{ initial: defaultSystemPromptInitial, refine: defaultSystemPromptRefine }, ...p };
     } catch { promptsCache = { initial: defaultSystemPromptInitial, refine: defaultSystemPromptRefine }; }
 }
@@ -405,7 +405,6 @@ function injectStyles() {
         box-shadow: 0 0 10px rgba(158, 206, 106, 0.1);
     }
     .pw-diff-card:not(.selected):hover { opacity: 0.8; }
-    /* 智能对比单框样式 */
     .pw-diff-card.single-view {
         flex: 1; opacity: 1; background: rgba(158, 206, 106, 0.05); 
         border-color: #9ece6a; cursor: text;
@@ -429,7 +428,6 @@ function injectStyles() {
         .pw-diff-cards { flex-direction: column; }
     }
     
-    /* 底部按钮样式 */
     .pw-btn.wi { background: linear-gradient(135deg, rgba(122, 162, 247, 0.2), rgba(0, 0, 0, 0)); border-color: #7aa2f7; color: #7aa2f7; }
     `;
     $('<style>').attr('id', styleId).text(css).appendTo('head');
@@ -637,7 +635,6 @@ async function runGeneration(data, apiConfig) {
             responseContent = json.choices[0].message.content;
 
         } else {
-            // 如果 context.generateQuietPrompt 不可用，这里可能会出错
             if (typeof context.generateQuietPrompt !== 'function') {
                 throw new Error("SillyTavern 版本过旧，不支持 generateQuietPrompt，请使用独立 API。");
             }
@@ -658,7 +655,6 @@ async function runGeneration(data, apiConfig) {
 async function openCreatorPopup() {
     const context = getContext();
     loadData();
-    // 这里如果世界书太多，也可能卡顿，但不至于卡死
     await loadAvailableWorldBooks();
     const savedState = loadState();
     const config = { ...defaultSettings, ...extension_settings[extensionName], ...savedState.localConfig };
@@ -811,6 +807,7 @@ async function openCreatorPopup() {
                 
                 <div style="display:flex; justify-content:space-between; margin-top:15px;"><span class="pw-prompt-label">润色指令 (System Prompt)</span><button class="pw-mini-btn" id="pw-reset-refine" style="font-size:0.7em;">恢复默认</button></div>
                 <div class="pw-var-btns">
+                    <div class="pw-var-btn" data-ins="{{tags}}"><span>模版(必要)</span><span class="code">{{tags}}</span></div>
                     <div class="pw-var-btn" data-ins="{{current}}"><span>当前文本</span><span class="code">{{current}}</span></div>
                     <div class="pw-var-btn" data-ins="{{input}}"><span>润色意见</span><span class="code">{{input}}</span></div>
                 </div>
@@ -1012,7 +1009,6 @@ function bindEvents() {
         const oldText = $('#pw-result-text').val();
         const $btn = $(this).find('i').removeClass('fa-magic').addClass('fa-spinner fa-spin');
         
-        // 【关键修复】强制渲染，防止 UI 立即卡死
         await forcePaint();
 
         try {
@@ -1137,7 +1133,6 @@ function bindEvents() {
         const $btn = $(this);
         $btn.prop('disabled', true).html('<i class="fas fa-spinner fa-spin"></i> 生成中...');
         
-        // 【关键修复】强制渲染，防止 UI 立即卡死
         await forcePaint();
         
         $('#pw-refine-input').val('');
