@@ -4,11 +4,10 @@ import { saveSettingsDebounced, callPopup, getRequestHeaders } from "../../../..
 const extensionName = "st-persona-weaver";
 const STORAGE_KEY_HISTORY = 'pw_history_v20';
 const STORAGE_KEY_STATE = 'pw_state_v20';
-const STORAGE_KEY_TEMPLATE = 'pw_template_v2'; // 升级版本号以应用新模版
-const STORAGE_KEY_PROMPTS = 'pw_prompts_v3';   // 升级版本号以应用新Prompt
+const STORAGE_KEY_TEMPLATE = 'pw_template_v2';
+const STORAGE_KEY_PROMPTS = 'pw_prompts_v3';
 const BUTTON_ID = 'pw_persona_tool_btn';
 
-// 【修改点 4】更新默认模版
 const defaultYamlTemplate =
 `基本信息: 
   姓名: {{user}}
@@ -73,7 +72,6 @@ NSFW:
   性癖好:
   禁忌底线:`;
 
-// 【修改点 3】Prompt 优化：多行格式 + 禁止思维链/状态栏
 const defaultSystemPromptInitial =
 `Creating User Persona for {{user}} (Target: {{char}}).
 {{wi}}
@@ -118,7 +116,6 @@ const defaultSettings = {
 };
 
 const TEXT = {
-    // 【修改点 1】标题图标修改为金色魔法棒 SVG
     PANEL_TITLE: `<span style="color:#e0af68; margin-right:5px;"><i class="fa-solid fa-wand-magic-sparkles"></i></span>User人设生成器`,
     BTN_TITLE: "打开设定生成器",
     TOAST_SAVE_SUCCESS: (name) => `Persona "${name}" 已保存并覆盖！`,
@@ -138,35 +135,29 @@ let pollInterval = null;
 let lastRawResponse = "";
 
 // ============================================================================
-// 1. 核心数据解析逻辑 (Key-Value 分离)
+// 1. 核心数据解析逻辑
 // ============================================================================
 
 function parseYamlToBlocks(text) {
     const map = new Map();
     if (!text) return map;
 
-    // 清理 markdown 代码块标记
     const cleanText = text.replace(/^```[a-z]*\n?/im, '').replace(/```$/im, '').trim();
     let lines = cleanText.split('\n');
 
-    // 匹配 YAML 顶层 Key 的正则 (以非空字符开头，后面跟冒号)
     const topLevelKeyRegex = /^\s*([^:\s\-]+?)[ \t]*[:：]/;
     
-    // 【修改点 4】优化智能解包逻辑
     let topKeysIndices = [];
     lines.forEach((line, index) => {
-        // 必须是顶格写 (indentLevel == 0) 或者非常小的缩进，且不是列表项
         if (topLevelKeyRegex.test(line) && !line.trim().startsWith('-') && line.search(/\S|$/) === 0) {
             topKeysIndices.push(index);
         }
     });
 
-    // 如果只有一个顶层 Key（例如 User:），且总行数较多，且第二行开始有统一缩进，则判定为包裹结构
     if (topKeysIndices.length === 1 && lines.length > 2) {
         const firstLineIndex = topKeysIndices[0];
         const remainingLines = lines.slice(firstLineIndex + 1);
         
-        // 检查剩余行的最小缩进量（忽略空行）
         let minIndent = Infinity;
         let hasContent = false;
         
@@ -178,14 +169,11 @@ function parseYamlToBlocks(text) {
             }
         });
 
-        // 只有当存在有效内容且确实有缩进时，才执行解包
         if (hasContent && minIndent > 0 && minIndent !== Infinity) {
-            // 解包：去掉第一行，并且对剩余行去除缩进
             lines = remainingLines.map(l => l.length >= minIndent ? l.substring(minIndent) : l);
         }
     }
 
-    // 常规解析逻辑
     let currentKey = null;
     let currentBuffer = [];
 
@@ -196,7 +184,6 @@ function parseYamlToBlocks(text) {
             const match = firstLine.match(topLevelKeyRegex);
             
             if (match) {
-                // 提取 Value，去除 Key
                 let inlineContent = firstLine.substring(match[0].length).trim();
                 let blockContent = currentBuffer.slice(1).join('\n');
                 
@@ -215,11 +202,9 @@ function parseYamlToBlocks(text) {
     };
 
     lines.forEach((line) => {
-        // 重新判断每一行
         const isTopLevel = topLevelKeyRegex.test(line) && !line.trim().startsWith('-');
         const indentLevel = line.search(/\S|$/);
 
-        // 这里只认 0 缩进或者极小缩进为 Top Level，避免嵌套内容被切断
         if (isTopLevel && indentLevel <= 1) {
             flushBuffer();
             const match = line.match(topLevelKeyRegex);
@@ -272,7 +257,6 @@ function loadData() {
     try { historyCache = JSON.parse(localStorage.getItem(STORAGE_KEY_HISTORY)) || []; } catch { historyCache = []; }
     try {
         const t = localStorage.getItem(STORAGE_KEY_TEMPLATE);
-        // 如果是旧的简易模版，强制更新为新的详细模版
         if (!t || t.length < 50) { 
              currentTemplate = defaultYamlTemplate;
         } else {
@@ -412,6 +396,9 @@ function injectStyles() {
     @media screen and (max-width: 600px) {
         .pw-diff-cards { flex-direction: column; }
     }
+    
+    /* 底部按钮样式 */
+    .pw-btn.wi { background: linear-gradient(135deg, rgba(122, 162, 247, 0.2), rgba(0, 0, 0, 0)); border-color: #7aa2f7; color: #7aa2f7; }
     `;
     $('<style>').attr('id', styleId).text(css).appendTo('head');
 }
@@ -689,7 +676,6 @@ async function openCreatorPopup() {
                 <div class="pw-tags-container" id="pw-template-chips"></div>
                 
                 <div class="pw-template-editor-area" id="pw-template-editor">
-                    <!-- 【修改点 5】快捷键栏移至输入框上方，防止被输入法遮挡 -->
                     <div class="pw-template-footer" style="border-top:none; border-bottom:1px solid var(--SmartThemeBorderColor); border-radius:6px 6px 0 0;">
                         <div class="pw-shortcut-bar">
                             <div class="pw-shortcut-btn" data-key="  "><span>缩进</span><span class="code">Tab</span></div>
@@ -727,9 +713,9 @@ async function openCreatorPopup() {
                 <div class="pw-compact-btn" id="pw-snapshot" title="存入草稿 (Drafts)"><i class="fa-solid fa-save"></i></div>
             </div>
             <div class="pw-footer-group" style="flex:1; justify-content:flex-end; gap: 8px;">
-                <!-- 【修改点 6】世界书按钮样式优化 -->
-                <button class="pw-btn primary" id="pw-btn-save-wi"><i class="fa-solid fa-book"></i> 保存至世界书</button>
-                <button class="pw-btn save" id="pw-btn-apply"><i class="fa-solid fa-check"></i> 覆盖当前人设</button>
+                <!-- 底部按钮：移除图标，应用新样式 -->
+                <button class="pw-btn wi" id="pw-btn-save-wi">保存至世界书</button>
+                <button class="pw-btn save" id="pw-btn-apply">覆盖当前人设</button>
             </div>
         </div>
     </div>
@@ -1015,21 +1001,19 @@ function bindEvents() {
                 const valOld = oldMap.get(matchedKeyInOld) || "";
                 const valNew = newMap.get(matchedKeyInNew) || "";
 
-                // 【修改点 2】智能对比逻辑优化：如果内容一致，只显示一个绿色可编辑框
                 const isChanged = valOld.trim() !== valNew.trim();
                 if (isChanged) changeCount++;
                 if (!valOld && !valNew) return;
 
                 let cardsHtml = '';
                 if (!isChanged) {
-                    // 内容未变，显示单绿框
+                    // 内容未变，显示单绿框。修改点：标题去除了 "(可编辑)"
                     cardsHtml = `
                     <div class="pw-diff-card new selected single-view" data-val="${encodeURIComponent(valNew)}">
-                        <div class="pw-diff-label">无变更 (可编辑)</div>
+                        <div class="pw-diff-label">无变更</div>
                         <textarea class="pw-diff-textarea">${valNew}</textarea>
                     </div>`;
                 } else {
-                    // 内容有变，显示对比
                     cardsHtml = `
                     <div class="pw-diff-card old" data-val="${encodeURIComponent(valOld)}">
                         <div class="pw-diff-label">原版本</div>
@@ -1068,17 +1052,19 @@ function bindEvents() {
         }
     });
 
+    // 修改点：允许任何选中的卡片进行编辑
     $(document).on('click.pw', '.pw-diff-card', function () {
         const $row = $(this).closest('.pw-diff-row');
-        // 如果是单视图模式，已经是选中状态，只需要确保focus
+        // 单视图本身就是选中的，不需要切换逻辑
         if ($(this).hasClass('single-view')) return;
 
         $row.find('.pw-diff-card').removeClass('selected');
         $(this).addClass('selected');
         
-        const isNew = $(this).hasClass('new');
+        // 1. 先把所有框设为只读
         $row.find('.pw-diff-textarea').prop('readonly', true);
-        if (isNew) $(this).find('.pw-diff-textarea').prop('readonly', false).focus();
+        // 2. 解锁当前选中的框 (无论是 old 还是 new)
+        $(this).find('.pw-diff-textarea').prop('readonly', false).focus();
     });
 
     $(document).on('click.pw', '#pw-diff-confirm', function () {
@@ -1090,11 +1076,9 @@ function bindEvents() {
             let finalLines = [];
             $('.pw-diff-row').each(function () {
                 const key = $(this).data('key');
-                // 无论是单视图还是双视图，取选中的那个 card 的 textarea
                 const val = $(this).find('.pw-diff-card.selected .pw-diff-textarea').val().trimEnd();
                 
                 if (val && val !== "(删除)" && val !== "(无)") {
-                    // 判断格式：如果包含换行或缩进，使用块格式
                     if (val.includes('\n') || val.startsWith('  ')) {
                         finalLines.push(`${key}:\n${val}`);
                     } else {
@@ -1293,7 +1277,6 @@ const renderTemplateChips = () => {
             const cur = $text.val();
             const prefix = (cur && !cur.endsWith('\n') && cur.length > 0) ? '\n\n' : '';
             
-            // 【重要修复】点击模版块时，也需要重新拼合 Key 和 Value
             let insertText = key + ":";
             if (content && content.trim()) {
                 if (content.includes('\n') || content.startsWith(' ')) {
