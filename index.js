@@ -389,7 +389,7 @@ function saveState(data) { localStorage.setItem(STORAGE_KEY_STATE, JSON.stringif
 function loadState() { try { return JSON.parse(localStorage.getItem(STORAGE_KEY_STATE)) || {}; } catch { return {}; } }
 
 function injectStyles() {
-    const styleId = 'persona-weaver-css-v45'; // Version bumped
+    const styleId = 'persona-weaver-css-v45'; // Bumped version
     if ($(`#${styleId}`).length) return;
     
     const css = `
@@ -445,8 +445,8 @@ function injectStyles() {
     .pw-opening-textarea { width: 100%; min-height: 350px; background: rgba(0, 0, 0, 0.15); border: 1px solid var(--SmartThemeBorderColor); border-radius: 6px; color: #eee; padding: 10px; font-family: inherit; font-size: 1.0em; line-height: 1.6; resize: vertical; outline: none; box-sizing: border-box; white-space: pre-wrap; }
     .pw-opening-textarea:focus { background: rgba(0,0,0,0.25); border-color: #e0af68; }
     
-    /* [Req 2] Layout Update for Opening Actions */
-    .pw-opening-actions { display: flex; justify-content: space-between; align-items: center; margin-top: 8px; border-top: 1px dashed var(--SmartThemeBorderColor); padding-top: 8px; }
+    /* [Req 1] Updated Opening Actions Layout */
+    .pw-opening-actions { display: flex; justify-content: space-between; align-items: center; margin-top: 8px; }
     
     .pw-carousel-nav { display: flex; align-items: center; justify-content: center; gap: 15px; margin-top: 15px; padding-top: 10px; border-top: 1px dashed var(--SmartThemeBorderColor); }
     
@@ -466,7 +466,7 @@ function injectStyles() {
     .pw-input-label { 
         font-size: 1.0em; 
         font-weight: bold; 
-        color: #e0af68; /* Theme gold color */
+        color: #e0af68; 
         margin-bottom: 5px; 
         margin-top: 5px;
         text-align: left; 
@@ -673,6 +673,7 @@ function renderOpeningResults(rawText) {
     let slidesHtml = '';
     totalSlides = matches.length;
     
+    // [Req 2] Layout update for Opening Card Actions
     matches.forEach((content, i) => {
         slidesHtml += `
             <div class="pw-opening-card" data-index="${i}">
@@ -690,11 +691,10 @@ function renderOpeningResults(rawText) {
 
                 <div class="pw-opening-actions">
                     <div class="pw-footer-group">
-                        <div class="pw-compact-btn danger pw-opening-clear-btn" title="清空"><i class="fa-solid fa-eraser"></i></div>
-                        <div class="pw-compact-btn pw-opening-copy-btn" title="复制"><i class="fa-solid fa-copy"></i></div>
+                        <div class="pw-compact-btn pw-copy-opening-btn" title="复制"><i class="fa-solid fa-copy"></i></div>
                         <div class="pw-compact-btn pw-save-draft-btn" title="保存"><i class="fa-solid fa-save"></i></div>
                     </div>
-                    <div class="pw-footer-group" style="gap: 8px;">
+                    <div class="pw-footer-group" style="justify-content: flex-end;">
                         <button class="pw-mini-btn toggle-refine-btn"><i class="fa-solid fa-pen-fancy"></i> 润色</button>
                         <button class="pw-btn save apply-btn"><i class="fa-solid fa-plus-circle"></i> 加入开场白列表</button>
                     </div>
@@ -817,8 +817,8 @@ async function openCreatorPopup() {
             <div class="pw-footer-group">
                 <div class="pw-compact-btn danger" id="pw-clear" title="清空"><i class="fa-solid fa-eraser"></i></div>
                 <!-- [Req 1] Added Copy Button for Persona -->
-                <div class="pw-compact-btn" id="pw-copy-persona" title="复制"><i class="fa-solid fa-copy"></i></div>
-                <div class="pw-compact-btn" id="pw-snapshot" title="存入草稿 (Drafts)"><i class="fa-solid fa-save"></i></div>
+                <div class="pw-compact-btn" id="pw-copy-persona" title="复制内容"><i class="fa-solid fa-copy"></i></div>
+                <div class="pw-compact-btn" id="pw-snapshot" title="保存"><i class="fa-solid fa-save"></i></div>
             </div>
             <div class="pw-footer-group" style="flex:1; justify-content:flex-end; gap: 8px;">
                 <button class="pw-btn wi" id="pw-btn-save-wi">保存至世界书</button>
@@ -830,7 +830,6 @@ async function openCreatorPopup() {
     <!-- 开场白页面 -->
     <div id="pw-view-opening" class="pw-view">
         <div class="pw-scroll-area">
-            
             <div class="pw-input-label">附加要求</div>
             <textarea id="pw-opening-req" class="pw-textarea pw-auto-height" placeholder="在此输入场景、时间、地点等要求..."></textarea>
             <button id="pw-btn-gen-opening" class="pw-btn gen" style="margin-top:10px;">生成开场白</button>
@@ -950,13 +949,18 @@ function bindEvents() {
 
     console.log("[PW] Binding Events...");
 
-    // --- 轮播图控制事件 ---
     $(document).on('click.pw', '#pw-prev-slide', () => { if (currentSlideIndex > 0) { currentSlideIndex--; updateCarousel(); } });
     $(document).on('click.pw', '#pw-next-slide', () => { if (currentSlideIndex < totalSlides - 1) { currentSlideIndex++; updateCarousel(); } });
 
-    // --- 开场白卡片内部按钮事件 ---
-    
-    // [Req 2] Save Draft
+    // [Req 2] Opening Action: Copy
+    $(document).on('click.pw', '.pw-copy-opening-btn', function() {
+        const content = $(this).closest('.pw-opening-card').find('.pw-opening-textarea').val();
+        if (!content) return toastr.warning("内容为空");
+        navigator.clipboard.writeText(content);
+        toastr.success("开场白已复制");
+    });
+
+    // Opening Action: Save Draft
     $(document).on('click.pw', '.pw-save-draft-btn', function() {
         const content = $(this).closest('.pw-opening-card').find('.pw-opening-textarea').val();
         const req = $('#pw-opening-req').val();
@@ -967,20 +971,6 @@ function bindEvents() {
             data: { name: "Opening", resultText: content, type: 'opening' } 
         });
         toastr.success(TEXT.TOAST_SNAPSHOT);
-    });
-
-    // [Req 2] Copy Opening
-    $(document).on('click.pw', '.pw-opening-copy-btn', function() {
-        const content = $(this).closest('.pw-opening-card').find('.pw-opening-textarea').val();
-        navigator.clipboard.writeText(content);
-        toastr.success("开场白已复制");
-    });
-
-    // [Req 2] Clear Opening
-    $(document).on('click.pw', '.pw-opening-clear-btn', function() {
-        if(confirm("确定清空此开场白内容？")) {
-            $(this).closest('.pw-opening-card').find('.pw-opening-textarea').val('').trigger('input');
-        }
     });
 
     // Apply to Alternate Greetings
@@ -1009,7 +999,7 @@ function bindEvents() {
         $(this).closest('.pw-opening-card').find('.pw-card-refine-box').slideToggle();
     });
 
-    // Confirm Refine (Opening) -> Diff View
+    // Confirm Refine (Opening)
     $(document).on('click.pw', '.refine-confirm-btn', async function() {
         console.log("[PW] Opening Refine Clicked");
         const $card = $(this).closest('.pw-opening-card');
@@ -1490,6 +1480,14 @@ function bindEvents() {
         $('.popup_close').click();
     });
 
+    // [Req 1] Persona Action: Copy
+    $(document).on('click.pw', '#pw-copy-persona', function() {
+        const text = $('#pw-result-text').val();
+        if (!text) return toastr.warning("没有内容可复制");
+        navigator.clipboard.writeText(text);
+        toastr.success("人设已复制");
+    });
+
     $(document).on('click.pw', '#pw-clear', function () {
         if (confirm("确定清空？")) {
             $('#pw-request').val('').removeClass('minimized');
@@ -1497,13 +1495,6 @@ function bindEvents() {
             $('#pw-result-text').val('');
             saveCurrentState();
         }
-    });
-
-    // [Req 1] Persona Copy Button
-    $(document).on('click.pw', '#pw-copy-persona', function() {
-        const content = $('#pw-result-text').val();
-        navigator.clipboard.writeText(content);
-        toastr.success("人设内容已复制");
     });
 
     // Save Draft (Persona)
@@ -1614,127 +1605,6 @@ function bindEvents() {
     $(document).on('click.pw', '#pw-history-search-clear', function () { $('#pw-history-search').val('').trigger('input'); });
     $(document).on('click.pw', '#pw-history-clear-all', function () { if (confirm("清空?")) { historyCache = []; saveData(); renderHistoryList(); } });
 }
-
-// ... 辅助渲染函数 ...
-const renderTemplateChips = () => {
-    const $container = $('#pw-template-chips').empty();
-    const blocks = parseYamlToBlocks(currentTemplate);
-    blocks.forEach((content, key) => {
-        const $chip = $(`<div class="pw-tag-chip"><i class="fa-solid fa-cube" style="opacity:0.5; margin-right:4px;"></i><span>${key}</span></div>`);
-        $chip.on('click', () => {
-            const $text = $('#pw-request');
-            const cur = $text.val();
-            const prefix = (cur && !cur.endsWith('\n') && cur.length > 0) ? '\n\n' : '';
-            let insertText = key + ":";
-            if (content && content.trim()) {
-                if (content.includes('\n') || content.startsWith(' ')) insertText += "\n" + content;
-                else insertText += " " + content;
-            } else insertText += " ";
-            $text.val(cur + prefix + insertText).focus();
-            $text.scrollTop($text[0].scrollHeight);
-        });
-        $container.append($chip);
-    });
-};
-
-const renderHistoryList = () => {
-    loadData();
-    const $list = $('#pw-history-list').empty();
-    const search = $('#pw-history-search').val().toLowerCase();
-    const filtered = historyCache.filter(item => {
-        if (!search) return true;
-        const content = (item.data.resultText || "").toLowerCase();
-        const title = (item.title || "").toLowerCase();
-        return title.includes(search) || content.includes(search);
-    });
-    if (filtered.length === 0) { $list.html('<div style="text-align:center; opacity:0.6; padding:20px;">暂无草稿</div>'); return; }
-
-    filtered.forEach((item, index) => {
-        const previewText = item.data.resultText || '无内容';
-        const displayTitle = item.title || "User & Char"; 
-        const typeLabel = item.data.type === 'opening' ? '<span style="color:#e0af68; font-size:0.8em; border:1px solid #e0af68; border-radius:3px; padding:0 3px; margin-right:5px;">开场白</span>' : '<span style="color:#9ece6a; font-size:0.8em; border:1px solid #9ece6a; border-radius:3px; padding:0 3px; margin-right:5px;">人设</span>';
-
-        const $el = $(`
-        <div class="pw-history-item">
-            <div class="pw-hist-main">
-                <div class="pw-hist-header">
-                    <span class="pw-hist-title-display">${typeLabel}${displayTitle}</span>
-                    <input type="text" class="pw-hist-title-input" value="${displayTitle}" style="display:none;">
-                    <div style="display:flex; gap:5px;">
-                        <i class="fa-solid fa-pen pw-hist-action-btn edit" title="编辑标题"></i>
-                        <i class="fa-solid fa-trash pw-hist-action-btn del" data-index="${index}" title="删除"></i>
-                    </div>
-                </div>
-                <div class="pw-hist-meta"><span>${item.timestamp || ''}</span></div>
-                <div class="pw-hist-desc">${previewText}</div>
-            </div>
-        </div>
-    `);
-        $el.on('click', function (e) {
-            if ($(e.target).closest('.pw-hist-action-btn, .pw-hist-title-input').length) return;
-            
-            if (item.data.type === 'opening') {
-                $('#pw-opening-req').val(item.request);
-                renderOpeningResults(item.data.resultText);
-                $('.pw-tab[data-tab="opening"]').click();
-            } else {
-                $('#pw-request').val(item.request); 
-                $('#pw-result-text').val(previewText); 
-                $('#pw-result-area').show();
-                $('#pw-request').addClass('minimized');
-                $('.pw-tab[data-tab="editor"]').click();
-            }
-        });
-        $el.find('.pw-hist-action-btn.del').on('click', function (e) {
-            e.stopPropagation();
-            if (confirm("删除?")) {
-                historyCache.splice(historyCache.indexOf(item), 1);
-                saveData(); renderHistoryList();
-            }
-        });
-        $list.append($el);
-    });
-};
-
-window.pwExtraBooks = [];
-const renderWiBooks = async () => {
-    const container = $('#pw-wi-container').empty();
-    const baseBooks = await getContextWorldBooks();
-    const allBooks = [...new Set([...baseBooks, ...(window.pwExtraBooks || [])])];
-    if (allBooks.length === 0) { container.html('<div style="opacity:0.6; padding:10px; text-align:center;">此角色未绑定世界书，请在“世界书”标签页手动添加或在酒馆主界面绑定。</div>'); return; }
-    for (const book of allBooks) {
-        const isBound = baseBooks.includes(book);
-        const $el = $(`<div class="pw-wi-book"><div class="pw-wi-header"><span><i class="fa-solid fa-book"></i> ${book} ${isBound ? '<span style="color:#9ece6a;font-size:0.8em;margin-left:5px;">(已绑定)</span>' : ''}</span><div>${!isBound ? '<i class="fa-solid fa-times remove-book" style="color:#ff6b6b;margin-right:10px;" title="移除"></i>' : ''}<i class="fa-solid fa-chevron-down arrow"></i></div></div><div class="pw-wi-list" data-book="${book}"></div></div>`);
-        $el.find('.remove-book').on('click', (e) => { e.stopPropagation(); window.pwExtraBooks = window.pwExtraBooks.filter(b => b !== book); renderWiBooks(); });
-        $el.find('.pw-wi-header').on('click', async function () {
-            const $list = $el.find('.pw-wi-list');
-            const $arrow = $(this).find('.arrow');
-            if ($list.is(':visible')) { $list.slideUp(); $arrow.removeClass('fa-flip-vertical'); }
-            else {
-                $list.slideDown(); $arrow.addClass('fa-flip-vertical');
-                if (!$list.data('loaded')) {
-                    $list.html('<div style="padding:10px;text-align:center;"><i class="fas fa-spinner fa-spin"></i></div>');
-                    const entries = await getWorldBookEntries(book);
-                    $list.empty();
-                    if (entries.length === 0) $list.html('<div style="padding:10px;opacity:0.5;">无条目</div>');
-                    entries.forEach(entry => {
-                        const isChecked = entry.enabled ? 'checked' : '';
-                        const $item = $(`<div class="pw-wi-item"><div class="pw-wi-item-row"><input type="checkbox" class="pw-wi-check" ${isChecked} data-content="${encodeURIComponent(entry.content)}"><div style="font-weight:bold; font-size:0.9em; flex:1;">${entry.displayName}</div><i class="fa-solid fa-eye pw-wi-toggle-icon"></i></div><div class="pw-wi-desc">${entry.content}<div class="pw-wi-close-bar"><i class="fa-solid fa-angle-up"></i> 收起</div></div></div>`);
-                        $item.find('.pw-wi-toggle-icon').on('click', function (e) {
-                            e.stopPropagation();
-                            const $desc = $(this).closest('.pw-wi-item').find('.pw-wi-desc');
-                            if ($desc.is(':visible')) { $desc.slideUp(); $(this).css('color', ''); } else { $desc.slideDown(); $(this).css('color', '#5b8db8'); }
-                        });
-                        $item.find('.pw-wi-close-bar').on('click', function () { $(this).parent().slideUp(); $item.find('.pw-wi-toggle-icon').css('color', ''); });
-                        $list.append($item);
-                    });
-                    $list.data('loaded', true);
-                }
-            }
-        });
-        container.append($el);
-    }
-};
 
 function addPersonaButton() {
     const container = $('.persona_controls_buttons_block');
