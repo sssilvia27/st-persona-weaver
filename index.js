@@ -1,11 +1,11 @@
 import { extension_settings, getContext } from "../../../extensions.js";
-import { saveSettingsDebounced, callPopup, getRequestHeaders } from "../../../../script.js";
+import { saveSettingsDebounced, callPopup, getRequestHeaders, saveChat, reloadCurrentChat } from "../../../../script.js";
 
 const extensionName = "st-persona-weaver";
 const STORAGE_KEY_HISTORY = 'pw_history_v20';
 const STORAGE_KEY_STATE = 'pw_state_v20';
 const STORAGE_KEY_TEMPLATE = 'pw_template_v2';
-const STORAGE_KEY_PROMPTS = 'pw_prompts_v3'; // 保持 v3，不强制覆盖用户数据
+const STORAGE_KEY_PROMPTS = 'pw_prompts_v4'; // 升级版本号以应用新Prompt
 const BUTTON_ID = 'pw_persona_tool_btn';
 
 const defaultYamlTemplate =
@@ -89,7 +89,6 @@ Generate character details strictly in structured YAML format.
 3. Do NOT output status bars, progress bars, or Chain of Thought/Reasoning/Thinking process.
 4. Response: ONLY the YAML content.`;
 
-// 【关键修改】润色 Prompt 更新：加入 {{tags}} 并明确迁移指令
 const defaultSystemPromptRefine =
 `You are an expert Data Converter and Persona Editor.
 Optimizing User Persona for {{char}}.
@@ -114,6 +113,52 @@ Optimizing User Persona for {{char}}.
 5. Do NOT output status bars, progress bars, or Chain of Thought.
 6. Response: ONLY the final YAML content.`;
 
+// 【新增】开场白生成 Prompt
+const defaultSystemPromptOpening =
+`Generate 4 distinct opening scenes (First Messages) based on the following personas and context.
+
+[User Persona]:
+{{userPersona}}
+
+[Character Persona ({{char}})]:
+{{charPersona}}
+
+{{wi}}
+
+[Additional Requirements]:
+{{input}}
+
+[Guidelines]:
+1. Language: Simplified Chinese.
+2. Length: Approx 700 characters per option.
+3. Content: detailed scene setting, environment description, specific date/time/location.
+4. Character: Reflect {{char}}'s personality and traits vividly.
+5. Interaction: End with a natural hook for {{user}} to respond. Do NOT summarize or use "elevated" philosophical endings (禁止升华).
+6. Constraint: Do NOT speak for {{user}} or decide {{user}}'s actions.
+7. Variety: Each option must have a completely different theme, time, scene, and plot.
+8. Do NOT output status bars, progress bars, or Chain of Thought.
+
+[Output Format]:
+Strictly follow this format for the 4 options:
+
+---【开场白选项1】---
+\`\`\`
+[Content of Option 1]
+\`\`\`
+---【开场白选项2】---
+\`\`\`
+[Content of Option 2]
+\`\`\`
+---【开场白选项3】---
+\`\`\`
+[Content of Option 3]
+\`\`\`
+---【开场白选项4】---
+\`\`\`
+[Content of Option 4]
+\`\`\`
+`;
+
 const defaultSettings = {
     autoSwitchPersona: true, syncToWorldInfo: false,
     historyLimit: 50, apiSource: 'main',
@@ -133,14 +178,14 @@ const TEXT = {
 
 let historyCache = [];
 let currentTemplate = defaultYamlTemplate;
-let promptsCache = { initial: defaultSystemPromptInitial, refine: defaultSystemPromptRefine };
+let promptsCache = { initial: defaultSystemPromptInitial, refine: defaultSystemPromptRefine, opening: defaultSystemPromptOpening };
 let availableWorldBooks = [];
 let isEditingTemplate = false;
 let pollInterval = null;
 let lastRawResponse = "";
 
 // ============================================================================
-// 工具函数：强制让渡主线程，防止 UI 卡死
+// 工具函数
 // ============================================================================
 const yieldToBrowser = () => new Promise(resolve => setTimeout(resolve, 0));
 const forcePaint = () => new Promise(resolve => setTimeout(resolve, 50));
@@ -279,6 +324,23 @@ async function collectActiveWorldInfoContent() {
     return content;
 }
 
+// 【新增】获取当前角色的详细设定字符串
+function getCharacterPersonaString() {
+    const context = getContext();
+    if (!context.characterId && context.characterId !== 0) return "No Character Selected";
+    const char = context.characters[context.characterId];
+    
+    let parts = [];
+    if (char.name) parts.push(`Name: ${char.name}`);
+    if (char.description) parts.push(`Description:\n${char.description}`);
+    if (char.personality) parts.push(`Personality:\n${char.personality}`);
+    if (char.scenario) parts.push(`Scenario:\n${char.scenario}`);
+    // Mes Example usually too long and token heavy, optional
+    // if (char.mes_example) parts.push(`Examples:\n${char.mes_example}`); 
+    
+    return parts.join('\n\n');
+}
+
 // ============================================================================
 // 2. 存储与系统函数
 // ============================================================================
@@ -287,18 +349,19 @@ function loadData() {
     try { historyCache = JSON.parse(localStorage.getItem(STORAGE_KEY_HISTORY)) || []; } catch { historyCache = []; }
     try {
         const t = localStorage.getItem(STORAGE_KEY_TEMPLATE);
-        if (!t || t.length < 50) { 
-             currentTemplate = defaultYamlTemplate;
-        } else {
-             currentTemplate = t;
-        }
+        if (!t || t.length < 50) currentTemplate = defaultYamlTemplate;
+        else currentTemplate = t;
     } catch { currentTemplate = defaultYamlTemplate; }
     try {
-        // 尝试加载用户保存的 Prompt
         const p = JSON.parse(localStorage.getItem(STORAGE_KEY_PROMPTS));
-        // 如果用户有保存，就用用户的，否则用默认（此时默认已经更新为包含 {{tags}} 的版本）
-        promptsCache = { ...{ initial: defaultSystemPromptInitial, refine: defaultSystemPromptRefine }, ...p };
-    } catch { promptsCache = { initial: defaultSystemPromptInitial, refine: defaultSystemPromptRefine }; }
+        // 合并新旧 Prompt
+        promptsCache = { 
+            ...{ initial: defaultSystemPromptInitial, refine: defaultSystemPromptRefine, opening: defaultSystemPromptOpening }, 
+            ...p 
+        };
+        // 强制检查 opening 是否存在（针对老用户升级）
+        if (!promptsCache.opening) promptsCache.opening = defaultSystemPromptOpening;
+    } catch { promptsCache = { initial: defaultSystemPromptInitial, refine: defaultSystemPromptRefine, opening: defaultSystemPromptOpening }; }
 }
 
 function saveData() {
@@ -318,7 +381,7 @@ function saveState(data) { localStorage.setItem(STORAGE_KEY_STATE, JSON.stringif
 function loadState() { try { return JSON.parse(localStorage.getItem(STORAGE_KEY_STATE)) || {}; } catch { return {}; } }
 
 function injectStyles() {
-    const styleId = 'persona-weaver-css-v38'; 
+    const styleId = 'persona-weaver-css-v39'; // Updated version
     if ($(`#${styleId}`).length) return;
     
     const css = `
@@ -429,6 +492,27 @@ function injectStyles() {
     }
     
     .pw-btn.wi { background: linear-gradient(135deg, rgba(122, 162, 247, 0.2), rgba(0, 0, 0, 0)); border-color: #7aa2f7; color: #7aa2f7; }
+
+    /* 开场白相关样式 */
+    .pw-opening-result-container {
+        display: flex; flex-direction: column; gap: 15px; margin-top: 20px;
+    }
+    .pw-opening-card {
+        background: rgba(0,0,0,0.2); border: 1px solid var(--SmartThemeBorderColor);
+        border-radius: 8px; padding: 15px; position: relative;
+        transition: all 0.2s;
+    }
+    .pw-opening-card:hover { background: rgba(0,0,0,0.25); box-shadow: 0 4px 10px rgba(0,0,0,0.2); }
+    .pw-opening-header {
+        font-weight: bold; color: #e0af68; margin-bottom: 10px; 
+        font-size: 1.1em; display: flex; justify-content: space-between; align-items: center;
+    }
+    .pw-opening-content {
+        white-space: pre-wrap; color: #eee; font-size: 0.95em; line-height: 1.6;
+        background: rgba(0,0,0,0.1); padding: 10px; border-radius: 4px;
+        margin-bottom: 10px; max-height: 300px; overflow-y: auto;
+    }
+    .pw-opening-actions { display: flex; gap: 10px; justify-content: flex-end; }
     `;
     $('<style>').attr('id', styleId).text(css).appendTo('head');
 }
@@ -573,15 +657,22 @@ async function runGeneration(data, apiConfig) {
         wiText = `\n[Context from World Info]:\n${data.wiContext.join('\n')}\n`;
     }
 
-    let systemTemplate = data.mode === 'refine' ? promptsCache.refine : promptsCache.initial;
+    // 根据模式选择 Prompt
+    let systemTemplate = promptsCache.initial;
+    if (data.mode === 'refine') systemTemplate = promptsCache.refine;
+    if (data.mode === 'opening') systemTemplate = promptsCache.opening;
 
+    // 变量注入
     let systemPrompt = systemTemplate
         .replace(/{{user}}/g, currentName)
         .replace(/{{char}}/g, charName)
         .replace(/{{wi}}/g, wiText)
         .replace(/{{tags}}/g, currentTemplate)
         .replace(/{{input}}/g, data.request)
-        .replace(/{{current}}/g, data.currentText || "");
+        .replace(/{{current}}/g, data.currentText || "")
+        // 新增开场白需要的变量
+        .replace(/{{userPersona}}/g, data.userPersona || "")
+        .replace(/{{charPersona}}/g, data.charPersona || "");
 
     let responseContent = "";
     
@@ -645,6 +736,8 @@ async function runGeneration(data, apiConfig) {
     }
     
     lastRawResponse = responseContent;
+    // 如果是开场白模式，保留```标记以便后续解析，其他模式才去除
+    if (data.mode === 'opening') return responseContent;
     return responseContent.replace(/```[a-z]*\n?/g, '').replace(/```/g, '').trim();
 }
 
@@ -686,6 +779,7 @@ async function openCreatorPopup() {
         <div class="pw-top-bar"><div class="pw-title">${TEXT.PANEL_TITLE}</div></div>
         <div class="pw-tabs">
             <div class="pw-tab active" data-tab="editor">编辑</div>
+            <div class="pw-tab" data-tab="opening">开场白</div>
             <div class="pw-tab" data-tab="context">世界书</div>
             <div class="pw-tab" data-tab="api">API & Prompt</div>
             <div class="pw-tab" data-tab="history">草稿</div>
@@ -752,6 +846,19 @@ async function openCreatorPopup() {
         </div>
     </div>
 
+    <!-- 【新增】开场白页面 -->
+    <div id="pw-view-opening" class="pw-view">
+        <div class="pw-scroll-area">
+            <div class="pw-info-display">
+                <div class="pw-info-item"><i class="fa-solid fa-comment-dots"></i><span>开场白生成器</span></div>
+            </div>
+            <div style="font-size:0.9em; opacity:0.8; margin-bottom:5px;">附加要求（如：发生在一个雨夜，地点在酒吧...）：</div>
+            <textarea id="pw-opening-req" class="pw-textarea pw-auto-height" placeholder="在此输入场景、时间、地点等要求..."></textarea>
+            <button id="pw-btn-gen-opening" class="pw-btn gen" style="margin-top:10px;">生成 4 个开场白</button>
+            <div id="pw-opening-results" class="pw-opening-result-container"></div>
+        </div>
+    </div>
+
     <div id="pw-diff-overlay" class="pw-diff-container" style="display:none;">
         <div class="pw-diff-tabs-bar">
             <div class="pw-diff-tab active" data-view="diff">智能对比 (选择修改)</div>
@@ -812,6 +919,16 @@ async function openCreatorPopup() {
                     <div class="pw-var-btn" data-ins="{{input}}"><span>润色意见</span><span class="code">{{input}}</span></div>
                 </div>
                 <textarea id="pw-prompt-refine" class="pw-textarea pw-auto-height" style="min-height:150px; font-size:0.85em;">${promptsCache.refine}</textarea>
+
+                <!-- 【新增】开场白 Prompt 编辑 -->
+                <div style="display:flex; justify-content:space-between; margin-top:15px;"><span class="pw-prompt-label">开场白生成指令 (System Prompt)</span><button class="pw-mini-btn" id="pw-reset-opening" style="font-size:0.7em;">恢复默认</button></div>
+                <div class="pw-var-btns">
+                    <div class="pw-var-btn" data-ins="{{userPersona}}"><span>User人设</span><span class="code">{{userPersona}}</span></div>
+                    <div class="pw-var-btn" data-ins="{{charPersona}}"><span>Char设定</span><span class="code">{{charPersona}}</span></div>
+                    <div class="pw-var-btn" data-ins="{{wi}}"><span>世界书</span><span class="code">{{wi}}</span></div>
+                    <div class="pw-var-btn" data-ins="{{input}}"><span>要求</span><span class="code">{{input}}</span></div>
+                </div>
+                <textarea id="pw-prompt-opening" class="pw-textarea pw-auto-height" style="min-height:150px; font-size:0.85em;">${promptsCache.opening || defaultSystemPromptOpening}</textarea>
             </div>
             <div style="text-align:right; margin-top:5px;"><button id="pw-api-save" class="pw-btn primary" style="width:100%;">保存 Prompts</button></div>
         </div>
@@ -1160,6 +1277,94 @@ function bindEvents() {
         }
     });
 
+    // 【新增】开场白生成逻辑
+    $(document).on('click.pw', '#pw-btn-gen-opening', async function(e) {
+        e.preventDefault();
+        const req = $('#pw-opening-req').val();
+        const $btn = $(this);
+        const $results = $('#pw-opening-results');
+        
+        $btn.prop('disabled', true).html('<i class="fas fa-spinner fa-spin"></i> 构思开场白中...');
+        $results.empty();
+        
+        await forcePaint();
+
+        try {
+            const wiContent = await collectActiveWorldInfoContent();
+            const charPersona = getCharacterPersonaString();
+            // 优先使用编辑器里的人设，如果为空则读取当前生效的人设
+            const userPersona = $('#pw-result-text').val() || getActivePersonaDescription();
+            
+            const modelVal = $('#pw-api-source').val() === 'independent' ? $('#pw-api-model-select').val() : null;
+            
+            const config = {
+                mode: 'opening', 
+                request: req, 
+                wiContext: wiContent,
+                charPersona: charPersona,
+                userPersona: userPersona,
+                apiSource: $('#pw-api-source').val(), 
+                indepApiUrl: $('#pw-api-url').val(),
+                indepApiKey: $('#pw-api-key').val(), 
+                indepApiModel: modelVal
+            };
+            
+            const rawText = await runGeneration(config, config);
+            
+            // 解析 4 个选项
+            const matches = [...rawText.matchAll(/-+【开场白选项\d+】-+[\s\S]*?```([\s\S]*?)```/g)];
+            
+            if (!matches || matches.length === 0) {
+                // 容错：如果格式不对，直接显示全文
+                $results.html(`<div class="pw-opening-card"><div class="pw-opening-content">${rawText.replace(/\n/g, '<br>')}</div></div>`);
+            } else {
+                matches.forEach((m, i) => {
+                    const content = m[1].trim();
+                    const $card = $(`
+                        <div class="pw-opening-card">
+                            <div class="pw-opening-header">
+                                <span>选项 ${i + 1}</span>
+                            </div>
+                            <div class="pw-opening-content">${content}</div>
+                            <div class="pw-opening-actions">
+                                <button class="pw-mini-btn copy-btn"><i class="fa-solid fa-copy"></i> 复制</button>
+                                <button class="pw-btn save apply-btn"><i class="fa-solid fa-check"></i> 应用为开场白</button>
+                            </div>
+                        </div>
+                    `);
+                    
+                    $card.find('.copy-btn').click(() => {
+                        navigator.clipboard.writeText(content);
+                        toastr.success("已复制");
+                    });
+                    
+                    $card.find('.apply-btn').click(async () => {
+                        if(confirm("确定要将此内容替换为当前对话的开场白（第0层消息）吗？此操作不可撤销。")) {
+                            const context = getContext();
+                            // 修改第0条消息
+                            if (context.chat && context.chat.length > 0) {
+                                context.chat[0].mes = content;
+                                await saveChat();
+                                await reloadCurrentChat();
+                                toastr.success("开场白已更新");
+                            } else {
+                                toastr.warning("当前没有对话可修改");
+                            }
+                        }
+                    });
+                    
+                    $results.append($card);
+                });
+            }
+            
+        } catch (e) {
+            console.error(e);
+            toastr.error("生成失败: " + e.message);
+        } finally {
+            $btn.prop('disabled', false).html('生成 4 个开场白');
+        }
+    });
+
     $(document).on('click.pw', '#pw-btn-load-current', function() {
         const content = getActivePersonaDescription();
         if (content) {
@@ -1275,6 +1480,7 @@ function bindEvents() {
     $(document).on('click.pw', '#pw-api-save', () => {
         promptsCache.initial = $('#pw-prompt-initial').val();
         promptsCache.refine = $('#pw-prompt-refine').val();
+        promptsCache.opening = $('#pw-prompt-opening').val();
         saveData();
         toastr.success("设置与Prompt已保存");
     });
@@ -1284,6 +1490,9 @@ function bindEvents() {
     });
     $(document).on('click.pw', '#pw-reset-refine', () => {
         if (confirm("恢复润色Prompt？")) $('#pw-prompt-refine').val(defaultSystemPromptRefine);
+    });
+    $(document).on('click.pw', '#pw-reset-opening', () => {
+        if (confirm("恢复开场白Prompt？")) $('#pw-prompt-opening').val(defaultSystemPromptOpening);
     });
 
     $(document).on('click.pw', '#pw-wi-refresh', async function() {
