@@ -1,5 +1,5 @@
 import { extension_settings, getContext } from "../../../extensions.js";
-import { saveSettingsDebounced, callPopup, getRequestHeaders, saveSettings, saveCharacterDebounced } from "../../../../script.js";
+import { saveSettingsDebounced, callPopup, getRequestHeaders, saveChat, reloadCurrentChat, saveCharacterDebounced } from "../../../../script.js";
 
 const extensionName = "st-persona-weaver";
 const STORAGE_KEY_HISTORY = 'pw_history_v20';
@@ -125,8 +125,8 @@ const TEXT = {
     BTN_TITLE: "打开设定生成器",
     TOAST_SAVE_SUCCESS: (name) => `Persona "${name}" 已保存并覆盖！`,
     TOAST_WI_SUCCESS: (book) => `已写入世界书: ${book}`,
-    TOAST_WI_FAIL: "当前角色未绑定世界书，或TavernHelper未就绪",
-    TOAST_WI_ERROR: "API 错误，无法操作世界书",
+    TOAST_WI_FAIL: "当前角色未绑定世界书，无法写入",
+    TOAST_WI_ERROR: "TavernHelper API 未加载，无法操作世界书",
     TOAST_SNAPSHOT: "已保存至草稿",
     TOAST_LOAD_CURRENT: "已读取当前酒馆人设内容"
 };
@@ -142,6 +142,7 @@ let isEditingTemplate = false;
 let pollInterval = null;
 let lastRawResponse = "";
 
+// [Fix] 全局处理锁，防止连点
 let isProcessing = false;
 
 // ============================================================================
@@ -234,11 +235,10 @@ function findMatchingKey(targetKey, map) {
     return null;
 }
 
-// [Updated] 收集上下文：包含开场白和世界书
 async function collectActiveWorldInfoContent() {
     let content = [];
     try {
-        // 1. 收集开场白
+        // 1. 收集开场白 (Ref Tab)
         $('.pw-greeting-check:checked').each(function() {
             const text = $(this).data('content');
             if (text) {
@@ -250,20 +250,18 @@ async function collectActiveWorldInfoContent() {
         const boundBooks = await getContextWorldBooks();
         const manualBooks = window.pwExtraBooks || [];
         const allBooks = [...new Set([...boundBooks, ...manualBooks])];
-        
         if (allBooks.length > 20) allBooks.length = 20;
 
         for (const bookName of allBooks) {
             await yieldToBrowser();
             try {
-                // [API Fix] 使用 TavernHelper.getWorldbook
                 const entries = await getWorldBookEntries(bookName);
                 const enabledEntries = entries.filter(e => e.enabled);
                 if (enabledEntries.length > 0) {
                     content.push(`\n--- World Book: ${bookName} ---`);
                     enabledEntries.forEach(e => content.push(`[Entry: ${e.displayName}]\n${e.content}`));
                 }
-            } catch (err) { console.warn("Failed to read book:", bookName); }
+            } catch (err) { }
         }
     } catch (e) { console.error("Error collecting context:", e); }
     return content;
@@ -313,12 +311,14 @@ function saveData() {
 
 function saveHistory(item) {
     const limit = extension_settings[extensionName]?.historyLimit || 50;
+    
     if (!item.title || item.title === "未命名") {
         const context = getContext();
         const userName = $('.persona_name').first().text().trim() || "User";
         const charName = context.characters[context.characterId]?.name || "Char";
         item.title = `${userName} & ${charName}`;
     }
+
     historyCache.unshift(item);
     if (historyCache.length > limit) historyCache = historyCache.slice(0, limit);
     saveData();
@@ -327,13 +327,119 @@ function saveHistory(item) {
 function saveState(data) { localStorage.setItem(STORAGE_KEY_STATE, JSON.stringify(data)); }
 function loadState() { try { return JSON.parse(localStorage.getItem(STORAGE_KEY_STATE)) || {}; } catch { return {}; } }
 
-// [API Fix] 使用 TavernHelper.getWorldbookNames 获取所有世界书
+function injectStyles() {
+    const styleId = 'persona-weaver-css-v49-lite'; 
+    if ($(`#${styleId}`).length) return;
+    
+    const css = `
+    #pw-api-model-select { flex: 1; width: 0; min-width: 0; text-overflow: ellipsis; overflow: hidden; white-space: nowrap; }
+    
+    .pw-load-btn { font-size: 0.85em; background: linear-gradient(135deg, rgba(224, 175, 104, 0.2), rgba(224, 175, 104, 0.1)); border: 1px solid #e0af68; padding: 4px 12px; border-radius: 4px; cursor: pointer; color: #e0af68; font-weight: bold; margin-left: auto; display: inline-flex; align-items: center; transition: all 0.2s; box-shadow: 0 2px 5px rgba(0,0,0,0.2); }
+    .pw-load-btn:hover { background: rgba(224, 175, 104, 0.3); transform: translateY(-1px); box-shadow: 0 4px 8px rgba(0,0,0,0.3); color: #fff; }
+
+    .pw-template-textarea { background: rgba(0, 0, 0, 0.5) !important; color: #eee !important; font-family: 'Consolas', 'Monaco', monospace; line-height: 1.4; height: 350px !important; border-radius: 0 0 6px 6px !important; border-top: none !important; }
+    
+    .pw-shortcut-btn { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 4px 10px; height: auto; gap: 2px; min-width: 40px; }
+    .pw-shortcut-btn span:first-child { font-size: 0.8em; opacity: 0.8; }
+    .pw-shortcut-btn span.code { font-weight: bold; font-family: monospace; color: #e0af68; font-size: 1.1em; }
+
+    .pw-var-btns { gap: 6px; }
+    .pw-var-btn { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 4px 10px; height: auto; gap: 0; border-color: rgba(128,128,128,0.4); }
+    .pw-var-btn span:first-child { font-weight: bold; font-size: 0.8em; }
+    .pw-var-btn span.code { font-size: 0.75em; opacity: 0.7; font-family: monospace; }
+
+    #pw-api-url { background-color: rgba(0, 0, 0, 0.2) !important; border: 1px solid var(--SmartThemeBorderColor) !important; color: var(--smart-theme-body-color) !important; }
+    .pw-auto-height { min-height: 80px; max-height: 500px; overflow-y: auto; }
+    
+    #pw-request { transition: none !important; } 
+
+    #pw-history-clear-all { background: transparent; border: none; color: #ff6b6b; font-size: 0.85em; opacity: 0.6; padding: 5px; width: auto; margin: 10px auto; text-decoration: underline; }
+    #pw-history-clear-all:hover { opacity: 1; background: transparent; transform: none; }
+
+    .pw-diff-row { background: #1a1a1a; border: 1px solid #333; border-radius: 8px; padding: 10px; display: flex; flex-direction: column; gap: 8px; margin-bottom: 10px; }
+    .pw-diff-attr-name { font-weight: bold; color: #9ece6a; font-size: 1em; padding-bottom: 5px; border-bottom: 1px solid #333; margin-bottom: 5px; }
+    
+    .pw-diff-cards { display: flex; gap: 10px; }
+    .pw-diff-card { flex: 1; display: flex; flex-direction: column; border: 2px solid transparent; border-radius: 6px; background: #222; overflow: hidden; transition: all 0.2s; cursor: pointer; opacity: 0.6; position: relative; }
+    .pw-diff-card.selected { border-color: #9ece6a; opacity: 1; background: #252525; box-shadow: 0 0 10px rgba(158, 206, 106, 0.1); }
+    .pw-diff-card:not(.selected):hover { opacity: 0.8; }
+    .pw-diff-card.single-view { flex: 1; opacity: 1; background: rgba(158, 206, 106, 0.05); border-color: #9ece6a; cursor: text; }
+    
+    .pw-diff-label { font-size: 0.75em; padding: 4px 8px; background: rgba(0,0,0,0.3); color: #aaa; text-transform: uppercase; font-weight: bold; }
+    .pw-diff-card.selected .pw-diff-label { color: #9ece6a; background: rgba(158, 206, 106, 0.1); }
+    
+    .pw-diff-textarea { flex: 1; width: 100%; background: transparent; border: none; color: #eee; padding: 8px; font-family: inherit; font-size: 0.95em; resize: none; outline: none; line-height: 1.5; min-height: 80px; box-sizing: border-box; }
+    .pw-diff-card:not(.selected) .pw-diff-textarea { color: #888; pointer-events: none; }
+    
+    @media screen and (max-width: 600px) { .pw-diff-cards { flex-direction: column; } }
+    
+    .pw-btn.wi { background: linear-gradient(135deg, rgba(122, 162, 247, 0.2), rgba(0, 0, 0, 0)); border-color: #7aa2f7; color: #7aa2f7; }
+
+    .pw-tab-sub { display: block; font-size: 0.75em; opacity: 0.6; font-weight: normal; margin-top: 2px; text-align: center; }
+    .pw-diff-tab { display: flex; flex-direction: column; align-items: center; justify-content: center; line-height: 1.1; }
+
+    .pw-header-subtitle { font-size: 0.65em; opacity: 0.6; font-weight: normal; margin-left: 10px; color: #ccc; }
+    
+    .pw-diff-raw-textarea { min-height: 350px !important; }
+
+    /* Greetings Section */
+    .pw-section-title { font-weight: bold; color: #e0af68; margin-bottom: 8px; font-size: 0.95em; border-bottom: 1px solid var(--SmartThemeBorderColor); padding-bottom: 4px; display:flex; align-items:center; gap:6px; }
+    
+    .pw-wi-list { margin-bottom: 15px; } /* Space between sections */
+
+    .pw-float-quote-btn { position: fixed; top: calc(20% + 60px); right: 0; background: linear-gradient(135deg, #e0af68, #d08f40); color: #1a1a1a; padding: 8px 12px; border-radius: 20px 0 0 20px; font-weight: bold; font-size: 0.85em; box-shadow: -2px 2px 8px rgba(0,0,0,0.4); cursor: pointer; z-index: 9999; display: none; align-items: center; gap: 4px; border: 1px solid rgba(255,255,255,0.3); border-right: none; backdrop-filter: blur(5px); }
+    .pw-float-quote-btn:hover { padding-right: 18px; transform: translateX(-2px); }
+    `;
+    $('<style>').attr('id', styleId).text(css).appendTo('head');
+}
+
+async function forceSavePersona(name, description) {
+    const context = getContext();
+    if (!context.powerUserSettings.personas) context.powerUserSettings.personas = {};
+    context.powerUserSettings.personas[name] = description;
+    context.powerUserSettings.persona_selected = name;
+    const $nameInput = $('#your_name');
+    const $descInput = $('#persona_description');
+    if ($nameInput.length) $nameInput.val(name).trigger('input').trigger('change');
+    if ($descInput.length) $descInput.val(description).trigger('input').trigger('change');
+    const $h5Name = $('h5#your_name');
+    if ($h5Name.length) $h5Name.text(name);
+    await saveSettingsDebounced();
+    return true;
+}
+
+async function syncToWorldInfoViaHelper(userName, content) {
+    if (!window.TavernHelper) return toastr.error(TEXT.TOAST_WI_ERROR);
+    let targetBook = null;
+    try {
+        const charBooks = window.TavernHelper.getCharWorldbookNames('current');
+        if (charBooks && charBooks.primary) targetBook = charBooks.primary;
+        else if (charBooks && charBooks.additional && charBooks.additional.length > 0) targetBook = charBooks.additional[0];
+    } catch (e) { }
+    if (!targetBook) {
+        const boundBooks = await getContextWorldBooks();
+        if (boundBooks.length > 0) targetBook = boundBooks[0];
+    }
+    if (!targetBook) return toastr.warning(TEXT.TOAST_WI_FAIL);
+    try {
+        const entries = await window.TavernHelper.getLorebookEntries(targetBook);
+        const entryComment = `User: ${userName}`;
+        const existingEntry = entries.find(e => e.comment === entryComment);
+        if (existingEntry) {
+            await window.TavernHelper.setLorebookEntries(targetBook, [{ uid: existingEntry.uid, content: content, enabled: true }]);
+        } else {
+            const newEntry = { comment: entryComment, keys: [userName, "User"], content: content, enabled: true, selective: true, constant: false, position: { type: 'before_character_definition' } };
+            await window.TavernHelper.createLorebookEntries(targetBook, [newEntry]);
+        }
+        toastr.success(TEXT.TOAST_WI_SUCCESS(targetBook));
+    } catch (e) { toastr.error("写入世界书失败"); }
+}
+
 async function loadAvailableWorldBooks() {
     availableWorldBooks = [];
     if (window.TavernHelper && typeof window.TavernHelper.getWorldbookNames === 'function') {
         try { availableWorldBooks = window.TavernHelper.getWorldbookNames(); } catch { }
     }
-    // Fallback logic
     if (availableWorldBooks.length === 0 && window.world_names && Array.isArray(window.world_names)) {
         availableWorldBooks = window.world_names;
     }
@@ -346,21 +452,10 @@ async function loadAvailableWorldBooks() {
     availableWorldBooks = [...new Set(availableWorldBooks)].filter(x => x).sort();
 }
 
-// [API Fix] 使用 TavernHelper.getCharWorldbookNames 获取绑定关系
 async function getContextWorldBooks(extras = []) {
     const context = getContext();
     const books = new Set(extras);
     const charId = context.characterId;
-    
-    // 优先使用 TavernHelper 获取准确的绑定关系
-    if (window.TavernHelper && typeof window.TavernHelper.getCharWorldbookNames === 'function' && charId !== undefined) {
-        try {
-            const bindings = window.TavernHelper.getCharWorldbookNames('current');
-            if (bindings.primary) books.add(bindings.primary);
-            if (Array.isArray(bindings.additional)) bindings.additional.forEach(b => books.add(b));
-        } catch(e) {}
-    }
-
     if (charId !== undefined && context.characters[charId]) {
         const char = context.characters[charId];
         const data = char.data || char;
@@ -372,111 +467,14 @@ async function getContextWorldBooks(extras = []) {
     return Array.from(books).filter(Boolean);
 }
 
-// [API Fix] 关键：切换到 TavernHelper.getWorldbook (Promise based)
 async function getWorldBookEntries(bookName) {
-    if (window.TavernHelper) {
-        // 尝试新版 API
-        if (typeof window.TavernHelper.getWorldbook === 'function') {
-            try {
-                const entries = await window.TavernHelper.getWorldbook(bookName);
-                return entries.map(e => ({
-                    uid: e.uid,
-                    displayName: e.name || e.comment || (Array.isArray(e.keys) ? e.keys.join(', ') : e.keys) || "无标题",
-                    content: e.content || "",
-                    enabled: e.enabled
-                }));
-            } catch (e) { console.warn("getWorldbook failed", e); }
-        }
-        // 回退旧版 API (已废弃但可能存在)
-        if (typeof window.TavernHelper.getLorebookEntries === 'function') {
-            try {
-                const entries = await window.TavernHelper.getLorebookEntries(bookName);
-                return entries.map(e => ({
-                    uid: e.uid,
-                    displayName: e.comment || (Array.isArray(e.keys) ? e.keys.join(', ') : e.keys) || "无标题",
-                    content: e.content || "",
-                    enabled: e.enabled
-                }));
-            } catch (e) { }
-        }
+    if (window.TavernHelper && typeof window.TavernHelper.getLorebookEntries === 'function') {
+        try {
+            const entries = await window.TavernHelper.getLorebookEntries(bookName);
+            return entries.map(e => ({ uid: e.uid, displayName: e.comment || (Array.isArray(e.keys) ? e.keys.join(', ') : e.keys) || "无标题", content: e.content || "", enabled: e.enabled }));
+        } catch (e) { }
     }
     return [];
-}
-
-// [API Fix] 写入世界书：使用 createWorldbookEntries
-async function syncToWorldInfoViaHelper(userName, content) {
-    if (!window.TavernHelper) return toastr.error(TEXT.TOAST_WI_ERROR);
-    let targetBook = null;
-    
-    // 1. 尝试获取主世界书
-    try {
-        if(typeof window.TavernHelper.getCharWorldbookNames === 'function') {
-            const charBooks = window.TavernHelper.getCharWorldbookNames('current');
-            if (charBooks && charBooks.primary) targetBook = charBooks.primary;
-            else if (charBooks && charBooks.additional && charBooks.additional.length > 0) targetBook = charBooks.additional[0];
-        }
-    } catch (e) { }
-
-    if (!targetBook) {
-        const boundBooks = await getContextWorldBooks();
-        if (boundBooks.length > 0) targetBook = boundBooks[0];
-    }
-
-    if (!targetBook) return toastr.warning(TEXT.TOAST_WI_FAIL);
-
-    try {
-        // 检查是否存在
-        const entries = await getWorldBookEntries(targetBook);
-        const entryComment = `User: ${userName}`;
-        const existingEntry = entries.find(e => e.displayName === entryComment || (e.keys && e.keys.includes(userName)));
-
-        if (existingEntry && typeof window.TavernHelper.updateWorldbookWith === 'function') {
-            // 更新
-            await window.TavernHelper.updateWorldbookWith(targetBook, (currentEntries) => {
-                const target = currentEntries.find(e => e.uid === existingEntry.uid);
-                if(target) {
-                    target.content = content;
-                    target.enabled = true;
-                }
-                return currentEntries;
-            });
-        } else {
-            // 新建 (使用 createWorldbookEntries)
-            const newEntry = {
-                name: entryComment, // 新版字段
-                comment: entryComment, // 旧版兼容
-                keys: [userName, "User"],
-                content: content,
-                enabled: true,
-                strategy: { type: 'selective', keys: [userName, "User"] }, // 新版结构模拟
-                selective: true, // 旧版兼容
-                constant: false,
-                position: { type: 'before_character_definition' }
-            };
-            
-            if(typeof window.TavernHelper.createWorldbookEntries === 'function') {
-                await window.TavernHelper.createWorldbookEntries(targetBook, [newEntry]);
-            } else if (typeof window.TavernHelper.createLorebookEntries === 'function') {
-                await window.TavernHelper.createLorebookEntries(targetBook, [newEntry]);
-            }
-        }
-        toastr.success(TEXT.TOAST_WI_SUCCESS(targetBook));
-    } catch (e) { 
-        console.error(e);
-        toastr.error("写入世界书失败: " + e.message); 
-    }
-}
-
-function getCharacterPersonaString() {
-    const context = getContext();
-    if (!context.characterId && context.characterId !== 0) return "No Character Selected";
-    const char = context.characters[context.characterId];
-    let parts = [];
-    if (char.name) parts.push(`Name: ${char.name}`);
-    if (char.description) parts.push(`Description:\n${char.description}`);
-    if (char.personality) parts.push(`Personality:\n${char.personality}`);
-    if (char.scenario) parts.push(`Scenario:\n${char.scenario}`);
-    return parts.join('\n\n');
 }
 
 async function runGeneration(data, apiConfig) {
@@ -541,59 +539,6 @@ async function runGeneration(data, apiConfig) {
 // ============================================================================
 // 3. UI 渲染 logic
 // ============================================================================
-
-function injectStyles() {
-    const styleId = 'persona-weaver-css-v49-lite'; 
-    if ($(`#${styleId}`).length) return;
-    
-    const css = `
-    #pw-api-model-select { flex: 1; width: 0; min-width: 0; text-overflow: ellipsis; overflow: hidden; white-space: nowrap; }
-    .pw-load-btn { font-size: 0.85em; background: linear-gradient(135deg, rgba(224, 175, 104, 0.2), rgba(224, 175, 104, 0.1)); border: 1px solid #e0af68; padding: 4px 12px; border-radius: 4px; cursor: pointer; color: #e0af68; font-weight: bold; margin-left: auto; display: inline-flex; align-items: center; transition: all 0.2s; box-shadow: 0 2px 5px rgba(0,0,0,0.2); }
-    .pw-load-btn:hover { background: rgba(224, 175, 104, 0.3); transform: translateY(-1px); box-shadow: 0 4px 8px rgba(0,0,0,0.3); color: #fff; }
-    .pw-template-textarea { background: rgba(0, 0, 0, 0.5) !important; color: #eee !important; font-family: 'Consolas', 'Monaco', monospace; line-height: 1.4; height: 350px !important; border-radius: 0 0 6px 6px !important; border-top: none !important; }
-    .pw-shortcut-btn { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 4px 10px; height: auto; gap: 2px; min-width: 40px; }
-    .pw-shortcut-btn span:first-child { font-size: 0.8em; opacity: 0.8; }
-    .pw-shortcut-btn span.code { font-weight: bold; font-family: monospace; color: #e0af68; font-size: 1.1em; }
-    .pw-var-btns { gap: 6px; }
-    .pw-var-btn { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 4px 10px; height: auto; gap: 0; border-color: rgba(128,128,128,0.4); }
-    .pw-var-btn span:first-child { font-weight: bold; font-size: 0.8em; }
-    .pw-var-btn span.code { font-size: 0.75em; opacity: 0.7; font-family: monospace; }
-    #pw-api-url { background-color: rgba(0, 0, 0, 0.2) !important; border: 1px solid var(--SmartThemeBorderColor) !important; color: var(--smart-theme-body-color) !important; }
-    .pw-auto-height { min-height: 80px; max-height: 500px; overflow-y: auto; }
-    #pw-request { transition: none !important; } 
-    #pw-history-clear-all { background: transparent; border: none; color: #ff6b6b; font-size: 0.85em; opacity: 0.6; padding: 5px; width: auto; margin: 10px auto; text-decoration: underline; }
-    #pw-history-clear-all:hover { opacity: 1; background: transparent; transform: none; }
-    .pw-diff-row { background: #1a1a1a; border: 1px solid #333; border-radius: 8px; padding: 10px; display: flex; flex-direction: column; gap: 8px; margin-bottom: 10px; }
-    .pw-diff-attr-name { font-weight: bold; color: #9ece6a; font-size: 1em; padding-bottom: 5px; border-bottom: 1px solid #333; margin-bottom: 5px; }
-    .pw-diff-cards { display: flex; gap: 10px; }
-    .pw-diff-card { flex: 1; display: flex; flex-direction: column; border: 2px solid transparent; border-radius: 6px; background: #222; overflow: hidden; transition: all 0.2s; cursor: pointer; opacity: 0.6; position: relative; }
-    .pw-diff-card.selected { border-color: #9ece6a; opacity: 1; background: #252525; box-shadow: 0 0 10px rgba(158, 206, 106, 0.1); }
-    .pw-diff-card:not(.selected):hover { opacity: 0.8; }
-    .pw-diff-card.single-view { flex: 1; opacity: 1; background: rgba(158, 206, 106, 0.05); border-color: #9ece6a; cursor: text; }
-    .pw-diff-label { font-size: 0.75em; padding: 4px 8px; background: rgba(0,0,0,0.3); color: #aaa; text-transform: uppercase; font-weight: bold; }
-    .pw-diff-card.selected .pw-diff-label { color: #9ece6a; background: rgba(158, 206, 106, 0.1); }
-    .pw-diff-textarea { flex: 1; width: 100%; background: transparent; border: none; color: #eee; padding: 8px; font-family: inherit; font-size: 0.95em; resize: none; outline: none; line-height: 1.5; min-height: 80px; box-sizing: border-box; }
-    .pw-diff-card:not(.selected) .pw-diff-textarea { color: #888; pointer-events: none; }
-    @media screen and (max-width: 600px) { .pw-diff-cards { flex-direction: column; } }
-    .pw-btn.wi { background: linear-gradient(135deg, rgba(122, 162, 247, 0.2), rgba(0, 0, 0, 0)); border-color: #7aa2f7; color: #7aa2f7; }
-    .pw-tab-sub { display: block; font-size: 0.75em; opacity: 0.6; font-weight: normal; margin-top: 2px; text-align: center; }
-    .pw-diff-tab { display: flex; flex-direction: column; align-items: center; justify-content: center; line-height: 1.1; }
-    .pw-header-subtitle { font-size: 0.65em; opacity: 0.6; font-weight: normal; margin-left: 10px; color: #ccc; }
-    .pw-diff-raw-textarea { min-height: 350px !important; }
-    .pw-section-title { font-weight: bold; color: #e0af68; margin-bottom: 8px; font-size: 0.95em; border-bottom: 1px solid var(--SmartThemeBorderColor); padding-bottom: 4px; display:flex; align-items:center; gap:6px; }
-    .pw-wi-list { display: none; padding: 8px; border-top: 1px solid var(--SmartThemeBorderColor); }
-    .pw-wi-item { background: rgba(255,255,255,0.05); padding: 6px 10px; border-radius: 4px; margin-bottom: 4px; }
-    .pw-wi-item-row { display: flex; align-items: center; gap: 8px; }
-    .pw-wi-check, .pw-greeting-check { transform: scale(1.1); cursor: pointer; }
-    .pw-wi-desc { display: none; margin-top: 5px; padding: 5px; background: rgba(0,0,0,0.3); border-radius: 4px; font-size: 0.85em; white-space: pre-wrap; }
-    .pw-wi-close-bar { text-align: center; font-size: 0.8em; opacity: 0.6; cursor: pointer; margin-top: 3px; }
-    .pw-wi-book { border: 1px solid var(--SmartThemeBorderColor); border-radius: 6px; margin-bottom: 6px; overflow: hidden; }
-    .pw-wi-header { padding: 8px; background: rgba(0,0,0,0.2); cursor: pointer; display: flex; justify-content: space-between; align-items: center; }
-    .pw-float-quote-btn { position: fixed; top: calc(20% + 60px); right: 0; background: linear-gradient(135deg, #e0af68, #d08f40); color: #1a1a1a; padding: 8px 12px; border-radius: 20px 0 0 20px; font-weight: bold; font-size: 0.85em; box-shadow: -2px 2px 8px rgba(0,0,0,0.4); cursor: pointer; z-index: 9999; display: none; align-items: center; gap: 4px; border: 1px solid rgba(255,255,255,0.3); border-right: none; backdrop-filter: blur(5px); }
-    .pw-float-quote-btn:hover { padding-right: 18px; transform: translateX(-2px); }
-    `;
-    $('<style>').attr('id', styleId).text(css).appendTo('head');
-}
 
 async function openCreatorPopup() {
     const context = getContext();
@@ -741,8 +686,7 @@ async function openCreatorPopup() {
                 <div class="pw-section-title"><i class="fa-solid fa-book-open"></i> 世界书</div>
                 <div class="pw-wi-controls">
                     <select id="pw-wi-select" class="pw-input pw-wi-select"><option value="">-- 添加参考/目标世界书 --</option>${renderBookOptions()}</select>
-                    <button id="pw-wi-refresh" class="pw-btn primary pw-wi-refresh-btn"><i class="fa-solid fa-sync"></i></button>
-                    <button id="pw-wi-add" class="pw-btn primary pw-wi-add-btn"><i class="fa-solid fa-plus"></i></button>
+                    <button id="pw-wi-refresh" class="pw-btn primary pw-wi-refresh-btn"><i class="fa-solid fa-sync"></i></button><button id="pw-wi-add" class="pw-btn primary pw-wi-add-btn"><i class="fa-solid fa-plus"></i></button>
                 </div>
             </div>
             <div id="pw-wi-container"></div>
@@ -814,13 +758,14 @@ async function openCreatorPopup() {
     }
 }
 
-// [New] Render Greetings List Logic
+// [New] Render Greetings List Logic (Fixed Type Access)
 function renderGreetingsList() {
     const $container = $('#pw-greetings-list').empty();
     const context = getContext();
     const charId = context.characterId;
     
-    if (charId === undefined || charId === null || !context.characters[charId]) {
+    // Strict checks
+    if (charId === undefined || charId === null || !context.characters || !context.characters[charId]) {
         $container.html('<div style="padding:10px;opacity:0.5;">未加载角色卡</div>');
         return;
     }
@@ -828,12 +773,12 @@ function renderGreetingsList() {
     const char = context.characters[charId];
     const greetings = [];
 
-    // Main Greeting
+    // 1. Main Greeting (first_mes on v1CharData)
     if (char.first_mes) {
         greetings.push({ label: "默认开场白", content: char.first_mes, default: true });
     }
 
-    // Alternate Greetings (Safe check for data existence)
+    // 2. Alternate Greetings (in v1CharData.data.alternate_greetings)
     if (char.data && Array.isArray(char.data.alternate_greetings)) {
         char.data.alternate_greetings.forEach((g, i) => {
             if(g) greetings.push({ label: `备用开场白 ${i+1}`, content: g, default: false });
@@ -870,58 +815,12 @@ function renderGreetingsList() {
     });
 }
 
-// [API Fix] 使用 TavernHelper.getWorldbookNames 获取所有世界书
-window.pwExtraBooks = [];
-const renderWiBooks = async () => {
-    const container = $('#pw-wi-container').empty();
-    const baseBooks = await getContextWorldBooks();
-    const allBooks = [...new Set([...baseBooks, ...(window.pwExtraBooks || [])])];
-    
-    if (allBooks.length === 0) { 
-        container.html('<div style="opacity:0.6; padding:10px; text-align:center;">此角色未绑定世界书，请在“参考”标签页手动添加或在酒馆主界面绑定。</div>'); 
-        return; 
-    }
-    
-    for (const book of allBooks) {
-        const isBound = baseBooks.includes(book);
-        const $el = $(`<div class="pw-wi-book"><div class="pw-wi-header"><span><i class="fa-solid fa-book"></i> ${book} ${isBound ? '<span style="color:#9ece6a;font-size:0.8em;margin-left:5px;">(已绑定)</span>' : ''}</span><div>${!isBound ? '<i class="fa-solid fa-times remove-book" style="color:#ff6b6b;margin-right:10px;" title="移除"></i>' : ''}<i class="fa-solid fa-chevron-down arrow"></i></div></div><div class="pw-wi-list" data-book="${book}"></div></div>`);
-        $el.find('.remove-book').on('click', (e) => { e.stopPropagation(); window.pwExtraBooks = window.pwExtraBooks.filter(b => b !== book); renderWiBooks(); });
-        $el.find('.pw-wi-header').on('click', async function () {
-            const $list = $el.find('.pw-wi-list');
-            const $arrow = $(this).find('.arrow');
-            if ($list.is(':visible')) { $list.slideUp(); $arrow.removeClass('fa-flip-vertical'); }
-            else {
-                $list.slideDown(); $arrow.addClass('fa-flip-vertical');
-                if (!$list.data('loaded')) {
-                    $list.html('<div style="padding:10px;text-align:center;"><i class="fas fa-spinner fa-spin"></i></div>');
-                    // [API Fix] Use new wrapper
-                    const entries = await getWorldBookEntries(book);
-                    $list.empty();
-                    if (entries.length === 0) $list.html('<div style="padding:10px;opacity:0.5;">无条目</div>');
-                    entries.forEach(entry => {
-                        const isChecked = entry.enabled ? 'checked' : '';
-                        const $item = $(`<div class="pw-wi-item"><div class="pw-wi-item-row"><input type="checkbox" class="pw-wi-check" ${isChecked} data-content="${encodeURIComponent(entry.content)}"><div style="font-weight:bold; font-size:0.9em; flex:1;">${entry.displayName}</div><i class="fa-solid fa-eye pw-wi-toggle-icon"></i></div><div class="pw-wi-desc">${entry.content}<div class="pw-wi-close-bar"><i class="fa-solid fa-angle-up"></i> 收起</div></div></div>`);
-                        $item.find('.pw-wi-toggle-icon').on('click', function (e) {
-                            e.stopPropagation();
-                            const $desc = $(this).closest('.pw-wi-item').find('.pw-wi-desc');
-                            if ($desc.is(':visible')) { $desc.slideUp(); $(this).css('color', ''); } else { $desc.slideDown(); $(this).css('color', '#5b8db8'); }
-                        });
-                        $item.find('.pw-wi-close-bar').on('click', function () { $(this).parent().slideUp(); $item.find('.pw-wi-toggle-icon').css('color', ''); });
-                        $list.append($item);
-                    });
-                    $list.data('loaded', true);
-                }
-            }
-        });
-        container.append($el);
-    }
-};
-
 // ============================================================================
 // 4. 事件绑定
 // ============================================================================
 
 function bindEvents() {
+    // [Fix] 防止重复绑定
     if (window.stPersonaWeaverBound) return;
     window.stPersonaWeaverBound = true;
 
@@ -1404,9 +1303,6 @@ function bindEvents() {
     $(document).on('click.pw', '#pw-wi-refresh', async function() {
         const btn = $(this); btn.find('i').addClass('fa-spin');
         await loadAvailableWorldBooks();
-        // [New] Re-render Greetings on refresh as well
-        renderGreetingsList();
-        
         const options = availableWorldBooks.length > 0 ? availableWorldBooks.map(b => `<option value="${b}">${b}</option>`).join('') : `<option disabled>未找到世界书</option>`;
         $('#pw-wi-select').html(`<option value="">-- 添加参考/目标世界书 --</option>${options}`);
         btn.find('i').removeClass('fa-spin'); toastr.success("已刷新");
@@ -1422,6 +1318,7 @@ function addPersonaButton() {
     if (container.length === 0 || $(`#${BUTTON_ID}`).length > 0) return;
     const newButton = $(`<div id="${BUTTON_ID}" class="menu_button fa-solid fa-wand-magic-sparkles interactable" title="${TEXT.BTN_TITLE}" tabindex="0" role="button"></div>`);
     newButton.on('click', () => {
+        // [Fix] Reset lock on open
         isProcessing = false;
         openCreatorPopup();
     });
