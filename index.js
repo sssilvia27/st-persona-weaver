@@ -1,12 +1,11 @@
 import { extension_settings, getContext } from "../../../extensions.js";
-// [Fix] 引入 saveCharacterDebounced 以解决保存时的黄色警告
-import { saveSettingsDebounced, callPopup, getRequestHeaders, saveChat, reloadCurrentChat, saveCharacterDebounced } from "../../../../script.js";
+import { saveSettingsDebounced, callPopup, getRequestHeaders, saveChat, reloadCurrentChat } from "../../../../script.js";
 
 const extensionName = "st-persona-weaver";
 const STORAGE_KEY_HISTORY = 'pw_history_v20';
 const STORAGE_KEY_STATE = 'pw_state_v20';
 const STORAGE_KEY_TEMPLATE = 'pw_template_v2';
-const STORAGE_KEY_PROMPTS = 'pw_prompts_v6'; 
+const STORAGE_KEY_PROMPTS = 'pw_prompts_v6';
 const BUTTON_ID = 'pw_persona_tool_btn';
 
 const defaultYamlTemplate =
@@ -74,13 +73,112 @@ NSFW:
   禁忌底线:`;
 
 // --- Prompt 定义 ---
-const defaultSystemPromptInitial = `Creating User Persona for {{user}} (Target: {{char}}).\n{{wi}}\n\n[Traits / Template]:\n{{tags}}\n\n[Instruction]:\n{{input}}\n\n[Task]:\nGenerate character details strictly in structured YAML format.\n1. Do NOT wrap the output in a root key like "{{user}}:". Start directly with the first key from the template.\n2. Maintain indentation strictly.\n3. Do NOT output status bars, progress bars, or Chain of Thought/Reasoning/Thinking process.\n4. Response: ONLY the YAML content.`;
+const defaultSystemPromptInitial =
+`Creating User Persona for {{user}} (Target: {{char}}).
+{{wi}}
 
-const defaultSystemPromptRefine = `You are an expert Data Converter and Persona Editor.\nOptimizing User Persona for {{char}}.\n{{wi}}\n\n[Target Schema / Template]:\n{{tags}}\n\n[Current Data]:\n"""\n{{current}}\n"""\n\n[Instruction]:\n"{{input}}"\n\n[Task]:\n1. Parse [Current Data]. If it is unstructured text or uses a different format, MIGRATE it to fit the [Target Schema].\n2. Apply the [Instruction] to modify or refine the content.\n3. STRICTLY output in valid YAML format following the [Target Schema] structure.\n4. Do NOT add a root key wrapper (like "User:").\n5. Do NOT output status bars, progress bars, or Chain of Thought.\n6. Response: ONLY the final YAML content.`;
+[Traits / Template]:
+{{tags}}
 
-const defaultSystemPromptOpening = `Generate distinct opening scenes (First Messages) based on the following personas and context.\n\n[User Persona]:\n{{userPersona}}\n\n[Character Persona ({{char}})]:\n{{charPersona}}\n\n{{wi}}\n\n[Additional Requirements]:\n{{input}}\n\n[Guidelines]:\n1. Language: Simplified Chinese.\n2. Length: Approx 600-800 characters per option.\n3. Content: detailed scene setting, environment description, specific date/time/location.\n4. Character: Reflect {{char}}'s personality and traits vividly.\n5. Interaction: End with a natural hook for {{user}} to respond. Do NOT summarize or use "elevated" philosophical endings (禁止升华).\n6. Constraint: Do NOT speak for {{user}} or decide {{user}}'s actions.\n7. Variety: Each option must have a completely different theme, time, scene, and plot.\n8. **IMPORTANT**: You MUST use Markdown Code Blocks for the content.\n\n[Output Format]:\nStrictly follow this format for each option (generate 3-4 options):\n\n--- Option 1 ---\n\`\`\`\n[Content of Option 1]\n\`\`\`\n\n--- Option 2 ---\n\`\`\`\n[Content of Option 2]\n\`\`\`\n...`;
+[Instruction]:
+{{input}}
 
-const defaultSystemPromptOpeningRefine = `Refine the following Opening Scene (First Message).\n\n[User Persona]:\n{{userPersona}}\n\n[Character Persona ({{char}})]:\n{{charPersona}}\n\n{{wi}}\n\n[Current Opening Scene]:\n"""\n{{current}}\n"""\n\n[Refinement Instruction]:\n"{{input}}"\n\n[Guidelines]:\n1. Keep the language Simplified Chinese.\n2. Maintain the roleplay style and character voice.\n3. Apply the instruction to modify the scene, tone, or details.\n4. Do NOT speak for {{user}}.\n5. Do NOT output status bars or Chain of Thought.\n6. Response: ONLY the refined opening text (do not use markdown code blocks or titles here, just the raw text).`;
+[Task]:
+Generate character details strictly in structured YAML format.
+1. Do NOT wrap the output in a root key like "{{user}}:". Start directly with the first key from the template.
+2. Maintain indentation strictly.
+3. Do NOT output status bars, progress bars, or Chain of Thought/Reasoning/Thinking process.
+4. Response: ONLY the YAML content.`;
+
+const defaultSystemPromptRefine =
+`You are an expert Data Converter and Persona Editor.
+Optimizing User Persona for {{char}}.
+{{wi}}
+
+[Target Schema / Template]:
+{{tags}}
+
+[Current Data]:
+"""
+{{current}}
+"""
+
+[Instruction]:
+"{{input}}"
+
+[Task]:
+1. Parse [Current Data]. If it is unstructured text or uses a different format, MIGRATE it to fit the [Target Schema].
+2. Apply the [Instruction] to modify or refine the content.
+3. STRICTLY output in valid YAML format following the [Target Schema] structure.
+4. Do NOT add a root key wrapper (like "User:").
+5. Do NOT output status bars, progress bars, or Chain of Thought.
+6. Response: ONLY the final YAML content.`;
+
+const defaultSystemPromptOpening =
+`Generate distinct opening scenes (First Messages) based on the following personas and context.
+
+[User Persona]:
+{{userPersona}}
+
+[Character Persona ({{char}})]:
+{{charPersona}}
+
+{{wi}}
+
+[Additional Requirements]:
+{{input}}
+
+[Guidelines]:
+1. Language: Simplified Chinese.
+2. Length: Approx 600-800 characters per option.
+3. Content: detailed scene setting, environment description, specific date/time/location.
+4. Character: Reflect {{char}}'s personality and traits vividly.
+5. Interaction: End with a natural hook for {{user}} to respond. Do NOT summarize or use "elevated" philosophical endings (禁止升华).
+6. Constraint: Do NOT speak for {{user}} or decide {{user}}'s actions.
+7. Variety: Each option must have a completely different theme, time, scene, and plot.
+8. **IMPORTANT**: You MUST use Markdown Code Blocks for the content.
+
+[Output Format]:
+Strictly follow this format for each option (generate 3-4 options):
+
+--- Option 1 ---
+\`\`\`
+[Content of Option 1]
+\`\`\`
+
+--- Option 2 ---
+\`\`\`
+[Content of Option 2]
+\`\`\`
+...
+`;
+
+const defaultSystemPromptOpeningRefine =
+`Refine the following Opening Scene (First Message).
+
+[User Persona]:
+{{userPersona}}
+
+[Character Persona ({{char}})]:
+{{charPersona}}
+
+{{wi}}
+
+[Current Opening Scene]:
+"""
+{{current}}
+"""
+
+[Refinement Instruction]:
+"{{input}}"
+
+[Guidelines]:
+1. Keep the language Simplified Chinese.
+2. Maintain the roleplay style and character voice.
+3. Apply the instruction to modify the scene, tone, or details.
+4. Do NOT speak for {{user}}.
+5. Do NOT output status bars or Chain of Thought.
+6. Response: ONLY the refined opening text (do not use markdown code blocks or titles here, just the raw text).`;
 
 const defaultSettings = {
     autoSwitchPersona: true, syncToWorldInfo: false,
@@ -116,12 +214,17 @@ let currentRefiningCard = null;
 // 轮播图状态
 let currentSlideIndex = 0;
 let totalSlides = 0;
+let isEventsBound = false;
 
 // ============================================================================
 // 工具函数
 // ============================================================================
-const yieldToBrowser = () => new Promise(resolve => setTimeout(resolve, 0));
-const forcePaint = () => new Promise(resolve => setTimeout(resolve, 50));
+// [Fix Issue 1] 使用 requestAnimationFrame 替代 setTimeout，确保 UI 渲染不被阻塞
+const nextFrame = () => new Promise(resolve => requestAnimationFrame(resolve));
+const forcePaint = async () => {
+    await nextFrame();
+    await new Promise(r => setTimeout(r, 20)); // 额外的小延迟确保 DOM 变动生效
+};
 
 // ============================================================================
 // 1. 核心数据解析逻辑
@@ -216,7 +319,7 @@ async function collectActiveWorldInfoContent() {
         if (allBooks.length > 20) allBooks.length = 20;
 
         for (const bookName of allBooks) {
-            await yieldToBrowser();
+            await nextFrame(); // 避免卡死
             try {
                 const entries = await getWorldBookEntries(bookName);
                 const enabledEntries = entries.filter(e => e.enabled);
@@ -290,6 +393,84 @@ function saveHistory(item) {
 
 function saveState(data) { localStorage.setItem(STORAGE_KEY_STATE, JSON.stringify(data)); }
 function loadState() { try { return JSON.parse(localStorage.getItem(STORAGE_KEY_STATE)) || {}; } catch { return {}; } }
+
+function injectStyles() {
+    const styleId = 'persona-weaver-css-v45'; // Version bumped for styles
+    if ($(`#${styleId}`).length) return;
+    
+    // [Fix Issue 4] CSS 调整：确保 textarea 高度撑满
+    const css = `
+    #pw-api-model-select { flex: 1; width: 0; min-width: 0; text-overflow: ellipsis; overflow: hidden; white-space: nowrap; }
+    
+    .pw-load-btn { font-size: 0.85em; background: linear-gradient(135deg, rgba(224, 175, 104, 0.2), rgba(224, 175, 104, 0.1)); border: 1px solid #e0af68; padding: 4px 12px; border-radius: 4px; cursor: pointer; color: #e0af68; font-weight: bold; margin-left: auto; display: inline-flex; align-items: center; transition: all 0.2s; box-shadow: 0 2px 5px rgba(0,0,0,0.2); }
+    .pw-load-btn:hover { background: rgba(224, 175, 104, 0.3); transform: translateY(-1px); box-shadow: 0 4px 8px rgba(0,0,0,0.3); color: #fff; }
+
+    .pw-template-textarea { background: rgba(0, 0, 0, 0.5) !important; color: #eee !important; font-family: 'Consolas', 'Monaco', monospace; line-height: 1.4; height: 350px !important; border-radius: 0 0 6px 6px !important; border-top: none !important; }
+    
+    .pw-shortcut-btn { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 4px 10px; height: auto; gap: 2px; min-width: 40px; }
+    .pw-shortcut-btn span:first-child { font-size: 0.8em; opacity: 0.8; }
+    .pw-shortcut-btn span.code { font-weight: bold; font-family: monospace; color: #e0af68; font-size: 1.1em; }
+
+    .pw-var-btns { gap: 6px; }
+    .pw-var-btn { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 4px 10px; height: auto; gap: 0; border-color: rgba(128,128,128,0.4); }
+    .pw-var-btn span:first-child { font-weight: bold; font-size: 0.8em; }
+    .pw-var-btn span.code { font-size: 0.75em; opacity: 0.7; font-family: monospace; }
+
+    #pw-api-url { background-color: rgba(0, 0, 0, 0.2) !important; border: 1px solid var(--SmartThemeBorderColor) !important; color: var(--smart-theme-body-color) !important; }
+    .pw-auto-height { min-height: 80px; max-height: 500px; overflow-y: auto; }
+    
+    #pw-request { transition: none !important; } 
+
+    #pw-history-clear-all { background: transparent; border: none; color: #ff6b6b; font-size: 0.85em; opacity: 0.6; padding: 5px; width: auto; margin: 10px auto; text-decoration: underline; }
+    #pw-history-clear-all:hover { opacity: 1; background: transparent; transform: none; }
+
+    .pw-diff-row { background: #1a1a1a; border: 1px solid #333; border-radius: 8px; padding: 10px; display: flex; flex-direction: column; gap: 8px; margin-bottom: 10px; }
+    .pw-diff-attr-name { font-weight: bold; color: #9ece6a; font-size: 1em; padding-bottom: 5px; border-bottom: 1px solid #333; margin-bottom: 5px; }
+    
+    .pw-diff-cards { display: flex; gap: 10px; }
+    .pw-diff-card { flex: 1; display: flex; flex-direction: column; border: 2px solid transparent; border-radius: 6px; background: #222; overflow: hidden; transition: all 0.2s; cursor: pointer; opacity: 0.8; position: relative; }
+    .pw-diff-card.selected { border-color: #9ece6a; opacity: 1; background: #252525; box-shadow: 0 0 10px rgba(158, 206, 106, 0.1); }
+    .pw-diff-card:not(.selected):hover { opacity: 1; }
+    .pw-diff-card.single-view { flex: 1; opacity: 1; background: rgba(158, 206, 106, 0.05); border-color: #9ece6a; cursor: text; }
+    
+    .pw-diff-label { font-size: 0.75em; padding: 4px 8px; background: rgba(0,0,0,0.3); color: #aaa; text-transform: uppercase; font-weight: bold; }
+    .pw-diff-card.selected .pw-diff-label { color: #9ece6a; background: rgba(158, 206, 106, 0.1); }
+    
+    .pw-diff-textarea { flex: 1; width: 100%; background: transparent; border: none; color: #eee; padding: 8px; font-family: inherit; font-size: 0.95em; resize: none; outline: none; line-height: 1.5; min-height: 80px; box-sizing: border-box; }
+    
+    @media screen and (max-width: 600px) { .pw-diff-cards { flex-direction: column; } }
+    
+    .pw-btn.wi { background: linear-gradient(135deg, rgba(122, 162, 247, 0.2), rgba(0, 0, 0, 0)); border-color: #7aa2f7; color: #7aa2f7; }
+
+    /* --- 开场白轮播相关 --- */
+    .pw-carousel-container { position: relative; width: 100%; overflow: hidden; margin-top: 10px; padding-bottom: 5px; }
+    .pw-carousel-track { display: flex; transition: transform 0.3s ease-in-out; }
+    .pw-opening-card { flex: 0 0 100%; width: 100%; box-sizing: border-box; background: rgba(0,0,0,0.2); border: 1px solid var(--SmartThemeBorderColor); border-radius: 8px; padding: 15px; display: flex; flex-direction: column; gap: 10px; }
+    
+    .pw-opening-header { font-weight: bold; color: #e0af68; font-size: 1.1em; display: flex; justify-content: space-between; align-items: center; }
+    .pw-opening-textarea { width: 100%; min-height: 350px; background: rgba(0, 0, 0, 0.15); border: 1px solid var(--SmartThemeBorderColor); border-radius: 6px; color: #eee; padding: 10px; font-family: inherit; font-size: 1.0em; line-height: 1.6; resize: vertical; outline: none; box-sizing: border-box; white-space: pre-wrap; }
+    .pw-opening-textarea:focus { background: rgba(0,0,0,0.25); border-color: #e0af68; }
+    
+    .pw-opening-actions { display: flex; gap: 10px; justify-content: flex-end; align-items: center; margin-top: 5px; }
+    .pw-carousel-nav { display: flex; align-items: center; justify-content: center; gap: 15px; margin-top: 15px; padding-top: 10px; border-top: 1px dashed var(--SmartThemeBorderColor); }
+    
+    .pw-nav-btn { background: rgba(0,0,0,0.3); border: 1px solid var(--SmartThemeBorderColor); color: #ccc; width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all 0.2s; }
+    .pw-nav-btn:hover { background: rgba(255,255,255,0.1); color: #fff; border-color: #e0af68; }
+    .pw-nav-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+    .pw-slide-indicator { font-weight: bold; font-family: monospace; color: #e0af68; }
+
+    .pw-card-refine-box { display: none; flex-direction: column; gap: 8px; background: rgba(0,0,0,0.2); padding: 10px; border-radius: 6px; border: 1px dashed var(--SmartThemeBorderColor); margin-top: 5px; }
+    .pw-card-refine-input { width: 100%; background: rgba(255,255,255,0.05); border: 1px solid var(--SmartThemeBorderColor); color: #ddd; padding: 8px; border-radius: 4px; resize: vertical; min-height: 60px; }
+    
+    .pw-tab-sub { display: block; font-size: 0.75em; opacity: 0.6; font-weight: normal; margin-top: 2px; text-align: center; }
+    .pw-diff-tab { display: flex; flex-direction: column; align-items: center; justify-content: center; line-height: 1.1; }
+
+    /* 悬浮修改按钮 */
+    .pw-float-quote-btn { position: fixed; top: calc(20% + 60px); right: 0; background: linear-gradient(135deg, #e0af68, #d08f40); color: #1a1a1a; padding: 8px 12px; border-radius: 20px 0 0 20px; font-weight: bold; font-size: 0.85em; box-shadow: -2px 2px 8px rgba(0,0,0,0.4); cursor: pointer; z-index: 9999; display: none; align-items: center; gap: 4px; border: 1px solid rgba(255,255,255,0.3); border-right: none; backdrop-filter: blur(5px); }
+    .pw-float-quote-btn:hover { padding-right: 18px; transform: translateX(-2px); }
+    `;
+    $('<style>').attr('id', styleId).text(css).appendTo('head');
+}
 
 function getActivePersonaDescription() {
     const domVal = $('#persona_description').val();
@@ -457,6 +638,7 @@ async function runGeneration(data, apiConfig) {
 // 3. UI 渲染 logic
 // ============================================================================
 
+// 轮播控制函数
 function updateCarousel() {
     if (totalSlides === 0) return;
     const offset = -currentSlideIndex * 100;
@@ -466,6 +648,7 @@ function updateCarousel() {
     $('#pw-next-slide').prop('disabled', currentSlideIndex === totalSlides - 1);
 }
 
+// 开场白结果渲染
 function renderOpeningResults(rawText) {
     const $container = $('#pw-opening-results').empty();
     
@@ -496,8 +679,8 @@ function renderOpeningResults(rawText) {
                 <div class="pw-opening-actions">
                     <button class="pw-mini-btn toggle-refine-btn"><i class="fa-solid fa-pen-fancy"></i> 润色</button>
                     <button class="pw-mini-btn pw-save-draft-btn"><i class="fa-solid fa-save"></i> 存入草稿</button>
-                    <!-- [Req 2] Button Text Update -->
-                    <button class="pw-btn save apply-btn"><i class="fa-solid fa-plus-circle"></i> 添加至开场白</button>
+                    <!-- [Req 3] Changed button to Add to Alternate Greetings -->
+                    <button class="pw-btn save apply-btn"><i class="fa-solid fa-plus-circle"></i> 存入开场白库</button>
                 </div>
             </div>
         `;
@@ -532,7 +715,10 @@ async function openCreatorPopup() {
     if (!currentName) currentName = $('h5#your_name').text().trim();
     if (!currentName) currentName = context.powerUserSettings?.persona_selected || "User";
 
+    const charName = context.characters[context.characterId]?.name || "Char";
+
     const activePersonaContent = getActivePersonaDescription();
+    
     let autoFilledResult = savedState.resultText || "";
     let shouldShowResult = savedState.hasResult || false;
 
@@ -548,12 +734,16 @@ async function openCreatorPopup() {
         return `<option disabled>未找到世界书</option>`;
     };
 
-    const charName = context.characters[context.characterId]?.name || "None";
+    // [Req 2] 标题和副标题调整
+    const titleHtml = `<div style="display:flex; flex-direction:column; gap:2px;">
+        <div style="color:#e0af68; font-weight:bold; font-size:1.2em;"><i class="fa-solid fa-wand-magic-sparkles"></i> User人设生成器</div>
+        <div style="font-size:0.7em; opacity:0.6; font-weight:normal;">当前会话: ${currentName} & ${charName}</div>
+    </div>`;
 
     const html = `
 <div class="pw-wrapper">
     <div class="pw-header">
-        <div class="pw-top-bar"><div class="pw-title">${TEXT.PANEL_TITLE}</div></div>
+        <div class="pw-top-bar"><div class="pw-title">${titleHtml}</div></div>
         <div class="pw-tabs">
             <div class="pw-tab active" data-tab="editor">人设</div>
             <div class="pw-tab" data-tab="opening">开场白</div>
@@ -623,18 +813,15 @@ async function openCreatorPopup() {
         </div>
     </div>
 
-    <!-- [Req 1] 开场白页面重构 -->
+    <!-- 开场白页面 -->
     <div id="pw-view-opening" class="pw-view">
         <div class="pw-scroll-area">
+            <!-- [Req 2] 标题修改 -->
             <div class="pw-info-display">
-                <div class="pw-info-item">
-                    <i class="fa-solid fa-comment-dots"></i>
-                    <span>开场白</span>
-                    <span class="pw-opening-sub-inline">User: ${currentName} & Char: ${charName}</span>
-                </div>
+                <div class="pw-info-item"><i class="fa-solid fa-comment-dots"></i><span>开场白</span></div>
             </div>
-            <!-- [Req 1] 副标题 -->
-            <div class="pw-opening-req-label">附加要求</div>
+            <!-- [Req 2] 副标题修改为“附加要求” -->
+            <div style="font-size: 0.9em; opacity: 0.8; margin-bottom: 2px;">附加要求:</div>
             
             <textarea id="pw-opening-req" class="pw-textarea pw-auto-height" placeholder="在此输入场景、时间、地点等要求..."></textarea>
             <button id="pw-btn-gen-opening" class="pw-btn gen" style="margin-top:10px;">生成开场白</button>
@@ -642,7 +829,8 @@ async function openCreatorPopup() {
         </div>
     </div>
 
-    <div id="pw-diff-overlay" class="pw-diff-container" style="display:none;">
+    <!-- [Req 4] 高度修复：确保 .pw-diff-content-area 使用 flex 撑满高度 -->
+    <div id="pw-diff-overlay" class="pw-diff-container" style="display:none; display: flex; flex-direction: column;">
         <div class="pw-diff-tabs-bar">
             <div class="pw-diff-tab active" data-view="diff">
                 <div>智能对比</div><div class="pw-tab-sub">选择编辑</div>
@@ -650,14 +838,20 @@ async function openCreatorPopup() {
             <div class="pw-diff-tab" data-view="raw">
                 <div>新版原文</div><div class="pw-tab-sub">直接编辑</div>
             </div>
+             <div class="pw-diff-tab" data-view="old-raw">
+                <div>原版原文</div><div class="pw-tab-sub">直接编辑</div>
+            </div>
         </div>
         
-        <div class="pw-diff-content-area">
+        <div class="pw-diff-content-area" style="flex:1; display:flex; flex-direction:column; overflow:hidden;">
             <div id="pw-diff-list-view" class="pw-diff-list-view">
                 <div id="pw-diff-list" style="display:flex; flex-direction:column; gap:10px;"></div>
             </div>
-            <div id="pw-diff-raw-view" class="pw-diff-raw-view">
-                <textarea id="pw-diff-raw-textarea" class="pw-diff-raw-textarea" spellcheck="false"></textarea>
+            <div id="pw-diff-raw-view" class="pw-diff-raw-view" style="flex:1; display:none; flex-direction:column;">
+                <textarea id="pw-diff-raw-textarea" class="pw-diff-raw-textarea" spellcheck="false" style="flex:1; height:100%;"></textarea>
+            </div>
+            <div id="pw-diff-old-raw-view" class="pw-diff-raw-view" style="flex:1; display:none; flex-direction:column;">
+                <textarea id="pw-diff-old-raw-textarea" class="pw-diff-raw-textarea" spellcheck="false" style="flex:1; height:100%;"></textarea>
             </div>
         </div>
 
@@ -749,16 +943,19 @@ async function openCreatorPopup() {
 // ============================================================================
 
 function bindEvents() {
-    // [Fix 1] 移除 visibilitychange 监听，避免重复绑定和事件丢失
-    $(document).off('.pw');
+    // [Fix Issue 1] 防止重复绑定和解绑导致的逻辑错乱
+    if (isEventsBound) {
+        // 解绑旧事件，确保使用最新的 DOM 引用
+        $(document).off('.pw');
+    }
+    isEventsBound = true;
 
     // --- 轮播图控制事件 ---
-    $(document).on('click.pw', '#pw-prev-slide', (e) => { e.stopPropagation(); if (currentSlideIndex > 0) { currentSlideIndex--; updateCarousel(); } });
-    $(document).on('click.pw', '#pw-next-slide', (e) => { e.stopPropagation(); if (currentSlideIndex < totalSlides - 1) { currentSlideIndex++; updateCarousel(); } });
+    $(document).on('click.pw', '#pw-prev-slide', () => { if (currentSlideIndex > 0) { currentSlideIndex--; updateCarousel(); } });
+    $(document).on('click.pw', '#pw-next-slide', () => { if (currentSlideIndex < totalSlides - 1) { currentSlideIndex++; updateCarousel(); } });
 
     // --- 开场白卡片内部按钮事件 ---
-    $(document).on('click.pw', '.pw-save-draft-btn', function(e) {
-        e.stopPropagation();
+    $(document).on('click.pw', '.pw-save-draft-btn', function() {
         const content = $(this).closest('.pw-opening-card').find('.pw-opening-textarea').val();
         const req = $('#pw-opening-req').val();
         saveHistory({ 
@@ -770,36 +967,42 @@ function bindEvents() {
         toastr.success(TEXT.TOAST_SNAPSHOT);
     });
 
-    // [Req 2, 3] Add to Character Opening
-    $(document).on('click.pw', '.apply-btn', async function(e) {
-        e.stopPropagation();
+    // [Req 3] Apply Opening to Character Card (Append to Alternate Greetings)
+    $(document).on('click.pw', '.apply-btn', async function() {
         const finalContent = $(this).closest('.pw-opening-card').find('.pw-opening-textarea').val();
         if (!finalContent) return toastr.warning("开场白内容为空");
 
         const context = getContext();
         const chId = context.characterId;
 
+        // 检查是否加载了角色卡
         if (chId === undefined || chId === null) {
             return toastr.warning("当前未加载任何角色卡，无法保存。");
         }
 
-        if(confirm("确定将此内容添加为当前角色卡的新开场白 (Alternate Greeting) 吗？")) {
+        if(confirm("确定将此开场白【添加】到角色卡的开场白库中吗？\n(不会覆盖现有开场白)")) {
             try {
+                // 获取角色对象
                 let charObj = context.characters[chId];
                 
-                if (!charObj.data) charObj.data = {};
-                if (!charObj.data.alternate_greetings) charObj.data.alternate_greetings = [];
+                // 确保 data.alternate_greetings 存在
+                if (!charObj.data.alternate_greetings) {
+                    charObj.data.alternate_greetings = [];
+                }
                 
+                // 添加新开场白
                 charObj.data.alternate_greetings.push(finalContent);
 
-                // [Fix 3] Use imported save function directly
-                await saveCharacterDebounced(chId);
-                
-                if (window.TavernHelper && window.TavernHelper.eventEmit && window.TavernHelper.events) {
-                     window.TavernHelper.eventEmit(window.TavernHelper.events.CHARACTER_EDITED, { detail: { id: chId, character: charObj } });
+                // 执行保存：使用酒馆全局保存函数
+                if (typeof window.SillyTavern !== 'undefined' && typeof window.SillyTavern.saveCharacterDebounced === 'function') {
+                    await window.SillyTavern.saveCharacterDebounced(chId);
+                } else if (typeof window.saveCharacterDebounced === 'function') {
+                    await window.saveCharacterDebounced(chId);
+                } else {
+                    toastr.warning("未找到保存接口，仅在内存中更新。");
                 }
-
-                toastr.success("已添加新开场白并保存");
+                
+                toastr.success("已添加至角色卡开场白库！");
             } catch (e) {
                 console.error(e);
                 toastr.error("保存失败: " + e.message);
@@ -807,14 +1010,13 @@ function bindEvents() {
         }
     });
 
-    $(document).on('click.pw', '.toggle-refine-btn', function(e) {
-        e.stopPropagation();
+    // Toggle Refine
+    $(document).on('click.pw', '.toggle-refine-btn', function() {
         $(this).closest('.pw-opening-card').find('.pw-card-refine-box').slideToggle();
     });
 
     // Confirm Refine (Opening)
-    $(document).on('click.pw', '.refine-confirm-btn', async function(e) {
-        e.stopPropagation();
+    $(document).on('click.pw', '.refine-confirm-btn', async function() {
         const $card = $(this).closest('.pw-opening-card');
         const refineInput = $card.find('.pw-card-refine-input').val();
         if(!refineInput) return toastr.warning("请输入要求");
@@ -822,6 +1024,9 @@ function bindEvents() {
         const oldContent = $card.find('.pw-opening-textarea').val();
         const btn = $(this);
         btn.prop('disabled', true).html('<i class="fas fa-spinner fa-spin"></i> 处理中');
+        
+        // [Fix Issue 1] 强制渲染 UI 避免假死
+        await forcePaint();
         
         try {
             const wiContent = await collectActiveWorldInfoContent();
@@ -840,23 +1045,30 @@ function bindEvents() {
             currentRefiningCard = $card;
             
             $('#pw-diff-overlay').data('source', 'opening');
-            $('#pw-diff-raw-textarea').val(lastRawResponse);
+            $('#pw-diff-overlay').data('old-content', oldContent); // 保存旧内容供 Tab 使用
+
+            $('#pw-diff-raw-textarea').val(refinedText);
+            $('#pw-diff-old-raw-textarea').val(oldContent); // 填充原版文本
             $('#pw-diff-list').empty();
 
-            // [Req 3] HTML clean up
             const oldTabHtml = `<textarea class="pw-diff-raw-textarea">${oldContent}</textarea>`;
             const newTabHtml = `<textarea class="pw-diff-raw-textarea" id="pw-opening-new-textarea">${refinedText}</textarea>`;
             
-            $('.pw-diff-tab[data-view="diff"] div:first-child').text('原版本');
+            // Temporary title change for opening context
+            $('.pw-diff-tab[data-view="diff"] div:first-child').text('智能对比');
             $('.pw-diff-tab[data-view="diff"] .pw-tab-sub').text('选择编辑');
-            $('.pw-diff-tab[data-view="raw"] div:first-child').text('新版本');
-            $('.pw-diff-tab[data-view="raw"] .pw-tab-sub').text('直接编辑');
+            
+            // [Req 5] 恢复 Tab 显示
+            $('.pw-diff-tab[data-view="raw"]').show();
+            $('.pw-diff-tab[data-view="old-raw"]').show();
             
             $('.pw-diff-tab[data-view="raw"]').addClass('active');
             $('.pw-diff-tab[data-view="diff"]').removeClass('active');
+            $('.pw-diff-tab[data-view="old-raw"]').removeClass('active');
 
             $('#pw-diff-list-view').html(oldTabHtml).hide();
-            $('#pw-diff-raw-view').html(newTabHtml).show();
+            $('#pw-diff-raw-view').show(); // 默认显示新版
+            $('#pw-diff-old-raw-view').hide();
 
             $('#pw-diff-overlay').fadeIn();
             $card.find('.pw-card-refine-input').val(''); 
@@ -870,8 +1082,7 @@ function bindEvents() {
     });
 
     // --- Tabs ---
-    $(document).on('click.pw', '.pw-tab', function (e) {
-        e.stopPropagation();
+    $(document).on('click.pw', '.pw-tab', function () {
         $('.pw-tab').removeClass('active'); $(this).addClass('active');
         $('.pw-view').removeClass('active');
         $(`#pw-view-${$(this).data('tab')}`).addClass('active');
@@ -879,8 +1090,7 @@ function bindEvents() {
     });
 
     // --- Template Editing ---
-    $(document).on('click.pw', '#pw-toggle-edit-template', (e) => {
-        e.stopPropagation();
+    $(document).on('click.pw', '#pw-toggle-edit-template', () => {
         isEditingTemplate = !isEditingTemplate;
         if (isEditingTemplate) {
             $('#pw-template-text').val(currentTemplate);
@@ -894,8 +1104,7 @@ function bindEvents() {
         }
     });
 
-    $(document).on('click.pw', '#pw-save-template', (e) => {
-        e.stopPropagation();
+    $(document).on('click.pw', '#pw-save-template', () => {
         const val = $('#pw-template-text').val();
         currentTemplate = val;
         saveData();
@@ -908,8 +1117,7 @@ function bindEvents() {
     });
 
     // --- Shortcuts ---
-    $(document).on('click.pw', '.pw-shortcut-btn', function (e) {
-        e.stopPropagation();
+    $(document).on('click.pw', '.pw-shortcut-btn', function () {
         const key = $(this).data('key');
         const $text = $('#pw-template-text');
         const el = $text[0];
@@ -922,8 +1130,7 @@ function bindEvents() {
         el.focus();
     });
 
-    $(document).on('click.pw', '.pw-var-btn', function (e) {
-        e.stopPropagation();
+    $(document).on('click.pw', '.pw-var-btn', function () {
         const ins = $(this).data('ins');
         const $activeText = $(this).parent().next('textarea');
         if ($activeText.length) {
@@ -937,24 +1144,22 @@ function bindEvents() {
         }
     });
 
-    // --- Float Button Selection Check [Fix 1: Safe Check] ---
+    // --- Float Button Selection Check ---
     let selectionTimeout;
     const checkSelection = () => {
         clearTimeout(selectionTimeout);
         selectionTimeout = setTimeout(() => {
-            try {
-                const activeEl = document.activeElement;
-                if (!activeEl || (!activeEl.id.startsWith('pw-result-text') && !activeEl.classList.contains('pw-opening-textarea'))) return;
-                
-                const hasSelection = activeEl.selectionStart !== activeEl.selectionEnd;
-                const $btn = $('#pw-float-quote-btn');
-                if (hasSelection) {
-                    if (!$btn.is(':visible')) $btn.stop(true, true).fadeIn(200).css('display', 'flex');
-                } else {
-                    if ($btn.is(':visible')) $btn.stop(true, true).fadeOut(200);
-                }
-            } catch(e) { console.error("Selection check error", e); }
-        }, 200);
+            const activeEl = document.activeElement;
+            if (!activeEl || (!activeEl.id.startsWith('pw-result-text') && !activeEl.classList.contains('pw-opening-textarea'))) return;
+            
+            const hasSelection = activeEl.selectionStart !== activeEl.selectionEnd;
+            const $btn = $('#pw-float-quote-btn');
+            if (hasSelection) {
+                if (!$btn.is(':visible')) $btn.stop(true, true).fadeIn(200).css('display', 'flex');
+            } else {
+                if ($btn.is(':visible')) $btn.stop(true, true).fadeOut(200);
+            }
+        }, 100);
     };
     $(document).on('touchend mouseup keyup', '.pw-opening-textarea, #pw-result-text', checkSelection);
 
@@ -997,6 +1202,7 @@ function bindEvents() {
     $(document).on('input.pw', '.pw-auto-height, #pw-refine-input, .pw-card-refine-input', function () { adjustHeight(this); });
 
     let saveTimeout;
+    // [Fix Issue 1] 防抖保存，减少卡顿
     const saveCurrentState = () => {
         clearTimeout(saveTimeout);
         saveTimeout = setTimeout(() => {
@@ -1012,44 +1218,35 @@ function bindEvents() {
                     extraBooks: window.pwExtraBooks || []
                 }
             });
-        }, 500);
+        }, 800);
     };
     $(document).on('input.pw change.pw', '#pw-request, #pw-result-text, #pw-wi-toggle, .pw-input, .pw-select', saveCurrentState);
 
     // --- Diff View Logic ---
-    $(document).on('click.pw', '.pw-diff-tab', function (e) {
-        e.stopPropagation();
+    $(document).on('click.pw', '.pw-diff-tab', function () {
         $('.pw-diff-tab').removeClass('active');
         $(this).addClass('active');
         const view = $(this).data('view');
         
         const isOpeningMode = $('#pw-diff-overlay').data('source') === 'opening';
 
-        if (isOpeningMode) {
-            if (view === 'diff') { 
-                $('#pw-diff-list-view').show();
-                $('#pw-diff-raw-view').hide();
-            } else { 
-                $('#pw-diff-list-view').hide();
-                $('#pw-diff-raw-view').show();
-            }
-        } else {
-            if (view === 'diff') {
-                $('#pw-diff-list-view').show();
-                $('#pw-diff-raw-view').hide();
-            } else {
-                $('#pw-diff-list-view').hide();
-                $('#pw-diff-raw-view').css('display', 'flex');
-                if (!$('#pw-diff-raw-textarea').val() && lastRawResponse) {
-                    $('#pw-diff-raw-textarea').val(lastRawResponse);
-                }
-            }
+        // 隐藏所有视图
+        $('#pw-diff-list-view').hide();
+        $('#pw-diff-raw-view').hide();
+        $('#pw-diff-old-raw-view').hide();
+
+        if (view === 'diff') {
+            $('#pw-diff-list-view').show();
+        } else if (view === 'raw') {
+            $('#pw-diff-raw-view').css('display', 'flex'); // [Fix Issue 4] ensure flex
+        } else if (view === 'old-raw') {
+            $('#pw-diff-old-raw-view').css('display', 'flex'); // [Fix Issue 4] ensure flex
         }
     });
 
     // Refine (Persona)
     $(document).on('click.pw', '#pw-btn-refine', async function (e) {
-        e.preventDefault(); e.stopPropagation();
+        e.preventDefault();
         const refineReq = $('#pw-refine-input').val();
         if (!refineReq) return toastr.warning("请输入润色意见");
         
@@ -1058,6 +1255,7 @@ function bindEvents() {
         const oldText = $('#pw-result-text').val();
         const $btn = $(this).find('i').removeClass('fa-magic').addClass('fa-spinner fa-spin');
         
+        // [Fix Issue 1] Force UI Paint
         await forcePaint();
 
         try {
@@ -1070,7 +1268,11 @@ function bindEvents() {
             };
             const responseText = await runGeneration(config, config);
 
-            $('#pw-diff-raw-textarea').val(lastRawResponse);
+            // [Req 5] Populate textareas for editing
+            $('#pw-diff-raw-textarea').val(responseText);
+            $('#pw-diff-old-raw-textarea').val(oldText);
+            
+            lastRawResponse = responseText;
 
             const oldMap = parseYamlToBlocks(oldText);
             const newMap = parseYamlToBlocks(responseText);
@@ -1089,8 +1291,8 @@ function bindEvents() {
                 if (isChanged) changeCount++;
                 if (!valOld && !valNew) return;
 
-                // [Req 3] Remove text labels
                 let cardsHtml = '';
+                // [Req 5] Support editing both: remove readonly from Old, allow selection
                 if (!isChanged) {
                     cardsHtml = `
                     <div class="pw-diff-card new selected single-view" data-val="${encodeURIComponent(valNew)}">
@@ -1100,11 +1302,11 @@ function bindEvents() {
                 } else {
                     cardsHtml = `
                     <div class="pw-diff-card old" data-val="${encodeURIComponent(valOld)}">
-                        <div class="pw-diff-label">原版本</div>
-                        <textarea class="pw-diff-textarea">${valOld || "(无)"}</textarea>
+                        <div class="pw-diff-label">原版本 (点击可编辑)</div>
+                        <textarea class="pw-diff-textarea" readonly>${valOld || "(无)"}</textarea>
                     </div>
                     <div class="pw-diff-card new selected" data-val="${encodeURIComponent(valNew)}">
-                        <div class="pw-diff-label">新版本</div>
+                        <div class="pw-diff-label">新版本 (推荐)</div>
                         <textarea class="pw-diff-textarea">${valNew || "(删除)"}</textarea>
                     </div>`;
                 }
@@ -1121,18 +1323,6 @@ function bindEvents() {
 
             $('#pw-diff-overlay').data('source', 'persona');
             
-            // [Req 3] Clean tabs
-            $('.pw-diff-tab[data-view="diff"] div:first-child').text('智能对比');
-            $('.pw-diff-tab[data-view="diff"] .pw-tab-sub').text('选择编辑');
-            $('.pw-diff-tab[data-view="raw"] div:first-child').text('新版原文');
-            $('.pw-diff-tab[data-view="raw"] .pw-tab-sub').text('直接编辑');
-
-            if (changeCount === 0 && !responseText) {
-                toastr.warning("返回内容为空，请切换到“直接编辑”查看");
-            } else if (changeCount === 0) {
-                toastr.info("没有检测到内容变化");
-            }
-
             $('.pw-diff-tab[data-view="diff"]').click();
             $('#pw-diff-overlay').fadeIn();
             $('#pw-refine-input').val('');
@@ -1144,27 +1334,33 @@ function bindEvents() {
         }
     });
 
-    $(document).on('click.pw', '.pw-diff-card', function (e) {
-        e.stopPropagation();
+    $(document).on('click.pw', '.pw-diff-card', function () {
         const $row = $(this).closest('.pw-diff-row');
         if ($(this).hasClass('single-view')) return;
 
         $row.find('.pw-diff-card').removeClass('selected');
         $(this).addClass('selected');
+        
+        // [Req 5] Allow editing of selected card
+        $row.find('.pw-diff-textarea').prop('readonly', true);
+        $(this).find('.pw-diff-textarea').prop('readonly', false).focus();
     });
 
-    $(document).on('click.pw', '#pw-diff-confirm', function (e) {
-        e.stopPropagation();
+    $(document).on('click.pw', '#pw-diff-confirm', function () {
         const source = $('#pw-diff-overlay').data('source');
         const activeTab = $('.pw-diff-tab.active').data('view');
         
         let finalContent = "";
 
+        // [Req 5] Logic to grab content from the currently ACTIVE editing tab
         if (source === 'opening') {
             if (activeTab === 'diff') {
-                finalContent = $('#pw-diff-list-view').find('textarea').val();
-            } else {
-                finalContent = $('#pw-diff-raw-view').find('textarea').val();
+                // Opening doesn't support list diff well, fallback to new raw
+                 finalContent = $('#pw-diff-raw-textarea').val();
+            } else if (activeTab === 'raw') {
+                finalContent = $('#pw-diff-raw-textarea').val();
+            } else if (activeTab === 'old-raw') {
+                finalContent = $('#pw-diff-old-raw-textarea').val();
             }
             
             if (currentRefiningCard) {
@@ -1174,7 +1370,10 @@ function bindEvents() {
         } else {
             if (activeTab === 'raw') {
                 finalContent = $('#pw-diff-raw-textarea').val();
+            } else if (activeTab === 'old-raw') {
+                finalContent = $('#pw-diff-old-raw-textarea').val();
             } else {
+                // List View: Collect from selected cards
                 let finalLines = [];
                 $('.pw-diff-row').each(function () {
                     const key = $(this).data('key');
@@ -1194,16 +1393,17 @@ function bindEvents() {
         toastr.success("修改已应用");
     });
 
-    $(document).on('click.pw', '#pw-diff-cancel', (e) => { e.stopPropagation(); $('#pw-diff-overlay').fadeOut(); });
+    $(document).on('click.pw', '#pw-diff-cancel', () => $('#pw-diff-overlay').fadeOut());
 
     // Generate Persona
     $(document).on('click.pw', '#pw-btn-gen', async function (e) {
-        e.preventDefault(); e.stopPropagation();
+        e.preventDefault();
         const req = $('#pw-request').val();
         if (!req) return toastr.warning("请输入要求");
         const $btn = $(this);
         $btn.prop('disabled', true).html('<i class="fas fa-spinner fa-spin"></i> 生成中...');
         
+        // [Fix Issue 1] Force Paint
         await forcePaint();
         
         $('#pw-refine-input').val('');
@@ -1227,13 +1427,14 @@ function bindEvents() {
             console.error(e);
             toastr.error("生成失败: " + e.message); 
         } finally { 
+            // [Fix Issue 1] Ensure button resets even on error
             $btn.prop('disabled', false).html('生成设定'); 
         }
     });
 
     // Generate Opening
     $(document).on('click.pw', '#pw-btn-gen-opening', async function(e) {
-        e.preventDefault(); e.stopPropagation();
+        e.preventDefault();
         const req = $('#pw-opening-req').val();
         const $btn = $(this);
         const $results = $('#pw-opening-results');
@@ -1241,6 +1442,7 @@ function bindEvents() {
         $btn.prop('disabled', true).html('<i class="fas fa-spinner fa-spin"></i> 构思开场白中...');
         $results.empty();
         
+        // [Fix Issue 1] Force Paint
         await forcePaint();
 
         try {
@@ -1267,8 +1469,7 @@ function bindEvents() {
         }
     });
 
-    $(document).on('click.pw', '#pw-btn-load-current', function(e) {
-        e.stopPropagation();
+    $(document).on('click.pw', '#pw-btn-load-current', function() {
         const content = getActivePersonaDescription();
         if (content) {
             if ($('#pw-result-text').val() && !confirm("当前结果框已有内容，确定要覆盖吗？")) return;
@@ -1283,16 +1484,14 @@ function bindEvents() {
         }
     });
 
-    $(document).on('click.pw', '#pw-btn-save-wi', async function (e) {
-        e.stopPropagation();
+    $(document).on('click.pw', '#pw-btn-save-wi', async function () {
         const content = $('#pw-result-text').val();
         if (!content) return toastr.warning("内容为空，无法保存");
         const name = $('.persona_name').first().text().trim() || $('h5#your_name').text().trim() || "User";
         await syncToWorldInfoViaHelper(name, content);
     });
 
-    $(document).on('click.pw', '#pw-btn-apply', async function (e) {
-        e.stopPropagation();
+    $(document).on('click.pw', '#pw-btn-apply', async function () {
         const content = $('#pw-result-text').val();
         if (!content) return toastr.warning("内容为空");
         const name = $('.persona_name').first().text().trim() || $('h5#your_name').text().trim() || "User";
@@ -1301,8 +1500,7 @@ function bindEvents() {
         $('.popup_close').click();
     });
 
-    $(document).on('click.pw', '#pw-clear', function (e) {
-        e.stopPropagation();
+    $(document).on('click.pw', '#pw-clear', function () {
         if (confirm("确定清空？")) {
             $('#pw-request').val('').removeClass('minimized');
             $('#pw-result-area').hide();
@@ -1311,15 +1509,15 @@ function bindEvents() {
         }
     });
 
-    $(document).on('click.pw', '#pw-snapshot', function (e) {
-        e.stopPropagation();
+    // Save Draft (Persona)
+    $(document).on('click.pw', '#pw-snapshot', function () {
         const text = $('#pw-result-text').val();
         const req = $('#pw-request').val();
         if (!text && !req) return toastr.warning("没有任何内容可保存");
         saveHistory({ 
             request: req || "无", 
             timestamp: new Date().toLocaleString(), 
-            title: "", 
+            title: "", // Let default logic handle it
             data: { name: "Persona", resultText: text || "(无)", type: 'persona' } 
         });
         toastr.success(TEXT.TOAST_SNAPSHOT);
@@ -1344,7 +1542,7 @@ function bindEvents() {
     $(document).on('change.pw', '#pw-api-source', function () { $('#pw-indep-settings').toggle($(this).val() === 'independent'); });
 
     $(document).on('click.pw', '#pw-api-fetch', async function (e) {
-        e.preventDefault(); e.stopPropagation();
+        e.preventDefault();
         const url = $('#pw-api-url').val().replace(/\/$/, '');
         const key = $('#pw-api-key').val();
         const $btn = $(this).find('i').addClass('fa-spin');
@@ -1368,7 +1566,7 @@ function bindEvents() {
     });
 
     $(document).on('click.pw', '#pw-api-test', async function (e) {
-        e.preventDefault(); e.stopPropagation();
+        e.preventDefault();
         const url = $('#pw-api-url').val().replace(/\/$/, '');
         const key = $('#pw-api-key').val();
         const model = $('#pw-api-model-select').val();
@@ -1385,8 +1583,7 @@ function bindEvents() {
         finally { $btn.html('<i class="fa-solid fa-plug"></i>'); }
     });
 
-    $(document).on('click.pw', '#pw-api-save', (e) => {
-        e.stopPropagation();
+    $(document).on('click.pw', '#pw-api-save', () => {
         promptsCache.initial = $('#pw-prompt-initial').val();
         promptsCache.refine = $('#pw-prompt-refine').val();
         promptsCache.opening = $('#pw-prompt-opening').val();
@@ -1395,36 +1592,152 @@ function bindEvents() {
         toastr.success("设置与Prompt已保存");
     });
 
-    $(document).on('click.pw', '#pw-reset-initial', (e) => {
-        e.stopPropagation();
+    $(document).on('click.pw', '#pw-reset-initial', () => {
         if (confirm("恢复初始生成Prompt？")) $('#pw-prompt-initial').val(defaultSystemPromptInitial);
     });
-    $(document).on('click.pw', '#pw-reset-refine', (e) => {
-        e.stopPropagation();
+    $(document).on('click.pw', '#pw-reset-refine', () => {
         if (confirm("恢复润色Prompt？")) $('#pw-prompt-refine').val(defaultSystemPromptRefine);
     });
-    $(document).on('click.pw', '#pw-reset-opening', (e) => {
-        e.stopPropagation();
+    $(document).on('click.pw', '#pw-reset-opening', () => {
         if (confirm("恢复开场白Prompt？")) $('#pw-prompt-opening').val(defaultSystemPromptOpening);
     });
-    $(document).on('click.pw', '#pw-reset-opening-refine', (e) => {
-        e.stopPropagation();
+    $(document).on('click.pw', '#pw-reset-opening-refine', () => {
         if (confirm("恢复开场白润色Prompt？")) $('#pw-prompt-opening-refine').val(defaultSystemPromptOpeningRefine);
     });
 
-    $(document).on('click.pw', '#pw-wi-refresh', async function(e) {
-        e.stopPropagation();
+    $(document).on('click.pw', '#pw-wi-refresh', async function() {
         const btn = $(this); btn.find('i').addClass('fa-spin');
         await loadAvailableWorldBooks();
         const options = availableWorldBooks.length > 0 ? availableWorldBooks.map(b => `<option value="${b}">${b}</option>`).join('') : `<option disabled>未找到世界书</option>`;
         $('#pw-wi-select').html(`<option value="">-- 添加参考/目标世界书 --</option>${options}`);
         btn.find('i').removeClass('fa-spin'); toastr.success("已刷新");
     });
-    $(document).on('click.pw', '#pw-wi-add', (e) => { e.stopPropagation(); const val = $('#pw-wi-select').val(); if (val && !window.pwExtraBooks.includes(val)) { window.pwExtraBooks.push(val); renderWiBooks(); } });
+    $(document).on('click.pw', '#pw-wi-add', () => { const val = $('#pw-wi-select').val(); if (val && !window.pwExtraBooks.includes(val)) { window.pwExtraBooks.push(val); renderWiBooks(); } });
     $(document).on('input.pw', '#pw-history-search', renderHistoryList);
-    $(document).on('click.pw', '#pw-history-search-clear', function (e) { e.stopPropagation(); $('#pw-history-search').val('').trigger('input'); });
-    $(document).on('click.pw', '#pw-history-clear-all', function (e) { e.stopPropagation(); if (confirm("清空?")) { historyCache = []; saveData(); renderHistoryList(); } });
+    $(document).on('click.pw', '#pw-history-search-clear', function () { $('#pw-history-search').val('').trigger('input'); });
+    $(document).on('click.pw', '#pw-history-clear-all', function () { if (confirm("清空?")) { historyCache = []; saveData(); renderHistoryList(); } });
 }
+
+// ... 辅助渲染函数 ...
+const renderTemplateChips = () => {
+    const $container = $('#pw-template-chips').empty();
+    const blocks = parseYamlToBlocks(currentTemplate);
+    blocks.forEach((content, key) => {
+        const $chip = $(`<div class="pw-tag-chip"><i class="fa-solid fa-cube" style="opacity:0.5; margin-right:4px;"></i><span>${key}</span></div>`);
+        $chip.on('click', () => {
+            const $text = $('#pw-request');
+            const cur = $text.val();
+            const prefix = (cur && !cur.endsWith('\n') && cur.length > 0) ? '\n\n' : '';
+            let insertText = key + ":";
+            if (content && content.trim()) {
+                if (content.includes('\n') || content.startsWith(' ')) insertText += "\n" + content;
+                else insertText += " " + content;
+            } else insertText += " ";
+            $text.val(cur + prefix + insertText).focus();
+            $text.scrollTop($text[0].scrollHeight);
+        });
+        $container.append($chip);
+    });
+};
+
+const renderHistoryList = () => {
+    loadData();
+    const $list = $('#pw-history-list').empty();
+    const search = $('#pw-history-search').val().toLowerCase();
+    const filtered = historyCache.filter(item => {
+        if (!search) return true;
+        const content = (item.data.resultText || "").toLowerCase();
+        const title = (item.title || "").toLowerCase();
+        return title.includes(search) || content.includes(search);
+    });
+    if (filtered.length === 0) { $list.html('<div style="text-align:center; opacity:0.6; padding:20px;">暂无草稿</div>'); return; }
+
+    filtered.forEach((item, index) => {
+        const previewText = item.data.resultText || '无内容';
+        const displayTitle = item.title || "User & Char"; // Fallback default
+        const typeLabel = item.data.type === 'opening' ? '<span style="color:#e0af68; font-size:0.8em; border:1px solid #e0af68; border-radius:3px; padding:0 3px; margin-right:5px;">开场白</span>' : '<span style="color:#9ece6a; font-size:0.8em; border:1px solid #9ece6a; border-radius:3px; padding:0 3px; margin-right:5px;">人设</span>';
+
+        const $el = $(`
+        <div class="pw-history-item">
+            <div class="pw-hist-main">
+                <div class="pw-hist-header">
+                    <span class="pw-hist-title-display">${typeLabel}${displayTitle}</span>
+                    <input type="text" class="pw-hist-title-input" value="${displayTitle}" style="display:none;">
+                    <div style="display:flex; gap:5px;">
+                        <i class="fa-solid fa-pen pw-hist-action-btn edit" title="编辑标题"></i>
+                        <i class="fa-solid fa-trash pw-hist-action-btn del" data-index="${index}" title="删除"></i>
+                    </div>
+                </div>
+                <div class="pw-hist-meta"><span>${item.timestamp || ''}</span></div>
+                <div class="pw-hist-desc">${previewText}</div>
+            </div>
+        </div>
+    `);
+        $el.on('click', function (e) {
+            if ($(e.target).closest('.pw-hist-action-btn, .pw-hist-title-input').length) return;
+            
+            if (item.data.type === 'opening') {
+                $('#pw-opening-req').val(item.request);
+                renderOpeningResults(item.data.resultText);
+                $('.pw-tab[data-tab="opening"]').click();
+            } else {
+                $('#pw-request').val(item.request); 
+                $('#pw-result-text').val(previewText); 
+                $('#pw-result-area').show();
+                $('#pw-request').addClass('minimized');
+                $('.pw-tab[data-tab="editor"]').click();
+            }
+        });
+        $el.find('.pw-hist-action-btn.del').on('click', function (e) {
+            e.stopPropagation();
+            if (confirm("删除?")) {
+                historyCache.splice(historyCache.indexOf(item), 1);
+                saveData(); renderHistoryList();
+            }
+        });
+        $list.append($el);
+    });
+};
+
+window.pwExtraBooks = [];
+const renderWiBooks = async () => {
+    const container = $('#pw-wi-container').empty();
+    const baseBooks = await getContextWorldBooks();
+    const allBooks = [...new Set([...baseBooks, ...(window.pwExtraBooks || [])])];
+    if (allBooks.length === 0) { container.html('<div style="opacity:0.6; padding:10px; text-align:center;">此角色未绑定世界书，请在“世界书”标签页手动添加或在酒馆主界面绑定。</div>'); return; }
+    for (const book of allBooks) {
+        const isBound = baseBooks.includes(book);
+        const $el = $(`<div class="pw-wi-book"><div class="pw-wi-header"><span><i class="fa-solid fa-book"></i> ${book} ${isBound ? '<span style="color:#9ece6a;font-size:0.8em;margin-left:5px;">(已绑定)</span>' : ''}</span><div>${!isBound ? '<i class="fa-solid fa-times remove-book" style="color:#ff6b6b;margin-right:10px;" title="移除"></i>' : ''}<i class="fa-solid fa-chevron-down arrow"></i></div></div><div class="pw-wi-list" data-book="${book}"></div></div>`);
+        $el.find('.remove-book').on('click', (e) => { e.stopPropagation(); window.pwExtraBooks = window.pwExtraBooks.filter(b => b !== book); renderWiBooks(); });
+        $el.find('.pw-wi-header').on('click', async function () {
+            const $list = $el.find('.pw-wi-list');
+            const $arrow = $(this).find('.arrow');
+            if ($list.is(':visible')) { $list.slideUp(); $arrow.removeClass('fa-flip-vertical'); }
+            else {
+                $list.slideDown(); $arrow.addClass('fa-flip-vertical');
+                if (!$list.data('loaded')) {
+                    $list.html('<div style="padding:10px;text-align:center;"><i class="fas fa-spinner fa-spin"></i></div>');
+                    const entries = await getWorldBookEntries(book);
+                    $list.empty();
+                    if (entries.length === 0) $list.html('<div style="padding:10px;opacity:0.5;">无条目</div>');
+                    entries.forEach(entry => {
+                        const isChecked = entry.enabled ? 'checked' : '';
+                        const $item = $(`<div class="pw-wi-item"><div class="pw-wi-item-row"><input type="checkbox" class="pw-wi-check" ${isChecked} data-content="${encodeURIComponent(entry.content)}"><div style="font-weight:bold; font-size:0.9em; flex:1;">${entry.displayName}</div><i class="fa-solid fa-eye pw-wi-toggle-icon"></i></div><div class="pw-wi-desc">${entry.content}<div class="pw-wi-close-bar"><i class="fa-solid fa-angle-up"></i> 收起</div></div></div>`);
+                        $item.find('.pw-wi-toggle-icon').on('click', function (e) {
+                            e.stopPropagation();
+                            const $desc = $(this).closest('.pw-wi-item').find('.pw-wi-desc');
+                            if ($desc.is(':visible')) { $desc.slideUp(); $(this).css('color', ''); } else { $desc.slideDown(); $(this).css('color', '#5b8db8'); }
+                        });
+                        $item.find('.pw-wi-close-bar').on('click', function () { $(this).parent().slideUp(); $item.find('.pw-wi-toggle-icon').css('color', ''); });
+                        $list.append($item);
+                    });
+                    $list.data('loaded', true);
+                }
+            }
+        });
+        container.append($el);
+    }
+};
 
 function addPersonaButton() {
     const container = $('.persona_controls_buttons_block');
@@ -1446,7 +1759,7 @@ function startPolling() {
 }
 
 jQuery(async () => {
-    // 移除了 injectStyles() 调用，请务必使用同级目录下的 style.css 文件
+    injectStyles();
     addPersonaButton();
     startPolling();
     bindEvents();
