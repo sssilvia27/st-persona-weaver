@@ -5,7 +5,7 @@ const extensionName = "st-persona-weaver";
 const STORAGE_KEY_HISTORY = 'pw_history_v20';
 const STORAGE_KEY_STATE = 'pw_state_v20';
 const STORAGE_KEY_TEMPLATE = 'pw_template_v2';
-const STORAGE_KEY_PROMPTS = 'pw_prompts_v5';
+const STORAGE_KEY_PROMPTS = 'pw_prompts_v6'; // 版本升级
 const BUTTON_ID = 'pw_persona_tool_btn';
 
 const defaultYamlTemplate =
@@ -137,9 +137,10 @@ const defaultSystemPromptOpening =
 6. Constraint: Do NOT speak for {{user}} or decide {{user}}'s actions.
 7. Variety: Each option must have a completely different theme, time, scene, and plot.
 8. Do NOT output status bars, progress bars, or Chain of Thought.
+9. **IMPORTANT**: Wrap each option content in a markdown code block.
 
 [Output Format]:
-Strictly follow this format for each option (generate as many as reasonable, usually 4):
+Strictly follow this format for each option:
 
 ---【开场白选项1】---
 \`\`\`
@@ -210,6 +211,7 @@ let pollInterval = null;
 let lastRawResponse = "";
 let currentRefiningCard = null; 
 
+// 轮播图状态
 let currentSlideIndex = 0;
 let totalSlides = 0;
 
@@ -379,7 +381,7 @@ function saveState(data) { localStorage.setItem(STORAGE_KEY_STATE, JSON.stringif
 function loadState() { try { return JSON.parse(localStorage.getItem(STORAGE_KEY_STATE)) || {}; } catch { return {}; } }
 
 function injectStyles() {
-    const styleId = 'persona-weaver-css-v42';
+    const styleId = 'persona-weaver-css-v42'; // Ver up
     if ($(`#${styleId}`).length) return;
     
     const css = `
@@ -425,7 +427,7 @@ function injectStyles() {
     .pw-btn.wi { background: linear-gradient(135deg, rgba(122, 162, 247, 0.2), rgba(0, 0, 0, 0)); border-color: #7aa2f7; color: #7aa2f7; }
 
     /* --- 开场白轮播相关 --- */
-    .pw-carousel-container { position: relative; width: 100%; overflow: hidden; margin-top: 20px; }
+    .pw-carousel-container { position: relative; width: 100%; overflow: hidden; margin-top: 10px; margin-bottom: 10px; }
     .pw-carousel-track { display: flex; transition: transform 0.3s ease-in-out; }
     .pw-opening-card { flex: 0 0 100%; width: 100%; box-sizing: border-box; background: rgba(0,0,0,0.2); border: 1px solid var(--SmartThemeBorderColor); border-radius: 8px; padding: 15px; display: flex; flex-direction: column; gap: 10px; }
     
@@ -434,7 +436,8 @@ function injectStyles() {
     .pw-opening-textarea:focus { background: rgba(0,0,0,0.25); border-color: #e0af68; }
     .pw-opening-actions { display: flex; gap: 10px; justify-content: flex-end; align-items: center; margin-top: 5px; }
     
-    .pw-carousel-nav { display: flex; align-items: center; justify-content: center; gap: 15px; margin-top: 15px; }
+    /* 导航栏移到下方 */
+    .pw-carousel-nav { display: flex; align-items: center; justify-content: center; gap: 15px; margin-top: 5px; margin-bottom: 5px; }
     .pw-nav-btn { background: rgba(0,0,0,0.3); border: 1px solid var(--SmartThemeBorderColor); color: #ccc; width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all 0.2s; }
     .pw-nav-btn:hover { background: rgba(255,255,255,0.1); color: #fff; border-color: #e0af68; }
     .pw-nav-btn:disabled { opacity: 0.3; cursor: not-allowed; }
@@ -616,7 +619,6 @@ async function runGeneration(data, apiConfig) {
 // 3. UI 渲染 logic
 // ============================================================================
 
-// 轮播控制函数
 function updateCarousel() {
     const offset = -currentSlideIndex * 100;
     $('#pw-carousel-track').css('transform', `translateX(${offset}%)`);
@@ -625,10 +627,15 @@ function updateCarousel() {
     $('#pw-next-slide').prop('disabled', currentSlideIndex === totalSlides - 1);
 }
 
-// 开场白结果渲染
 function renderOpeningResults(rawText) {
     const $container = $('#pw-opening-results').empty();
-    const matches = [...rawText.matchAll(/-+【开场白选项\d+】-+[\s\S]*?```([\s\S]*?)```/g)];
+    
+    // 【解析增强】优先尝试标准代码块，失败则降级使用分隔符解析
+    let matches = [...rawText.matchAll(/-+【开场白选项\d+】-+[\s\S]*?```([\s\S]*?)```/g)];
+    if (!matches || matches.length === 0) {
+        // 备用正则：只找分隔符，不强制要求代码块
+        matches = [...rawText.matchAll(/-+【开场白选项\d+】-+([\s\S]*?)(?=-+【开场白选项|$)/g)];
+    }
     
     let slidesHtml = '';
     
@@ -655,7 +662,8 @@ function renderOpeningResults(rawText) {
 
                     <div class="pw-opening-actions">
                         <button class="pw-mini-btn toggle-refine-btn"><i class="fa-solid fa-pen-fancy"></i> 润色</button>
-                        <button class="pw-mini-btn draft-btn"><i class="fa-solid fa-save"></i> 保存到草稿</button>
+                        <!-- 保存到草稿按钮 -->
+                        <button class="pw-mini-btn save-draft-btn"><i class="fa-solid fa-save"></i> 存入草稿</button>
                         <button class="pw-btn save apply-btn"><i class="fa-solid fa-check"></i> 应用</button>
                     </div>
                 </div>
@@ -663,6 +671,7 @@ function renderOpeningResults(rawText) {
         });
     }
 
+    // 结构调整：Nav 放在 Track 下面
     const carouselHtml = `
         <div class="pw-carousel-container">
             <div id="pw-carousel-track" class="pw-carousel-track">
@@ -680,27 +689,29 @@ function renderOpeningResults(rawText) {
     currentSlideIndex = 0;
     updateCarousel();
 
-    // 绑定轮播事件
     $('#pw-prev-slide').click(() => { if (currentSlideIndex > 0) { currentSlideIndex--; updateCarousel(); } });
     $('#pw-next-slide').click(() => { if (currentSlideIndex < totalSlides - 1) { currentSlideIndex++; updateCarousel(); } });
 
-    // 保存到草稿
-    $container.find('.draft-btn').click(async function() {
+    // 绑定事件：应用防卡死 forcePaint
+    $container.find('.save-draft-btn').click(async function() {
         await forcePaint();
         const content = $(this).closest('.pw-opening-card').find('.pw-opening-textarea').val();
         const context = getContext();
         const userName = $('.persona_name').first().text().trim() || "User";
-        const charName = context.characters[context.characterId]?.name || "Char";
-        // 开场白草稿使用固定格式标题
-        const defaultTitle = `${userName} & ${charName} (${new Date().toLocaleDateString()})`;
+        const charName = context.characters[context.characterId]?.name || "";
+        const defaultTitle = charName ? `${userName} & ${charName} (${new Date().toLocaleDateString()})` : `${userName} (${new Date().toLocaleDateString()})`;
         
         saveHistory({ 
             request: $('#pw-opening-req').val() || "开场白生成", 
             timestamp: new Date().toLocaleString(), 
-            title: defaultTitle, 
-            data: { name: "Opening", resultText: content, type: 'opening' } 
+            title: defaultTitle, // 统一标题
+            data: { 
+                name: "Opening", 
+                resultText: content, // 只保存单条
+                type: 'opening' 
+            } 
         });
-        toastr.success("已保存到草稿");
+        toastr.success("该选项已存入草稿");
     });
 
     $container.find('.apply-btn').click(async function() {
@@ -719,7 +730,8 @@ function renderOpeningResults(rawText) {
         }
     });
 
-    $container.find('.toggle-refine-btn').click(function() {
+    $container.find('.toggle-refine-btn').click(async function() {
+        await forcePaint();
         $(this).closest('.pw-opening-card').find('.pw-card-refine-box').slideToggle();
     });
 
@@ -731,11 +743,9 @@ function renderOpeningResults(rawText) {
         const oldContent = $card.find('.pw-opening-textarea').val();
         const btn = $(this);
         btn.prop('disabled', true).html('<i class="fas fa-spinner fa-spin"></i> 处理中');
-        
         await forcePaint();
-
+        
         try {
-            // 准备上下文
             const wiContent = await collectActiveWorldInfoContent();
             const charPersona = getCharacterPersonaString();
             const userPersona = $('#pw-result-text').val() || getActivePersonaDescription();
@@ -751,20 +761,14 @@ function renderOpeningResults(rawText) {
             const refinedText = await runGeneration(config, config);
             currentRefiningCard = $card;
             
-            // 标记Diff来源为开场白
             $('#pw-diff-overlay').data('source', 'opening');
             $('#pw-diff-raw-textarea').val(lastRawResponse);
             
-            // 清空列表，因为开场白用专用Tab视图
             $('#pw-diff-list').empty();
 
-            // 渲染开场白专用的 Diff Tab 内容
-            // 原版本 (readonly)
             const oldTabHtml = `<textarea class="pw-diff-raw-textarea" readonly>${oldContent}</textarea>`;
-            // 新版本 (editable)
             const newTabHtml = `<textarea class="pw-diff-raw-textarea" id="pw-opening-new-textarea">${refinedText}</textarea>`;
             
-            // 临时修改 Tab 标题和内容逻辑
             $('.pw-diff-tab[data-view="diff"]').text('原版本').data('special', 'old');
             $('.pw-diff-tab[data-view="raw"]').text('新版本').data('special', 'new').addClass('active');
             $('.pw-diff-tab[data-view="diff"]').removeClass('active');
@@ -900,7 +904,6 @@ async function openCreatorPopup() {
 
     <div id="pw-diff-overlay" class="pw-diff-container" style="display:none;">
         <div class="pw-diff-tabs-bar">
-            <!-- 默认是人设的Wording -->
             <div class="pw-diff-tab active" data-view="diff">智能对比（选择编辑）</div>
             <div class="pw-diff-tab" data-view="raw">新版原文（直接编辑）</div>
         </div>
@@ -1153,11 +1156,9 @@ function bindEvents() {
         $(this).addClass('active');
         const view = $(this).data('view');
         
-        // 检查是不是开场白模式
         const isOpeningMode = $('#pw-diff-overlay').data('source') === 'opening';
 
         if (isOpeningMode) {
-            // 开场白模式下切换 Tab
             if (view === 'diff') { // 原版本
                 $('#pw-diff-list-view').show();
                 $('#pw-diff-raw-view').hide();
@@ -1166,7 +1167,6 @@ function bindEvents() {
                 $('#pw-diff-raw-view').show();
             }
         } else {
-            // 人设模式下切换 Tab
             if (view === 'diff') {
                 $('#pw-diff-list-view').show();
                 $('#pw-diff-raw-view').hide();
@@ -1283,19 +1283,17 @@ function bindEvents() {
         $(this).find('.pw-diff-textarea').prop('readonly', false).focus();
     });
 
-    $(document).on('click.pw', '#pw-diff-confirm', function () {
+    $(document).on('click.pw', '#pw-diff-confirm', async function () {
+        await forcePaint();
         const source = $('#pw-diff-overlay').data('source');
         const activeTab = $('.pw-diff-tab.active').data('view');
         
         let finalContent = "";
 
         if (source === 'opening') {
-            // 开场白模式逻辑
             if (activeTab === 'diff') {
-                // 原版本 Tab
                 finalContent = $('#pw-diff-list-view').find('textarea').val();
             } else {
-                // 新版本 Tab
                 finalContent = $('#pw-diff-raw-view').find('textarea').val();
             }
             
@@ -1304,7 +1302,6 @@ function bindEvents() {
                 currentRefiningCard.find('.pw-card-refine-box').slideUp();
             }
         } else {
-            // 人设模式逻辑
             if (activeTab === 'raw') {
                 finalContent = $('#pw-diff-raw-textarea').val();
             } else {
@@ -1583,18 +1580,18 @@ const renderHistoryList = () => {
         const previewText = item.data.resultText || '无内容';
         const displayTitle = item.title || "未命名";
         
-        let typeTag = '';
+        let typeLabel = '';
         if (item.data.type === 'opening') {
-            typeTag = '<span style="color:#e0af68; font-size:0.8em; border:1px solid #e0af68; border-radius:3px; padding:0 4px; margin-right:5px;">[开场白]</span>';
+            typeLabel = '<span style="color:#e0af68; font-size:0.8em; border:1px solid #e0af68; border-radius:3px; padding:0 3px; margin-right:5px;">开场白</span>';
         } else {
-            typeTag = '<span style="color:#9ece6a; font-size:0.8em; border:1px solid #9ece6a; border-radius:3px; padding:0 4px; margin-right:5px;">[人设]</span>';
+            typeLabel = '<span style="color:#9ece6a; font-size:0.8em; border:1px solid #9ece6a; border-radius:3px; padding:0 3px; margin-right:5px;">人设</span>';
         }
 
         const $el = $(`
         <div class="pw-history-item">
             <div class="pw-hist-main">
                 <div class="pw-hist-header">
-                    <span class="pw-hist-title-display">${typeTag}${displayTitle}</span>
+                    <span class="pw-hist-title-display">${typeLabel}${displayTitle}</span>
                     <input type="text" class="pw-hist-title-input" value="${displayTitle}" style="display:none;">
                     <div style="display:flex; gap:5px;">
                         <i class="fa-solid fa-pen pw-hist-action-btn edit" title="编辑标题"></i>
