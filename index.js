@@ -142,10 +142,14 @@ let isEditingTemplate = false;
 let pollInterval = null;
 let lastRawResponse = "";
 
+// [Fix] 全局处理锁，防止连点
+let isProcessing = false;
+
 // ============================================================================
 // 工具函数
 // ============================================================================
-const yieldToBrowser = () => new Promise(resolve => setTimeout(resolve, 0));
+// [Fix] 优化 yield
+const yieldToBrowser = () => new Promise(resolve => requestAnimationFrame(resolve));
 const forcePaint = () => new Promise(resolve => setTimeout(resolve, 50));
 
 // ============================================================================
@@ -255,16 +259,18 @@ async function collectActiveWorldInfoContent() {
     return content;
 }
 
-function getCharacterPersonaString() {
+function getActivePersonaDescription() {
+    const domVal = $('#persona_description').val();
+    if (domVal !== undefined && domVal !== null) return domVal;
     const context = getContext();
-    if (!context.characterId && context.characterId !== 0) return "No Character Selected";
-    const char = context.characters[context.characterId];
-    let parts = [];
-    if (char.name) parts.push(`Name: ${char.name}`);
-    if (char.description) parts.push(`Description:\n${char.description}`);
-    if (char.personality) parts.push(`Personality:\n${char.personality}`);
-    if (char.scenario) parts.push(`Scenario:\n${char.scenario}`);
-    return parts.join('\n\n');
+    if (context && context.powerUserSettings) {
+        if (context.powerUserSettings.persona_description) return context.powerUserSettings.persona_description;
+        const selected = context.powerUserSettings.persona_selected;
+        if (selected && context.powerUserSettings.personas && context.powerUserSettings.personas[selected]) {
+            return context.powerUserSettings.personas[selected];
+        }
+    }
+    return "";
 }
 
 // ============================================================================
@@ -314,7 +320,7 @@ function saveState(data) { localStorage.setItem(STORAGE_KEY_STATE, JSON.stringif
 function loadState() { try { return JSON.parse(localStorage.getItem(STORAGE_KEY_STATE)) || {}; } catch { return {}; } }
 
 function injectStyles() {
-    const styleId = 'persona-weaver-css-v45-lite'; 
+    const styleId = 'persona-weaver-css-v46-lite'; 
     if ($(`#${styleId}`).length) return;
     
     const css = `
@@ -372,20 +378,6 @@ function injectStyles() {
     .pw-float-quote-btn:hover { padding-right: 18px; transform: translateX(-2px); }
     `;
     $('<style>').attr('id', styleId).text(css).appendTo('head');
-}
-
-function getActivePersonaDescription() {
-    const domVal = $('#persona_description').val();
-    if (domVal !== undefined && domVal !== null) return domVal;
-    const context = getContext();
-    if (context && context.powerUserSettings) {
-        if (context.powerUserSettings.persona_description) return context.powerUserSettings.persona_description;
-        const selected = context.powerUserSettings.persona_selected;
-        if (selected && context.powerUserSettings.personas && context.powerUserSettings.personas[selected]) {
-            return context.powerUserSettings.personas[selected];
-        }
-    }
-    return "";
 }
 
 async function forceSavePersona(name, description) {
@@ -860,7 +852,7 @@ function bindEvents() {
             el.style.height = (el.scrollHeight) + 'px';
         });
     };
-    $(document).on('input.pw', '.pw-auto-height, #pw-refine-input', function () { adjustHeight(this); });
+    $(document).on('input.pw', '.pw-auto-height, #pw-refine-input, .pw-card-refine-input', function () { adjustHeight(this); });
 
     let saveTimeout;
     const saveCurrentState = () => {
@@ -900,8 +892,17 @@ function bindEvents() {
     // Refine (Persona)
     $(document).on('click.pw', '#pw-btn-refine', async function (e) {
         e.preventDefault();
+        
+        if (isProcessing) return;
+        isProcessing = true;
+
+        console.log("[PW] Refine Clicked");
         const refineReq = $('#pw-refine-input').val();
-        if (!refineReq) return toastr.warning("请输入润色意见");
+        if (!refineReq) {
+            toastr.warning("请输入润色意见");
+            isProcessing = false;
+            return;
+        }
         
         if(!promptsCache.initial) loadData();
 
@@ -989,7 +990,8 @@ function bindEvents() {
             console.error(e);
             toastr.error("润色失败: " + e.message); 
         } finally { 
-            $btn.removeClass('fa-spinner fa-spin').addClass('fa-magic'); 
+            $btn.removeClass('fa-spinner fa-spin').addClass('fa-magic');
+            isProcessing = false;
         }
     });
 
@@ -1035,8 +1037,17 @@ function bindEvents() {
     // Generate Persona
     $(document).on('click.pw', '#pw-btn-gen', async function (e) {
         e.preventDefault();
+        
+        if (isProcessing) return;
+        isProcessing = true;
+
+        console.log("[PW] Gen Clicked");
         const req = $('#pw-request').val();
-        if (!req) return toastr.warning("请输入要求");
+        if (!req) {
+            toastr.warning("请输入要求");
+            isProcessing = false;
+            return;
+        }
         const $btn = $(this);
         $btn.prop('disabled', true).html('<i class="fas fa-spinner fa-spin"></i> 生成中...');
         
@@ -1064,6 +1075,7 @@ function bindEvents() {
             toastr.error("生成失败: " + e.message); 
         } finally { 
             $btn.prop('disabled', false).html('生成设定'); 
+            isProcessing = false;
         }
     });
 
@@ -1234,12 +1246,17 @@ const renderHistoryList = () => {
     loadData();
     const $list = $('#pw-history-list').empty();
     const search = $('#pw-history-search').val().toLowerCase();
+    
+    // [Lite Fix] Filter out opening types
     const filtered = historyCache.filter(item => {
+        if (item.data && item.data.type === 'opening') return false; 
+        
         if (!search) return true;
         const content = (item.data.resultText || "").toLowerCase();
         const title = (item.title || "").toLowerCase();
         return title.includes(search) || content.includes(search);
     });
+    
     if (filtered.length === 0) { $list.html('<div style="text-align:center; opacity:0.6; padding:20px;">暂无草稿</div>'); return; }
 
     filtered.forEach((item, index) => {
