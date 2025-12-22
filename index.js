@@ -194,8 +194,7 @@ const TEXT = {
     TOAST_WI_FAIL: "当前角色未绑定世界书，无法写入",
     TOAST_WI_ERROR: "TavernHelper API 未加载，无法操作世界书",
     TOAST_SNAPSHOT: "已保存至草稿",
-    TOAST_LOAD_CURRENT: "已读取当前酒馆人设内容",
-    TOAST_COPY: "已复制到剪贴板"
+    TOAST_LOAD_CURRENT: "已读取当前酒馆人设内容"
 };
 
 let historyCache = [];
@@ -446,7 +445,9 @@ function injectStyles() {
     .pw-opening-textarea { width: 100%; min-height: 350px; background: rgba(0, 0, 0, 0.15); border: 1px solid var(--SmartThemeBorderColor); border-radius: 6px; color: #eee; padding: 10px; font-family: inherit; font-size: 1.0em; line-height: 1.6; resize: vertical; outline: none; box-sizing: border-box; white-space: pre-wrap; }
     .pw-opening-textarea:focus { background: rgba(0,0,0,0.25); border-color: #e0af68; }
     
-    .pw-opening-actions { display: flex; gap: 10px; justify-content: flex-end; align-items: center; margin-top: 5px; }
+    /* [Req 2] Layout Update for Opening Actions */
+    .pw-opening-actions { display: flex; justify-content: space-between; align-items: center; margin-top: 8px; border-top: 1px dashed var(--SmartThemeBorderColor); padding-top: 8px; }
+    
     .pw-carousel-nav { display: flex; align-items: center; justify-content: center; gap: 15px; margin-top: 15px; padding-top: 10px; border-top: 1px dashed var(--SmartThemeBorderColor); }
     
     .pw-nav-btn { background: rgba(0,0,0,0.3); border: 1px solid var(--SmartThemeBorderColor); color: #ccc; width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all 0.2s; }
@@ -465,7 +466,7 @@ function injectStyles() {
     .pw-input-label { 
         font-size: 1.0em; 
         font-weight: bold; 
-        color: #e0af68; 
+        color: #e0af68; /* Theme gold color */
         margin-bottom: 5px; 
         margin-top: 5px;
         text-align: left; 
@@ -656,21 +657,29 @@ function updateCarousel() {
     $('#pw-next-slide').prop('disabled', currentSlideIndex === totalSlides - 1);
 }
 
-// [Req 2] Split render logic: 
-// 1. From Raw Text (AI Output)
-// 2. From Data Array (Saved State)
-function renderOpeningFromData(dataArray) {
+function renderOpeningResults(rawText) {
     const $container = $('#pw-opening-results').empty();
-    let slidesHtml = '';
-    totalSlides = dataArray.length;
     
-    dataArray.forEach((content, i) => {
+    let matches = [...rawText.matchAll(/```[\s\S]*?```/g)].map(m => m[0].replace(/```[a-z]*\n?/g, '').replace(/```$/, ''));
+    if (!matches || matches.length === 0) {
+        if (rawText.includes('---')) {
+            matches = rawText.split(/---+[^\n]*---+/g).map(s => s.trim()).filter(s => s.length > 10);
+        }
+    }
+    if (!matches || matches.length === 0) {
+        matches = [rawText.trim()];
+    }
+    
+    let slidesHtml = '';
+    totalSlides = matches.length;
+    
+    matches.forEach((content, i) => {
         slidesHtml += `
             <div class="pw-opening-card" data-index="${i}">
                 <div class="pw-opening-header">
                     <span>开场白选项 ${i + 1}</span>
                 </div>
-                <textarea class="pw-opening-textarea">${content}</textarea>
+                <textarea class="pw-opening-textarea">${content.trim()}</textarea>
                 
                 <div class="pw-card-refine-box">
                     <textarea class="pw-card-refine-input" placeholder="对此开场白提出修改意见..."></textarea>
@@ -680,11 +689,15 @@ function renderOpeningFromData(dataArray) {
                 </div>
 
                 <div class="pw-opening-actions">
-                    <button class="pw-mini-btn toggle-refine-btn"><i class="fa-solid fa-pen-fancy"></i> 润色</button>
-                    <!-- [Req 1] Added Copy Button -->
-                    <button class="pw-mini-btn pw-copy-opening-btn"><i class="fa-solid fa-copy"></i> 复制</button>
-                    <button class="pw-mini-btn pw-save-draft-btn"><i class="fa-solid fa-save"></i> 保存</button>
-                    <button class="pw-btn save apply-btn"><i class="fa-solid fa-plus-circle"></i> 加入开场白列表</button>
+                    <div class="pw-footer-group">
+                        <div class="pw-compact-btn danger pw-opening-clear-btn" title="清空"><i class="fa-solid fa-eraser"></i></div>
+                        <div class="pw-compact-btn pw-opening-copy-btn" title="复制"><i class="fa-solid fa-copy"></i></div>
+                        <div class="pw-compact-btn pw-save-draft-btn" title="保存"><i class="fa-solid fa-save"></i></div>
+                    </div>
+                    <div class="pw-footer-group" style="gap: 8px;">
+                        <button class="pw-mini-btn toggle-refine-btn"><i class="fa-solid fa-pen-fancy"></i> 润色</button>
+                        <button class="pw-btn save apply-btn"><i class="fa-solid fa-plus-circle"></i> 加入开场白列表</button>
+                    </div>
                 </div>
             </div>
         `;
@@ -706,21 +719,6 @@ function renderOpeningFromData(dataArray) {
     $container.html(carouselHtml);
     currentSlideIndex = 0;
     updateCarousel();
-}
-
-function renderOpeningResults(rawText) {
-    let matches = [...rawText.matchAll(/```[\s\S]*?```/g)].map(m => m[0].replace(/```[a-z]*\n?/g, '').replace(/```$/, ''));
-    if (!matches || matches.length === 0) {
-        if (rawText.includes('---')) {
-            matches = rawText.split(/---+[^\n]*---+/g).map(s => s.trim()).filter(s => s.length > 10);
-        }
-    }
-    if (!matches || matches.length === 0) {
-        matches = [rawText.trim()];
-    }
-    // Trim each entry
-    matches = matches.map(m => m.trim());
-    renderOpeningFromData(matches);
 }
 
 async function openCreatorPopup() {
@@ -818,8 +816,8 @@ async function openCreatorPopup() {
         <div class="pw-footer">
             <div class="pw-footer-group">
                 <div class="pw-compact-btn danger" id="pw-clear" title="清空"><i class="fa-solid fa-eraser"></i></div>
-                <!-- [Req 1] Persona Copy Button -->
-                <div class="pw-compact-btn" id="pw-copy-persona" title="复制内容"><i class="fa-solid fa-copy"></i></div>
+                <!-- [Req 1] Added Copy Button for Persona -->
+                <div class="pw-compact-btn" id="pw-copy-persona" title="复制"><i class="fa-solid fa-copy"></i></div>
                 <div class="pw-compact-btn" id="pw-snapshot" title="存入草稿 (Drafts)"><i class="fa-solid fa-save"></i></div>
             </div>
             <div class="pw-footer-group" style="flex:1; justify-content:flex-end; gap: 8px;">
@@ -832,8 +830,9 @@ async function openCreatorPopup() {
     <!-- 开场白页面 -->
     <div id="pw-view-opening" class="pw-view">
         <div class="pw-scroll-area">
+            
             <div class="pw-input-label">附加要求</div>
-            <textarea id="pw-opening-req" class="pw-textarea pw-auto-height" placeholder="在此输入场景、时间、地点等要求...">${savedState.openingRequest || ''}</textarea>
+            <textarea id="pw-opening-req" class="pw-textarea pw-auto-height" placeholder="在此输入场景、时间、地点等要求..."></textarea>
             <button id="pw-btn-gen-opening" class="pw-btn gen" style="margin-top:10px;">生成开场白</button>
             <div id="pw-opening-results" class="pw-opening-result-container"></div>
         </div>
@@ -927,11 +926,6 @@ async function openCreatorPopup() {
     renderTemplateChips();
     renderWiBooks();
 
-    // [Req 2] Load saved opening data
-    if (savedState.openingData && Array.isArray(savedState.openingData) && savedState.openingData.length > 0) {
-        renderOpeningFromData(savedState.openingData);
-    }
-
     $('.pw-auto-height').each(function() {
         this.style.height = 'auto';
         this.style.height = (this.scrollHeight) + 'px';
@@ -960,26 +954,9 @@ function bindEvents() {
     $(document).on('click.pw', '#pw-prev-slide', () => { if (currentSlideIndex > 0) { currentSlideIndex--; updateCarousel(); } });
     $(document).on('click.pw', '#pw-next-slide', () => { if (currentSlideIndex < totalSlides - 1) { currentSlideIndex++; updateCarousel(); } });
 
-    // --- 复制按钮 (人设) [Req 1] ---
-    $(document).on('click.pw', '#pw-copy-persona', function() {
-        const text = $('#pw-result-text').val();
-        if(text) {
-            navigator.clipboard.writeText(text);
-            toastr.success(TEXT.TOAST_COPY);
-        }
-    });
-
-    // --- 复制按钮 (开场白) [Req 1] ---
-    $(document).on('click.pw', '.pw-copy-opening-btn', function() {
-        const content = $(this).closest('.pw-opening-card').find('.pw-opening-textarea').val();
-        if(content) {
-            navigator.clipboard.writeText(content);
-            toastr.success(TEXT.TOAST_COPY);
-        }
-    });
-
     // --- 开场白卡片内部按钮事件 ---
-    // Save Draft
+    
+    // [Req 2] Save Draft
     $(document).on('click.pw', '.pw-save-draft-btn', function() {
         const content = $(this).closest('.pw-opening-card').find('.pw-opening-textarea').val();
         const req = $('#pw-opening-req').val();
@@ -990,6 +967,20 @@ function bindEvents() {
             data: { name: "Opening", resultText: content, type: 'opening' } 
         });
         toastr.success(TEXT.TOAST_SNAPSHOT);
+    });
+
+    // [Req 2] Copy Opening
+    $(document).on('click.pw', '.pw-opening-copy-btn', function() {
+        const content = $(this).closest('.pw-opening-card').find('.pw-opening-textarea').val();
+        navigator.clipboard.writeText(content);
+        toastr.success("开场白已复制");
+    });
+
+    // [Req 2] Clear Opening
+    $(document).on('click.pw', '.pw-opening-clear-btn', function() {
+        if(confirm("确定清空此开场白内容？")) {
+            $(this).closest('.pw-opening-card').find('.pw-opening-textarea').val('').trigger('input');
+        }
     });
 
     // Apply to Alternate Greetings
@@ -1194,23 +1185,14 @@ function bindEvents() {
     };
     $(document).on('input.pw', '.pw-auto-height, #pw-refine-input, .pw-card-refine-input', function () { adjustHeight(this); });
 
-    // [Req 2] Enhanced Save Logic to capture Opening Data
     let saveTimeout;
     const saveCurrentState = () => {
         clearTimeout(saveTimeout);
         saveTimeout = setTimeout(() => {
-            // Capture all current opening texts
-            const currentOpeningData = [];
-            $('.pw-opening-textarea').each(function() {
-                currentOpeningData.push($(this).val());
-            });
-
             saveState({
                 request: $('#pw-request').val(),
                 resultText: $('#pw-result-text').val(),
                 hasResult: $('#pw-result-area').is(':visible'),
-                openingRequest: $('#pw-opening-req').val(),
-                openingData: currentOpeningData, // Save the array
                 localConfig: {
                     apiSource: $('#pw-api-source').val(),
                     indepApiUrl: $('#pw-api-url').val(),
@@ -1221,8 +1203,7 @@ function bindEvents() {
             });
         }, 500);
     };
-    // Listen to changes in opening textarea
-    $(document).on('input.pw change.pw', '#pw-request, #pw-result-text, #pw-wi-toggle, .pw-input, .pw-select, .pw-opening-textarea, #pw-opening-req', saveCurrentState);
+    $(document).on('input.pw change.pw', '#pw-request, #pw-result-text, #pw-wi-toggle, .pw-input, .pw-select', saveCurrentState);
 
     // --- Diff View Logic ---
     $(document).on('click.pw', '.pw-diff-tab', function () {
@@ -1377,8 +1358,6 @@ function bindEvents() {
             
             if (currentRefiningCard) {
                 currentRefiningCard.find('.pw-opening-textarea').val(finalContent);
-                // Trigger save so new content is persisted
-                saveCurrentState();
                 currentRefiningCard.find('.pw-card-refine-box').slideUp();
             }
         } else {
@@ -1520,6 +1499,13 @@ function bindEvents() {
         }
     });
 
+    // [Req 1] Persona Copy Button
+    $(document).on('click.pw', '#pw-copy-persona', function() {
+        const content = $('#pw-result-text').val();
+        navigator.clipboard.writeText(content);
+        toastr.success("人设内容已复制");
+    });
+
     // Save Draft (Persona)
     $(document).on('click.pw', '#pw-snapshot', function () {
         const text = $('#pw-result-text').val();
@@ -1528,7 +1514,7 @@ function bindEvents() {
         saveHistory({ 
             request: req || "无", 
             timestamp: new Date().toLocaleString(), 
-            title: "", // Let default logic handle it
+            title: "", 
             data: { name: "Persona", resultText: text || "(无)", type: 'persona' } 
         });
         toastr.success(TEXT.TOAST_SNAPSHOT);
