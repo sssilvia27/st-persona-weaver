@@ -389,7 +389,7 @@ function saveState(data) { localStorage.setItem(STORAGE_KEY_STATE, JSON.stringif
 function loadState() { try { return JSON.parse(localStorage.getItem(STORAGE_KEY_STATE)) || {}; } catch { return {}; } }
 
 function injectStyles() {
-    const styleId = 'persona-weaver-css-v45'; // Bumped version
+    const styleId = 'persona-weaver-css-v45'; // Version bumped
     if ($(`#${styleId}`).length) return;
     
     const css = `
@@ -445,8 +445,8 @@ function injectStyles() {
     .pw-opening-textarea { width: 100%; min-height: 350px; background: rgba(0, 0, 0, 0.15); border: 1px solid var(--SmartThemeBorderColor); border-radius: 6px; color: #eee; padding: 10px; font-family: inherit; font-size: 1.0em; line-height: 1.6; resize: vertical; outline: none; box-sizing: border-box; white-space: pre-wrap; }
     .pw-opening-textarea:focus { background: rgba(0,0,0,0.25); border-color: #e0af68; }
     
-    /* [Req 1] Updated Opening Actions Layout */
-    .pw-opening-actions { display: flex; justify-content: space-between; align-items: center; margin-top: 8px; }
+    /* [Req 2] Adjusted actions layout to match Persona */
+    .pw-opening-actions { display: flex; justify-content: space-between; align-items: center; margin-top: 5px; }
     
     .pw-carousel-nav { display: flex; align-items: center; justify-content: center; gap: 15px; margin-top: 15px; padding-top: 10px; border-top: 1px dashed var(--SmartThemeBorderColor); }
     
@@ -673,7 +673,6 @@ function renderOpeningResults(rawText) {
     let slidesHtml = '';
     totalSlides = matches.length;
     
-    // [Req 2] Layout update for Opening Card Actions
     matches.forEach((content, i) => {
         slidesHtml += `
             <div class="pw-opening-card" data-index="${i}">
@@ -691,10 +690,10 @@ function renderOpeningResults(rawText) {
 
                 <div class="pw-opening-actions">
                     <div class="pw-footer-group">
-                        <div class="pw-compact-btn pw-copy-opening-btn" title="复制"><i class="fa-solid fa-copy"></i></div>
+                        <div class="pw-compact-btn copy-opening-btn" title="复制"><i class="fa-solid fa-copy"></i></div>
                         <div class="pw-compact-btn pw-save-draft-btn" title="保存"><i class="fa-solid fa-save"></i></div>
                     </div>
-                    <div class="pw-footer-group" style="justify-content: flex-end;">
+                    <div class="pw-footer-group">
                         <button class="pw-mini-btn toggle-refine-btn"><i class="fa-solid fa-pen-fancy"></i> 润色</button>
                         <button class="pw-btn save apply-btn"><i class="fa-solid fa-plus-circle"></i> 加入开场白列表</button>
                     </div>
@@ -816,8 +815,7 @@ async function openCreatorPopup() {
         <div class="pw-footer">
             <div class="pw-footer-group">
                 <div class="pw-compact-btn danger" id="pw-clear" title="清空"><i class="fa-solid fa-eraser"></i></div>
-                <!-- [Req 1] Added Copy Button for Persona -->
-                <div class="pw-compact-btn" id="pw-copy-persona" title="复制内容"><i class="fa-solid fa-copy"></i></div>
+                <div class="pw-compact-btn" id="pw-copy-persona" title="复制"><i class="fa-solid fa-copy"></i></div>
                 <div class="pw-compact-btn" id="pw-snapshot" title="保存"><i class="fa-solid fa-save"></i></div>
             </div>
             <div class="pw-footer-group" style="flex:1; justify-content:flex-end; gap: 8px;">
@@ -830,6 +828,7 @@ async function openCreatorPopup() {
     <!-- 开场白页面 -->
     <div id="pw-view-opening" class="pw-view">
         <div class="pw-scroll-area">
+            
             <div class="pw-input-label">附加要求</div>
             <textarea id="pw-opening-req" class="pw-textarea pw-auto-height" placeholder="在此输入场景、时间、地点等要求..."></textarea>
             <button id="pw-btn-gen-opening" class="pw-btn gen" style="margin-top:10px;">生成开场白</button>
@@ -949,18 +948,26 @@ function bindEvents() {
 
     console.log("[PW] Binding Events...");
 
+    // --- 轮播图控制事件 ---
     $(document).on('click.pw', '#pw-prev-slide', () => { if (currentSlideIndex > 0) { currentSlideIndex--; updateCarousel(); } });
     $(document).on('click.pw', '#pw-next-slide', () => { if (currentSlideIndex < totalSlides - 1) { currentSlideIndex++; updateCarousel(); } });
 
-    // [Req 2] Opening Action: Copy
-    $(document).on('click.pw', '.pw-copy-opening-btn', function() {
-        const content = $(this).closest('.pw-opening-card').find('.pw-opening-textarea').val();
-        if (!content) return toastr.warning("内容为空");
-        navigator.clipboard.writeText(content);
-        toastr.success("开场白已复制");
+    // --- 复制功能 ---
+    $(document).on('click.pw', '#pw-copy-persona', function() {
+        const text = $('#pw-result-text').val();
+        if(!text) return toastr.warning("内容为空");
+        navigator.clipboard.writeText(text);
+        toastr.success("已复制人设");
     });
 
-    // Opening Action: Save Draft
+    $(document).on('click.pw', '.copy-opening-btn', function() {
+        const text = $(this).closest('.pw-opening-card').find('.pw-opening-textarea').val();
+        navigator.clipboard.writeText(text);
+        toastr.success("已复制开场白");
+    });
+
+    // --- 开场白卡片内部按钮事件 ---
+    // Save Draft
     $(document).on('click.pw', '.pw-save-draft-btn', function() {
         const content = $(this).closest('.pw-opening-card').find('.pw-opening-textarea').val();
         const req = $('#pw-opening-req').val();
@@ -999,7 +1006,7 @@ function bindEvents() {
         $(this).closest('.pw-opening-card').find('.pw-card-refine-box').slideToggle();
     });
 
-    // Confirm Refine (Opening)
+    // Confirm Refine (Opening) -> Diff View
     $(document).on('click.pw', '.refine-confirm-btn', async function() {
         console.log("[PW] Opening Refine Clicked");
         const $card = $(this).closest('.pw-opening-card');
@@ -1478,14 +1485,6 @@ function bindEvents() {
         await forceSavePersona(name, content);
         toastr.success(TEXT.TOAST_SAVE_SUCCESS(name));
         $('.popup_close').click();
-    });
-
-    // [Req 1] Persona Action: Copy
-    $(document).on('click.pw', '#pw-copy-persona', function() {
-        const text = $('#pw-result-text').val();
-        if (!text) return toastr.warning("没有内容可复制");
-        navigator.clipboard.writeText(text);
-        toastr.success("人设已复制");
     });
 
     $(document).on('click.pw', '#pw-clear', function () {
