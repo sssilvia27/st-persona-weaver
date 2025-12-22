@@ -1,11 +1,11 @@
 import { extension_settings, getContext } from "../../../extensions.js";
-import { saveSettingsDebounced, callPopup, getRequestHeaders } from "../../../../script.js";
+import { saveSettingsDebounced, callPopup, getRequestHeaders, saveChat, reloadCurrentChat, saveCharacterDebounced } from "../../../../script.js";
 
 const extensionName = "st-persona-weaver";
 const STORAGE_KEY_HISTORY = 'pw_history_v20';
 const STORAGE_KEY_STATE = 'pw_state_v20';
 const STORAGE_KEY_TEMPLATE = 'pw_template_v2';
-const STORAGE_KEY_PROMPTS = 'pw_prompts_v3'; // 保持 v3，不强制覆盖用户数据
+const STORAGE_KEY_PROMPTS = 'pw_prompts_v6'; 
 const BUTTON_ID = 'pw_persona_tool_btn';
 
 const defaultYamlTemplate =
@@ -72,6 +72,7 @@ NSFW:
   性癖好:
   禁忌底线:`;
 
+// --- Prompt 定义 ---
 const defaultSystemPromptInitial =
 `Creating User Persona for {{user}} (Target: {{char}}).
 {{wi}}
@@ -89,7 +90,6 @@ Generate character details strictly in structured YAML format.
 3. Do NOT output status bars, progress bars, or Chain of Thought/Reasoning/Thinking process.
 4. Response: ONLY the YAML content.`;
 
-// 【关键修改】润色 Prompt 更新：加入 {{tags}} 并明确迁移指令
 const defaultSystemPromptRefine =
 `You are an expert Data Converter and Persona Editor.
 Optimizing User Persona for {{char}}.
@@ -127,20 +127,23 @@ const TEXT = {
     TOAST_WI_SUCCESS: (book) => `已写入世界书: ${book}`,
     TOAST_WI_FAIL: "当前角色未绑定世界书，无法写入",
     TOAST_WI_ERROR: "TavernHelper API 未加载，无法操作世界书",
-    TOAST_SNAPSHOT: "已存入草稿箱",
+    TOAST_SNAPSHOT: "已保存至草稿",
     TOAST_LOAD_CURRENT: "已读取当前酒馆人设内容"
 };
 
 let historyCache = [];
 let currentTemplate = defaultYamlTemplate;
-let promptsCache = { initial: defaultSystemPromptInitial, refine: defaultSystemPromptRefine };
+let promptsCache = { 
+    initial: defaultSystemPromptInitial, 
+    refine: defaultSystemPromptRefine 
+};
 let availableWorldBooks = [];
 let isEditingTemplate = false;
 let pollInterval = null;
 let lastRawResponse = "";
 
 // ============================================================================
-// 工具函数：强制让渡主线程，防止 UI 卡死
+// 工具函数
 // ============================================================================
 const yieldToBrowser = () => new Promise(resolve => setTimeout(resolve, 0));
 const forcePaint = () => new Promise(resolve => setTimeout(resolve, 50));
@@ -158,7 +161,6 @@ function parseYamlToBlocks(text) {
         let lines = cleanText.split('\n');
 
         const topLevelKeyRegex = /^\s*([^:\s\-]+?)\s*[:：]/;
-        
         let topKeysIndices = [];
         for (let i = 0; i < lines.length; i++) {
             const line = lines[i];
@@ -170,10 +172,8 @@ function parseYamlToBlocks(text) {
         if (topKeysIndices.length === 1 && lines.length > 2) {
             const firstLineIndex = topKeysIndices[0];
             const remainingLines = lines.slice(firstLineIndex + 1);
-            
             let minIndent = Infinity;
             let hasContent = false;
-            
             for (const l of remainingLines) {
                 if (l.trim().length > 0) {
                     const indent = l.search(/\S|$/);
@@ -181,7 +181,6 @@ function parseYamlToBlocks(text) {
                     hasContent = true;
                 }
             }
-
             if (hasContent && minIndent > 0 && minIndent !== Infinity) {
                 lines = remainingLines.map(l => l.length >= minIndent ? l.substring(minIndent) : l);
             }
@@ -195,18 +194,12 @@ function parseYamlToBlocks(text) {
                 let valuePart = "";
                 const firstLine = currentBuffer[0];
                 const match = firstLine.match(topLevelKeyRegex);
-                
                 if (match) {
                     let inlineContent = firstLine.substring(match[0].length).trim();
                     let blockContent = currentBuffer.slice(1).join('\n');
-                    
-                    if (inlineContent && blockContent) {
-                        valuePart = inlineContent + '\n' + blockContent;
-                    } else if (inlineContent) {
-                        valuePart = inlineContent;
-                    } else {
-                        valuePart = blockContent;
-                    }
+                    if (inlineContent && blockContent) valuePart = inlineContent + '\n' + blockContent;
+                    else if (inlineContent) valuePart = inlineContent;
+                    else valuePart = blockContent;
                 } else {
                     valuePart = currentBuffer.join('\n');
                 }
@@ -217,23 +210,17 @@ function parseYamlToBlocks(text) {
         lines.forEach((line) => {
             const isTopLevel = (line.length < 200) && topLevelKeyRegex.test(line) && !line.trim().startsWith('-');
             const indentLevel = line.search(/\S|$/);
-
             if (isTopLevel && indentLevel <= 1) {
                 flushBuffer();
                 const match = line.match(topLevelKeyRegex);
                 currentKey = match[1].trim();
                 currentBuffer = [line];
             } else {
-                if (currentKey) {
-                    currentBuffer.push(line);
-                }
+                if (currentKey) { currentBuffer.push(line); }
             }
         });
-
         flushBuffer();
-    } catch (e) {
-        console.error("[PW] Parse Error:", e);
-    }
+    } catch (e) { console.error("[PW] Parse Error:", e); }
     return map;
 }
 
@@ -251,32 +238,33 @@ async function collectActiveWorldInfoContent() {
         const boundBooks = await getContextWorldBooks();
         const manualBooks = window.pwExtraBooks || [];
         const allBooks = [...new Set([...boundBooks, ...manualBooks])];
-        
-        if (allBooks.length > 20) {
-            console.warn("[PW] Too many world books, limiting to first 20.");
-            allBooks.length = 20;
-        }
+        if (allBooks.length > 20) allBooks.length = 20;
 
         for (const bookName of allBooks) {
             await yieldToBrowser();
             try {
                 const entries = await getWorldBookEntries(bookName);
                 const enabledEntries = entries.filter(e => e.enabled);
-                
                 if (enabledEntries.length > 0) {
                     content.push(`\n--- World Book: ${bookName} ---`);
-                    enabledEntries.forEach(e => {
-                        content.push(`[Entry: ${e.displayName}]\n${e.content}`);
-                    });
+                    enabledEntries.forEach(e => content.push(`[Entry: ${e.displayName}]\n${e.content}`));
                 }
-            } catch (err) {
-                console.warn(`[PW] Failed to read book ${bookName}`, err);
-            }
+            } catch (err) { }
         }
-    } catch (e) { 
-        console.error("Error collecting WI content:", e); 
-    }
+    } catch (e) { }
     return content;
+}
+
+function getCharacterPersonaString() {
+    const context = getContext();
+    if (!context.characterId && context.characterId !== 0) return "No Character Selected";
+    const char = context.characters[context.characterId];
+    let parts = [];
+    if (char.name) parts.push(`Name: ${char.name}`);
+    if (char.description) parts.push(`Description:\n${char.description}`);
+    if (char.personality) parts.push(`Personality:\n${char.personality}`);
+    if (char.scenario) parts.push(`Scenario:\n${char.scenario}`);
+    return parts.join('\n\n');
 }
 
 // ============================================================================
@@ -287,18 +275,18 @@ function loadData() {
     try { historyCache = JSON.parse(localStorage.getItem(STORAGE_KEY_HISTORY)) || []; } catch { historyCache = []; }
     try {
         const t = localStorage.getItem(STORAGE_KEY_TEMPLATE);
-        if (!t || t.length < 50) { 
-             currentTemplate = defaultYamlTemplate;
-        } else {
-             currentTemplate = t;
-        }
+        if (!t || t.length < 50) currentTemplate = defaultYamlTemplate;
+        else currentTemplate = t;
     } catch { currentTemplate = defaultYamlTemplate; }
     try {
-        // 尝试加载用户保存的 Prompt
         const p = JSON.parse(localStorage.getItem(STORAGE_KEY_PROMPTS));
-        // 如果用户有保存，就用用户的，否则用默认（此时默认已经更新为包含 {{tags}} 的版本）
-        promptsCache = { ...{ initial: defaultSystemPromptInitial, refine: defaultSystemPromptRefine }, ...p };
-    } catch { promptsCache = { initial: defaultSystemPromptInitial, refine: defaultSystemPromptRefine }; }
+        promptsCache = { 
+            ...{ initial: defaultSystemPromptInitial, refine: defaultSystemPromptRefine }, 
+            ...p 
+        };
+    } catch { 
+        promptsCache = { initial: defaultSystemPromptInitial, refine: defaultSystemPromptRefine }; 
+    }
 }
 
 function saveData() {
@@ -309,6 +297,14 @@ function saveData() {
 
 function saveHistory(item) {
     const limit = extension_settings[extensionName]?.historyLimit || 50;
+    
+    if (!item.title || item.title === "未命名") {
+        const context = getContext();
+        const userName = $('.persona_name').first().text().trim() || "User";
+        const charName = context.characters[context.characterId]?.name || "Char";
+        item.title = `${userName} & ${charName}`;
+    }
+
     historyCache.unshift(item);
     if (historyCache.length > limit) historyCache = historyCache.slice(0, limit);
     saveData();
@@ -318,117 +314,62 @@ function saveState(data) { localStorage.setItem(STORAGE_KEY_STATE, JSON.stringif
 function loadState() { try { return JSON.parse(localStorage.getItem(STORAGE_KEY_STATE)) || {}; } catch { return {}; } }
 
 function injectStyles() {
-    const styleId = 'persona-weaver-css-v38'; 
+    const styleId = 'persona-weaver-css-v45-lite'; 
     if ($(`#${styleId}`).length) return;
     
     const css = `
     #pw-api-model-select { flex: 1; width: 0; min-width: 0; text-overflow: ellipsis; overflow: hidden; white-space: nowrap; }
     
-    .pw-load-btn {
-        font-size: 0.85em;
-        background: linear-gradient(135deg, rgba(224, 175, 104, 0.2), rgba(224, 175, 104, 0.1));
-        border: 1px solid #e0af68;
-        padding: 4px 12px;
-        border-radius: 4px;
-        cursor: pointer;
-        color: #e0af68;
-        font-weight: bold;
-        margin-left: auto;
-        display: inline-flex; align-items: center;
-        transition: all 0.2s;
-        box-shadow: 0 2px 5px rgba(0,0,0,0.2);
-    }
-    .pw-load-btn:hover {
-        background: rgba(224, 175, 104, 0.3);
-        transform: translateY(-1px);
-        box-shadow: 0 4px 8px rgba(0,0,0,0.3);
-        color: #fff;
-    }
+    .pw-load-btn { font-size: 0.85em; background: linear-gradient(135deg, rgba(224, 175, 104, 0.2), rgba(224, 175, 104, 0.1)); border: 1px solid #e0af68; padding: 4px 12px; border-radius: 4px; cursor: pointer; color: #e0af68; font-weight: bold; margin-left: auto; display: inline-flex; align-items: center; transition: all 0.2s; box-shadow: 0 2px 5px rgba(0,0,0,0.2); }
+    .pw-load-btn:hover { background: rgba(224, 175, 104, 0.3); transform: translateY(-1px); box-shadow: 0 4px 8px rgba(0,0,0,0.3); color: #fff; }
 
-    .pw-template-textarea {
-        background: rgba(0, 0, 0, 0.5) !important;
-        color: #eee !important;
-        font-family: 'Consolas', 'Monaco', monospace;
-        line-height: 1.4;
-        height: 350px !important;
-        border-radius: 0 0 6px 6px !important;
-        border-top: none !important;
-    }
-    .pw-shortcut-btn {
-        display: flex; flex-direction: column; align-items: center; justify-content: center;
-        padding: 4px 10px; height: auto; gap: 2px; min-width: 40px;
-    }
+    .pw-template-textarea { background: rgba(0, 0, 0, 0.5) !important; color: #eee !important; font-family: 'Consolas', 'Monaco', monospace; line-height: 1.4; height: 350px !important; border-radius: 0 0 6px 6px !important; border-top: none !important; }
+    
+    .pw-shortcut-btn { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 4px 10px; height: auto; gap: 2px; min-width: 40px; }
     .pw-shortcut-btn span:first-child { font-size: 0.8em; opacity: 0.8; }
     .pw-shortcut-btn span.code { font-weight: bold; font-family: monospace; color: #e0af68; font-size: 1.1em; }
 
     .pw-var-btns { gap: 6px; }
-    .pw-var-btn {
-        display: flex; flex-direction: column; align-items: center; justify-content: center;
-        padding: 4px 10px; height: auto; gap: 0;
-        border-color: rgba(128,128,128,0.4);
-    }
+    .pw-var-btn { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 4px 10px; height: auto; gap: 0; border-color: rgba(128,128,128,0.4); }
     .pw-var-btn span:first-child { font-weight: bold; font-size: 0.8em; }
     .pw-var-btn span.code { font-size: 0.75em; opacity: 0.7; font-family: monospace; }
 
-    #pw-api-url {
-        background-color: rgba(0, 0, 0, 0.2) !important;
-        border: 1px solid var(--SmartThemeBorderColor) !important;
-        color: var(--smart-theme-body-color) !important;
-    }
+    #pw-api-url { background-color: rgba(0, 0, 0, 0.2) !important; border: 1px solid var(--SmartThemeBorderColor) !important; color: var(--smart-theme-body-color) !important; }
     .pw-auto-height { min-height: 80px; max-height: 500px; overflow-y: auto; }
+    
+    #pw-request { transition: none !important; } 
 
-    #pw-history-clear-all {
-        background: transparent; border: none; color: #ff6b6b; 
-        font-size: 0.85em; opacity: 0.6; padding: 5px; width: auto; 
-        margin: 10px auto; text-decoration: underline;
-    }
+    #pw-history-clear-all { background: transparent; border: none; color: #ff6b6b; font-size: 0.85em; opacity: 0.6; padding: 5px; width: auto; margin: 10px auto; text-decoration: underline; }
     #pw-history-clear-all:hover { opacity: 1; background: transparent; transform: none; }
 
-    .pw-diff-row {
-        background: #1a1a1a; border: 1px solid #333; border-radius: 8px; 
-        padding: 10px; display: flex; flex-direction: column; gap: 8px;
-        margin-bottom: 10px;
-    }
-    .pw-diff-attr-name { 
-        font-weight: bold; color: #9ece6a; font-size: 1em; 
-        padding-bottom: 5px; border-bottom: 1px solid #333; margin-bottom: 5px;
-    }
-    .pw-diff-cards { display: flex; gap: 10px; }
-    .pw-diff-card {
-        flex: 1; display: flex; flex-direction: column;
-        border: 2px solid transparent; border-radius: 6px;
-        background: #222; overflow: hidden; transition: all 0.2s;
-        cursor: pointer; opacity: 0.6; position: relative;
-    }
-    .pw-diff-card.selected {
-        border-color: #9ece6a; opacity: 1; background: #252525;
-        box-shadow: 0 0 10px rgba(158, 206, 106, 0.1);
-    }
-    .pw-diff-card:not(.selected):hover { opacity: 0.8; }
-    .pw-diff-card.single-view {
-        flex: 1; opacity: 1; background: rgba(158, 206, 106, 0.05); 
-        border-color: #9ece6a; cursor: text;
-    }
+    .pw-diff-row { background: #1a1a1a; border: 1px solid #333; border-radius: 8px; padding: 10px; display: flex; flex-direction: column; gap: 8px; margin-bottom: 10px; }
+    .pw-diff-attr-name { font-weight: bold; color: #9ece6a; font-size: 1em; padding-bottom: 5px; border-bottom: 1px solid #333; margin-bottom: 5px; }
     
-    .pw-diff-label {
-        font-size: 0.75em; padding: 4px 8px; background: rgba(0,0,0,0.3);
-        color: #aaa; text-transform: uppercase; font-weight: bold;
-    }
+    .pw-diff-cards { display: flex; gap: 10px; }
+    .pw-diff-card { flex: 1; display: flex; flex-direction: column; border: 2px solid transparent; border-radius: 6px; background: #222; overflow: hidden; transition: all 0.2s; cursor: pointer; opacity: 0.6; position: relative; }
+    .pw-diff-card.selected { border-color: #9ece6a; opacity: 1; background: #252525; box-shadow: 0 0 10px rgba(158, 206, 106, 0.1); }
+    .pw-diff-card:not(.selected):hover { opacity: 0.8; }
+    .pw-diff-card.single-view { flex: 1; opacity: 1; background: rgba(158, 206, 106, 0.05); border-color: #9ece6a; cursor: text; }
+    
+    .pw-diff-label { font-size: 0.75em; padding: 4px 8px; background: rgba(0,0,0,0.3); color: #aaa; text-transform: uppercase; font-weight: bold; }
     .pw-diff-card.selected .pw-diff-label { color: #9ece6a; background: rgba(158, 206, 106, 0.1); }
     
-    .pw-diff-textarea {
-        flex: 1; width: 100%; background: transparent; border: none;
-        color: #eee; padding: 8px; font-family: inherit; font-size: 0.95em;
-        resize: none; outline: none; line-height: 1.5; min-height: 80px;
-        box-sizing: border-box;
-    }
+    .pw-diff-textarea { flex: 1; width: 100%; background: transparent; border: none; color: #eee; padding: 8px; font-family: inherit; font-size: 0.95em; resize: none; outline: none; line-height: 1.5; min-height: 80px; box-sizing: border-box; }
     .pw-diff-card:not(.selected) .pw-diff-textarea { color: #888; pointer-events: none; }
     
-    @media screen and (max-width: 600px) {
-        .pw-diff-cards { flex-direction: column; }
-    }
+    @media screen and (max-width: 600px) { .pw-diff-cards { flex-direction: column; } }
     
     .pw-btn.wi { background: linear-gradient(135deg, rgba(122, 162, 247, 0.2), rgba(0, 0, 0, 0)); border-color: #7aa2f7; color: #7aa2f7; }
+
+    .pw-tab-sub { display: block; font-size: 0.75em; opacity: 0.6; font-weight: normal; margin-top: 2px; text-align: center; }
+    .pw-diff-tab { display: flex; flex-direction: column; align-items: center; justify-content: center; line-height: 1.1; }
+
+    .pw-header-subtitle { font-size: 0.65em; opacity: 0.6; font-weight: normal; margin-left: 10px; color: #ccc; }
+    
+    .pw-diff-raw-textarea { min-height: 350px !important; }
+
+    .pw-float-quote-btn { position: fixed; top: calc(20% + 60px); right: 0; background: linear-gradient(135deg, #e0af68, #d08f40); color: #1a1a1a; padding: 8px 12px; border-radius: 20px 0 0 20px; font-weight: bold; font-size: 0.85em; box-shadow: -2px 2px 8px rgba(0,0,0,0.4); cursor: pointer; z-index: 9999; display: none; align-items: center; gap: 4px; border: 1px solid rgba(255,255,255,0.3); border-right: none; backdrop-filter: blur(5px); }
+    .pw-float-quote-btn:hover { padding-right: 18px; transform: translateX(-2px); }
     `;
     $('<style>').attr('id', styleId).text(css).appendTo('head');
 }
@@ -436,12 +377,9 @@ function injectStyles() {
 function getActivePersonaDescription() {
     const domVal = $('#persona_description').val();
     if (domVal !== undefined && domVal !== null) return domVal;
-
     const context = getContext();
     if (context && context.powerUserSettings) {
-        if (context.powerUserSettings.persona_description) {
-            return context.powerUserSettings.persona_description;
-        }
+        if (context.powerUserSettings.persona_description) return context.powerUserSettings.persona_description;
         const selected = context.powerUserSettings.persona_selected;
         if (selected && context.powerUserSettings.personas && context.powerUserSettings.personas[selected]) {
             return context.powerUserSettings.personas[selected];
@@ -455,62 +393,41 @@ async function forceSavePersona(name, description) {
     if (!context.powerUserSettings.personas) context.powerUserSettings.personas = {};
     context.powerUserSettings.personas[name] = description;
     context.powerUserSettings.persona_selected = name;
-
     const $nameInput = $('#your_name');
     const $descInput = $('#persona_description');
     if ($nameInput.length) $nameInput.val(name).trigger('input').trigger('change');
     if ($descInput.length) $descInput.val(description).trigger('input').trigger('change');
-
     const $h5Name = $('h5#your_name');
     if ($h5Name.length) $h5Name.text(name);
-
     await saveSettingsDebounced();
     return true;
 }
 
 async function syncToWorldInfoViaHelper(userName, content) {
-    if (!window.TavernHelper) {
-        toastr.error(TEXT.TOAST_WI_ERROR);
-        return;
-    }
+    if (!window.TavernHelper) return toastr.error(TEXT.TOAST_WI_ERROR);
     let targetBook = null;
     try {
         const charBooks = window.TavernHelper.getCharWorldbookNames('current');
         if (charBooks && charBooks.primary) targetBook = charBooks.primary;
         else if (charBooks && charBooks.additional && charBooks.additional.length > 0) targetBook = charBooks.additional[0];
     } catch (e) { }
-
     if (!targetBook) {
         const boundBooks = await getContextWorldBooks();
         if (boundBooks.length > 0) targetBook = boundBooks[0];
     }
-
-    if (!targetBook) {
-        toastr.warning(TEXT.TOAST_WI_FAIL);
-        return;
-    }
-
+    if (!targetBook) return toastr.warning(TEXT.TOAST_WI_FAIL);
     try {
         const entries = await window.TavernHelper.getLorebookEntries(targetBook);
         const entryComment = `User: ${userName}`;
         const existingEntry = entries.find(e => e.comment === entryComment);
-
         if (existingEntry) {
-            await window.TavernHelper.setLorebookEntries(targetBook, [{
-                uid: existingEntry.uid, content: content, enabled: true
-            }]);
+            await window.TavernHelper.setLorebookEntries(targetBook, [{ uid: existingEntry.uid, content: content, enabled: true }]);
         } else {
-            const newEntry = {
-                comment: entryComment, keys: [userName, "User"], content: content,
-                enabled: true, selective: true, constant: false, position: { type: 'before_character_definition' }
-            };
+            const newEntry = { comment: entryComment, keys: [userName, "User"], content: content, enabled: true, selective: true, constant: false, position: { type: 'before_character_definition' } };
             await window.TavernHelper.createLorebookEntries(targetBook, [newEntry]);
         }
         toastr.success(TEXT.TOAST_WI_SUCCESS(targetBook));
-    } catch (e) {
-        console.error("[PW] TavernHelper Sync Error:", e);
-        toastr.error("写入世界书失败");
-    }
+    } catch (e) { toastr.error("写入世界书失败"); }
 }
 
 async function loadAvailableWorldBooks() {
@@ -549,10 +466,7 @@ async function getWorldBookEntries(bookName) {
     if (window.TavernHelper && typeof window.TavernHelper.getLorebookEntries === 'function') {
         try {
             const entries = await window.TavernHelper.getLorebookEntries(bookName);
-            return entries.map(e => ({
-                uid: e.uid, displayName: e.comment || (Array.isArray(e.keys) ? e.keys.join(', ') : e.keys) || "无标题",
-                content: e.content || "", enabled: e.enabled
-            }));
+            return entries.map(e => ({ uid: e.uid, displayName: e.comment || (Array.isArray(e.keys) ? e.keys.join(', ') : e.keys) || "无标题", content: e.content || "", enabled: e.enabled }));
         } catch (e) { }
     }
     return [];
@@ -564,16 +478,15 @@ async function runGeneration(data, apiConfig) {
     const charName = (charId !== undefined) ? context.characters[charId].name : "None";
     const currentName = $('.persona_name').first().text().trim() || $('h5#your_name').text().trim() || "User";
 
-    if (!promptsCache || !promptsCache.initial) {
-        loadData(); 
-    }
+    if (!promptsCache || !promptsCache.initial) loadData(); 
 
     let wiText = "";
     if (data.wiContext && data.wiContext.length > 0) {
         wiText = `\n[Context from World Info]:\n${data.wiContext.join('\n')}\n`;
     }
 
-    let systemTemplate = data.mode === 'refine' ? promptsCache.refine : promptsCache.initial;
+    let systemTemplate = promptsCache.initial;
+    if (data.mode === 'refine') systemTemplate = promptsCache.refine;
 
     let systemPrompt = systemTemplate
         .replace(/{{user}}/g, currentName)
@@ -584,65 +497,35 @@ async function runGeneration(data, apiConfig) {
         .replace(/{{current}}/g, data.currentText || "");
 
     let responseContent = "";
-    
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 120000); 
 
     try {
         if (apiConfig.apiSource === 'independent') {
             let baseUrl = apiConfig.indepApiUrl.replace(/\/$/, '');
-            if (baseUrl.endsWith('/chat/completions')) {
-                baseUrl = baseUrl.replace(/\/chat\/completions$/, '');
-            }
+            if (baseUrl.endsWith('/chat/completions')) baseUrl = baseUrl.replace(/\/chat\/completions$/, '');
             const url = `${baseUrl}/chat/completions`;
-            
             const messages = [{ role: 'user', content: systemPrompt }];
-
             const res = await fetch(url, {
                 method: 'POST', 
-                headers: { 
-                    'Content-Type': 'application/json', 
-                    'Authorization': `Bearer ${apiConfig.indepApiKey}` 
-                },
-                body: JSON.stringify({ 
-                    model: apiConfig.indepApiModel, 
-                    messages: messages, 
-                    temperature: 0.7 
-                }),
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiConfig.indepApiKey}` },
+                body: JSON.stringify({ model: apiConfig.indepApiModel, messages: messages, temperature: 0.7 }),
                 signal: controller.signal
             });
-
             const text = await res.text();
             let json;
-            try {
-                json = JSON.parse(text);
-            } catch (e) {
-                throw new Error(`API 返回了非 JSON 数据 (状态码 ${res.status}): ${text.slice(0, 100)}...`);
-            }
-
+            try { json = JSON.parse(text); } catch (e) { throw new Error(`API 返回非 JSON: ${text.slice(0, 100)}...`); }
             if (!res.ok) {
                 const errorMsg = json.error?.message || json.message || JSON.stringify(json);
-                if (errorMsg.includes('contents is not specified')) {
-                    throw new Error(`API 格式错误: 目标模型不支持 System 角色。已自动尝试修复，请重试。`);
-                }
                 throw new Error(`API 请求失败 [${res.status}]: ${errorMsg}`);
             }
-
-            if (!json.choices || !json.choices.length) {
-                throw new Error("API 返回格式错误: 找不到 'choices' 字段。");
-            }
-
+            if (!json.choices || !json.choices.length) throw new Error("API 返回格式错误: 找不到 choices");
             responseContent = json.choices[0].message.content;
-
         } else {
-            if (typeof context.generateQuietPrompt !== 'function') {
-                throw new Error("SillyTavern 版本过旧，不支持 generateQuietPrompt，请使用独立 API。");
-            }
+            if (typeof context.generateQuietPrompt !== 'function') throw new Error("ST版本过旧，不支持后台生成");
             responseContent = await context.generateQuietPrompt(systemPrompt, false, false, null, "System");
         }
-    } finally {
-        clearTimeout(timeoutId);
-    }
+    } finally { clearTimeout(timeoutId); }
     
     lastRawResponse = responseContent;
     return responseContent.replace(/```[a-z]*\n?/g, '').replace(/```/g, '').trim();
@@ -680,12 +563,15 @@ async function openCreatorPopup() {
         return `<option disabled>未找到世界书</option>`;
     };
 
+    const charName = getContext().characters[getContext().characterId]?.name || "None";
+    const headerTitle = `${TEXT.PANEL_TITLE}<span class="pw-header-subtitle">User: ${currentName} & Char: ${charName}</span>`;
+
     const html = `
 <div class="pw-wrapper">
     <div class="pw-header">
-        <div class="pw-top-bar"><div class="pw-title">${TEXT.PANEL_TITLE}</div></div>
+        <div class="pw-top-bar"><div class="pw-title">${headerTitle}</div></div>
         <div class="pw-tabs">
-            <div class="pw-tab active" data-tab="editor">编辑</div>
+            <div class="pw-tab active" data-tab="editor">人设</div>
             <div class="pw-tab" data-tab="context">世界书</div>
             <div class="pw-tab" data-tab="api">API & Prompt</div>
             <div class="pw-tab" data-tab="history">草稿</div>
@@ -743,7 +629,8 @@ async function openCreatorPopup() {
         <div class="pw-footer">
             <div class="pw-footer-group">
                 <div class="pw-compact-btn danger" id="pw-clear" title="清空"><i class="fa-solid fa-eraser"></i></div>
-                <div class="pw-compact-btn" id="pw-snapshot" title="存入草稿 (Drafts)"><i class="fa-solid fa-save"></i></div>
+                <div class="pw-compact-btn" id="pw-copy-persona" title="复制内容"><i class="fa-solid fa-copy"></i></div>
+                <div class="pw-compact-btn" id="pw-snapshot" title="保存草稿"><i class="fa-solid fa-save"></i></div>
             </div>
             <div class="pw-footer-group" style="flex:1; justify-content:flex-end; gap: 8px;">
                 <button class="pw-btn wi" id="pw-btn-save-wi">保存至世界书</button>
@@ -754,8 +641,12 @@ async function openCreatorPopup() {
 
     <div id="pw-diff-overlay" class="pw-diff-container" style="display:none;">
         <div class="pw-diff-tabs-bar">
-            <div class="pw-diff-tab active" data-view="diff">智能对比 (选择修改)</div>
-            <div class="pw-diff-tab" data-view="raw">原文编辑 (直接修改)</div>
+            <div class="pw-diff-tab active" data-view="diff">
+                <div>智能对比</div><div class="pw-tab-sub">选择编辑</div>
+            </div>
+            <div class="pw-diff-tab" data-view="raw">
+                <div>新版原文</div><div class="pw-tab-sub">直接编辑</div>
+            </div>
         </div>
         
         <div class="pw-diff-content-area">
@@ -795,7 +686,7 @@ async function openCreatorPopup() {
             </div>
 
             <div class="pw-card-section pw-prompt-editor-block">
-                <div style="display:flex; justify-content:space-between;"><span class="pw-prompt-label">初始生成指令 (System Prompt)</span><button class="pw-mini-btn" id="pw-reset-initial" style="font-size:0.7em;">恢复默认</button></div>
+                <div style="display:flex; justify-content:space-between;"><span class="pw-prompt-label">人设初始生成指令 (System Prompt)</span><button class="pw-mini-btn" id="pw-reset-initial" style="font-size:0.7em;">恢复默认</button></div>
                 <div class="pw-var-btns">
                     <div class="pw-var-btn" data-ins="{{user}}"><span>User名</span><span class="code">{{user}}</span></div>
                     <div class="pw-var-btn" data-ins="{{char}}"><span>Char名</span><span class="code">{{char}}</span></div>
@@ -805,7 +696,7 @@ async function openCreatorPopup() {
                 </div>
                 <textarea id="pw-prompt-initial" class="pw-textarea pw-auto-height" style="min-height:150px; font-size:0.85em;">${promptsCache.initial}</textarea>
                 
-                <div style="display:flex; justify-content:space-between; margin-top:15px;"><span class="pw-prompt-label">润色指令 (System Prompt)</span><button class="pw-mini-btn" id="pw-reset-refine" style="font-size:0.7em;">恢复默认</button></div>
+                <div style="display:flex; justify-content:space-between; margin-top:15px;"><span class="pw-prompt-label">人设润色指令 (System Prompt)</span><button class="pw-mini-btn" id="pw-reset-refine" style="font-size:0.7em;">恢复默认</button></div>
                 <div class="pw-var-btns">
                     <div class="pw-var-btn" data-ins="{{tags}}"><span>模版(必要)</span><span class="code">{{tags}}</span></div>
                     <div class="pw-var-btn" data-ins="{{current}}"><span>当前文本</span><span class="code">{{current}}</span></div>
@@ -845,15 +736,20 @@ async function openCreatorPopup() {
 // ============================================================================
 
 function bindEvents() {
-    $(document).off('.pw');
+    if (window.stPersonaWeaverBound) return;
+    window.stPersonaWeaverBound = true;
 
-    document.addEventListener("visibilitychange", function() {
-        if (!document.hidden) {
-            console.log("[PW] App visible, rebinding events...");
-            bindEvents();
-        }
-    }, { once: true }); 
+    console.log("[PW] Binding Events (Lite)...");
 
+    // --- 复制功能 ---
+    $(document).on('click.pw', '#pw-copy-persona', function() {
+        const text = $('#pw-result-text').val();
+        if(!text) return toastr.warning("没有内容可复制");
+        navigator.clipboard.writeText(text);
+        toastr.success("人设已复制");
+    });
+
+    // --- Tabs ---
     $(document).on('click.pw', '.pw-tab', function () {
         $('.pw-tab').removeClass('active'); $(this).addClass('active');
         $('.pw-view').removeClass('active');
@@ -861,6 +757,7 @@ function bindEvents() {
         if ($(this).data('tab') === 'history') renderHistoryList();
     });
 
+    // --- Template Editing ---
     $(document).on('click.pw', '#pw-toggle-edit-template', () => {
         isEditingTemplate = !isEditingTemplate;
         if (isEditingTemplate) {
@@ -887,6 +784,7 @@ function bindEvents() {
         toastr.success("模版已更新");
     });
 
+    // --- Shortcuts ---
     $(document).on('click.pw', '.pw-shortcut-btn', function () {
         const key = $(this).data('key');
         const $text = $('#pw-template-text');
@@ -914,13 +812,15 @@ function bindEvents() {
         }
     });
 
+    // --- Float Button Selection Check ---
     let selectionTimeout;
     const checkSelection = () => {
         clearTimeout(selectionTimeout);
         selectionTimeout = setTimeout(() => {
-            const el = document.getElementById('pw-result-text');
-            if (!el) return;
-            const hasSelection = el.selectionStart !== el.selectionEnd;
+            const activeEl = document.activeElement;
+            if (!activeEl || !activeEl.id.startsWith('pw-result-text')) return;
+            
+            const hasSelection = activeEl.selectionStart !== activeEl.selectionEnd;
             const $btn = $('#pw-float-quote-btn');
             if (hasSelection) {
                 if (!$btn.is(':visible')) $btn.stop(true, true).fadeIn(200).css('display', 'flex');
@@ -935,23 +835,22 @@ function bindEvents() {
         e.preventDefault(); 
         e.stopPropagation();
         
-        const textarea = document.getElementById('pw-result-text');
-        const start = textarea.selectionStart;
-        const end = textarea.selectionEnd;
-        const selectedText = textarea.value.substring(start, end).trim();
+        const activeEl = document.activeElement;
+        if (!activeEl) return;
+
+        const start = activeEl.selectionStart;
+        const end = activeEl.selectionEnd;
+        const selectedText = activeEl.value.substring(start, end).trim();
         
         if (selectedText) {
-            const $input = $('#pw-refine-input');
-            const cur = $input.val();
-            const newText = `对 "${selectedText}" 的修改意见为：`;
-            $input.val(cur ? cur + '\n' + newText : newText).focus();
-            requestAnimationFrame(() => {
-                const el = $input[0];
-                el.style.height = 'auto';
-                el.style.height = (el.scrollHeight) + 'px';
-            });
-            textarea.setSelectionRange(end, end);
-            $('#pw-float-quote-btn').fadeOut(100);
+            let $input = $('#pw-refine-input');
+            if ($input && $input.length) {
+                const cur = $input.val();
+                const newText = `对 "${selectedText}" 的修改意见为：`;
+                $input.val(cur ? cur + '\n' + newText : newText).focus();
+                activeEl.setSelectionRange(end, end); 
+                $('#pw-float-quote-btn').fadeOut(100);
+            }
         }
     });
 
@@ -983,22 +882,22 @@ function bindEvents() {
     };
     $(document).on('input.pw change.pw', '#pw-request, #pw-result-text, #pw-wi-toggle, .pw-input, .pw-select', saveCurrentState);
 
+    // --- Diff View Logic ---
     $(document).on('click.pw', '.pw-diff-tab', function () {
         $('.pw-diff-tab').removeClass('active');
         $(this).addClass('active');
         const view = $(this).data('view');
-        if (view === 'diff') {
+        
+        if (view === 'diff') { 
             $('#pw-diff-list-view').show();
             $('#pw-diff-raw-view').hide();
-        } else {
+        } else { 
             $('#pw-diff-list-view').hide();
-            $('#pw-diff-raw-view').css('display', 'flex');
-            if (!$('#pw-diff-raw-textarea').val() && lastRawResponse) {
-                $('#pw-diff-raw-textarea').val(lastRawResponse);
-            }
+            $('#pw-diff-raw-view').show();
         }
     });
 
+    // Refine (Persona)
     $(document).on('click.pw', '#pw-btn-refine', async function (e) {
         e.preventDefault();
         const refineReq = $('#pw-refine-input').val();
@@ -1069,8 +968,16 @@ function bindEvents() {
                 $list.append(rowHtml);
             });
 
+            $('#pw-diff-overlay').data('source', 'persona');
+            
+            // Restore Tab names
+            $('.pw-diff-tab[data-view="diff"] div:first-child').text('智能对比');
+            $('.pw-diff-tab[data-view="diff"] .pw-tab-sub').text('选择编辑');
+            $('.pw-diff-tab[data-view="raw"] div:first-child').text('新版原文');
+            $('.pw-diff-tab[data-view="raw"] .pw-tab-sub').text('直接编辑');
+
             if (changeCount === 0 && !responseText) {
-                toastr.warning("返回内容为空，请切换到“原文编辑”查看");
+                toastr.warning("返回内容为空，请切换到“直接编辑”查看");
             } else if (changeCount === 0) {
                 toastr.info("没有检测到内容变化");
             }
@@ -1099,33 +1006,33 @@ function bindEvents() {
 
     $(document).on('click.pw', '#pw-diff-confirm', function () {
         const activeTab = $('.pw-diff-tab.active').data('view');
+        
+        let finalContent = "";
+
         if (activeTab === 'raw') {
-            const rawContent = $('#pw-diff-raw-textarea').val();
-            $('#pw-result-text').val(rawContent);
+            finalContent = $('#pw-diff-raw-textarea').val();
         } else {
             let finalLines = [];
             $('.pw-diff-row').each(function () {
                 const key = $(this).data('key');
                 const val = $(this).find('.pw-diff-card.selected .pw-diff-textarea').val().trimEnd();
-                
                 if (val && val !== "(删除)" && val !== "(无)") {
-                    if (val.includes('\n') || val.startsWith('  ')) {
-                        finalLines.push(`${key}:\n${val}`);
-                    } else {
-                        finalLines.push(`${key}: ${val.trim()}`);
-                    }
+                    if (val.includes('\n') || val.startsWith('  ')) finalLines.push(`${key}:\n${val}`);
+                    else finalLines.push(`${key}: ${val.trim()}`);
                 }
             });
-            $('#pw-result-text').val(finalLines.join('\n\n'));
+            finalContent = finalLines.join('\n\n');
         }
+        $('#pw-result-text').val(finalContent).trigger('input');
+
         $('#pw-diff-overlay').fadeOut();
         saveCurrentState();
         toastr.success("修改已应用");
-        $('#pw-result-text').trigger('input');
     });
 
     $(document).on('click.pw', '#pw-diff-cancel', () => $('#pw-diff-overlay').fadeOut());
 
+    // Generate Persona
     $(document).on('click.pw', '#pw-btn-gen', async function (e) {
         e.preventDefault();
         const req = $('#pw-request').val();
@@ -1200,15 +1107,17 @@ function bindEvents() {
         }
     });
 
+    // Save Draft (Persona)
     $(document).on('click.pw', '#pw-snapshot', function () {
         const text = $('#pw-result-text').val();
         const req = $('#pw-request').val();
         if (!text && !req) return toastr.warning("没有任何内容可保存");
-        const context = getContext();
-        const userName = $('.persona_name').first().text().trim() || "User";
-        const charName = context.characters[context.characterId]?.name || "";
-        const defaultTitle = charName ? `${userName} & ${charName} (${new Date().toLocaleDateString()})` : `${userName} (${new Date().toLocaleDateString()})`;
-        saveHistory({ request: req || "无", timestamp: new Date().toLocaleString(), title: defaultTitle, data: { name: userName, resultText: text || "(无)" } });
+        saveHistory({ 
+            request: req || "无", 
+            timestamp: new Date().toLocaleString(), 
+            title: "", // Let default logic handle it
+            data: { name: "Persona", resultText: text || "(无)", type: 'persona' } 
+        });
         toastr.success(TEXT.TOAST_SNAPSHOT);
     });
 
@@ -1309,18 +1218,11 @@ const renderTemplateChips = () => {
             const $text = $('#pw-request');
             const cur = $text.val();
             const prefix = (cur && !cur.endsWith('\n') && cur.length > 0) ? '\n\n' : '';
-            
             let insertText = key + ":";
             if (content && content.trim()) {
-                if (content.includes('\n') || content.startsWith(' ')) {
-                    insertText += "\n" + content;
-                } else {
-                    insertText += " " + content;
-                }
-            } else {
-                insertText += " ";
-            }
-
+                if (content.includes('\n') || content.startsWith(' ')) insertText += "\n" + content;
+                else insertText += " " + content;
+            } else insertText += " ";
             $text.val(cur + prefix + insertText).focus();
             $text.scrollTop($text[0].scrollHeight);
         });
@@ -1342,7 +1244,7 @@ const renderHistoryList = () => {
 
     filtered.forEach((item, index) => {
         const previewText = item.data.resultText || '无内容';
-        const displayTitle = item.title || "未命名";
+        const displayTitle = item.title || "User & Char";
 
         const $el = $(`
         <div class="pw-history-item">
