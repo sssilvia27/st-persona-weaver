@@ -5,7 +5,7 @@ const extensionName = "st-persona-weaver";
 const STORAGE_KEY_HISTORY = 'pw_history_v20';
 const STORAGE_KEY_STATE = 'pw_state_v20';
 const STORAGE_KEY_TEMPLATE = 'pw_template_v2';
-const STORAGE_KEY_PROMPTS = 'pw_prompts_v5';
+const STORAGE_KEY_PROMPTS = 'pw_prompts_v6'; // Version bumped
 const BUTTON_ID = 'pw_persona_tool_btn';
 
 const defaultYamlTemplate =
@@ -114,6 +114,7 @@ Optimizing User Persona for {{char}}.
 5. Do NOT output status bars, progress bars, or Chain of Thought.
 6. Response: ONLY the final YAML content.`;
 
+// 修改：更强烈的 Markdown 和格式要求
 const defaultSystemPromptOpening =
 `Generate distinct opening scenes (First Messages) based on the following personas and context.
 
@@ -130,26 +131,23 @@ const defaultSystemPromptOpening =
 
 [Guidelines]:
 1. Language: Simplified Chinese.
-2. Length: Approx 700 characters per option.
+2. Length: Approx 600-800 characters per option.
 3. Content: detailed scene setting, environment description, specific date/time/location.
 4. Character: Reflect {{char}}'s personality and traits vividly.
 5. Interaction: End with a natural hook for {{user}} to respond. Do NOT summarize or use "elevated" philosophical endings (禁止升华).
 6. Constraint: Do NOT speak for {{user}} or decide {{user}}'s actions.
 7. Variety: Each option must have a completely different theme, time, scene, and plot.
-8. Do NOT output status bars, progress bars, or Chain of Thought.
+8. **IMPORTANT**: You MUST use Markdown Code Blocks for the content.
 
 [Output Format]:
-You MUST separate each option clearly using the specific separator below.
-You MUST enclose the content in markdown code blocks if possible, but the separator is most important.
+Strictly follow this format for each option (generate 3-4 options):
 
-Separator: ---【开场白选项X】---
-
-Example:
----【开场白选项1】---
+--- Option 1 ---
 \`\`\`
 [Content of Option 1]
 \`\`\`
----【开场白选项2】---
+
+--- Option 2 ---
 \`\`\`
 [Content of Option 2]
 \`\`\`
@@ -181,7 +179,7 @@ const defaultSystemPromptOpeningRefine =
 3. Apply the instruction to modify the scene, tone, or details.
 4. Do NOT speak for {{user}}.
 5. Do NOT output status bars or Chain of Thought.
-6. Response: ONLY the refined opening text (do not use markdown code blocks or titles).`;
+6. Response: ONLY the refined opening text (do not use markdown code blocks or titles here, just the raw text).`;
 
 const defaultSettings = {
     autoSwitchPersona: true, syncToWorldInfo: false,
@@ -360,6 +358,7 @@ function loadData() {
             ...{ initial: defaultSystemPromptInitial, refine: defaultSystemPromptRefine, opening: defaultSystemPromptOpening, openingRefine: defaultSystemPromptOpeningRefine }, 
             ...p 
         };
+        // Ensure defaults if missing in older cache
         if (!promptsCache.opening) promptsCache.opening = defaultSystemPromptOpening;
         if (!promptsCache.openingRefine) promptsCache.openingRefine = defaultSystemPromptOpeningRefine;
     } catch { 
@@ -375,6 +374,15 @@ function saveData() {
 
 function saveHistory(item) {
     const limit = extension_settings[extensionName]?.historyLimit || 50;
+    
+    // 强制修正标题逻辑 (Req 1)
+    if (!item.title || item.title === "未命名") {
+        const context = getContext();
+        const userName = $('.persona_name').first().text().trim() || "User";
+        const charName = context.characters[context.characterId]?.name || "Char";
+        item.title = `${userName} & ${charName}`;
+    }
+
     historyCache.unshift(item);
     if (historyCache.length > limit) historyCache = historyCache.slice(0, limit);
     saveData();
@@ -384,9 +392,10 @@ function saveState(data) { localStorage.setItem(STORAGE_KEY_STATE, JSON.stringif
 function loadState() { try { return JSON.parse(localStorage.getItem(STORAGE_KEY_STATE)) || {}; } catch { return {}; } }
 
 function injectStyles() {
-    const styleId = 'persona-weaver-css-v42'; // Bump version
+    const styleId = 'persona-weaver-css-v42'; // Bumped version
     if ($(`#${styleId}`).length) return;
     
+    // [Req 5] Fix Animation: #pw-request remove transition
     const css = `
     #pw-api-model-select { flex: 1; width: 0; min-width: 0; text-overflow: ellipsis; overflow: hidden; white-space: nowrap; }
     
@@ -406,6 +415,9 @@ function injectStyles() {
 
     #pw-api-url { background-color: rgba(0, 0, 0, 0.2) !important; border: 1px solid var(--SmartThemeBorderColor) !important; color: var(--smart-theme-body-color) !important; }
     .pw-auto-height { min-height: 80px; max-height: 500px; overflow-y: auto; }
+    
+    /* [Req 5] 移除滑动动画 */
+    #pw-request { transition: none !important; } 
 
     #pw-history-clear-all { background: transparent; border: none; color: #ff6b6b; font-size: 0.85em; opacity: 0.6; padding: 5px; width: auto; margin: 10px auto; text-decoration: underline; }
     #pw-history-clear-all:hover { opacity: 1; background: transparent; transform: none; }
@@ -430,17 +442,18 @@ function injectStyles() {
     .pw-btn.wi { background: linear-gradient(135deg, rgba(122, 162, 247, 0.2), rgba(0, 0, 0, 0)); border-color: #7aa2f7; color: #7aa2f7; }
 
     /* --- 开场白轮播相关 --- */
-    .pw-carousel-container { position: relative; width: 100%; overflow: hidden; margin-top: 20px; }
+    .pw-carousel-container { position: relative; width: 100%; overflow: hidden; margin-top: 10px; padding-bottom: 5px; }
     .pw-carousel-track { display: flex; transition: transform 0.3s ease-in-out; }
     .pw-opening-card { flex: 0 0 100%; width: 100%; box-sizing: border-box; background: rgba(0,0,0,0.2); border: 1px solid var(--SmartThemeBorderColor); border-radius: 8px; padding: 15px; display: flex; flex-direction: column; gap: 10px; }
     
     .pw-opening-header { font-weight: bold; color: #e0af68; font-size: 1.1em; display: flex; justify-content: space-between; align-items: center; }
-    .pw-opening-textarea { width: 100%; min-height: 400px; background: rgba(0, 0, 0, 0.15); border: 1px solid var(--SmartThemeBorderColor); border-radius: 6px; color: #eee; padding: 10px; font-family: inherit; font-size: 1.0em; line-height: 1.6; resize: vertical; outline: none; box-sizing: border-box; white-space: pre-wrap; }
+    .pw-opening-textarea { width: 100%; min-height: 350px; background: rgba(0, 0, 0, 0.15); border: 1px solid var(--SmartThemeBorderColor); border-radius: 6px; color: #eee; padding: 10px; font-family: inherit; font-size: 1.0em; line-height: 1.6; resize: vertical; outline: none; box-sizing: border-box; white-space: pre-wrap; }
     .pw-opening-textarea:focus { background: rgba(0,0,0,0.25); border-color: #e0af68; }
-    .pw-opening-actions { display: flex; gap: 10px; justify-content: flex-end; align-items: center; margin-top: 5px; }
     
-    /* 轮播导航在下方 */
-    .pw-carousel-nav { display: flex; align-items: center; justify-content: center; gap: 15px; margin-top: 15px; }
+    /* [Req 2.1] Action bars */
+    .pw-opening-actions { display: flex; gap: 10px; justify-content: flex-end; align-items: center; margin-top: 5px; }
+    .pw-carousel-nav { display: flex; align-items: center; justify-content: center; gap: 15px; margin-top: 15px; padding-top: 10px; border-top: 1px dashed var(--SmartThemeBorderColor); }
+    
     .pw-nav-btn { background: rgba(0,0,0,0.3); border: 1px solid var(--SmartThemeBorderColor); color: #ccc; width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all 0.2s; }
     .pw-nav-btn:hover { background: rgba(255,255,255,0.1); color: #fff; border-color: #e0af68; }
     .pw-nav-btn:disabled { opacity: 0.3; cursor: not-allowed; }
@@ -449,15 +462,13 @@ function injectStyles() {
     .pw-card-refine-box { display: none; flex-direction: column; gap: 8px; background: rgba(0,0,0,0.2); padding: 10px; border-radius: 6px; border: 1px dashed var(--SmartThemeBorderColor); margin-top: 5px; }
     .pw-card-refine-input { width: 100%; background: rgba(255,255,255,0.05); border: 1px solid var(--SmartThemeBorderColor); color: #ddd; padding: 8px; border-radius: 4px; resize: vertical; min-height: 60px; }
     
+    /* [Req 3] Diff Tab Subtitle */
+    .pw-tab-sub { display: block; font-size: 0.75em; opacity: 0.6; font-weight: normal; margin-top: 2px; text-align: center; }
+    .pw-diff-tab { display: flex; flex-direction: column; align-items: center; justify-content: center; line-height: 1.1; }
+
     /* 悬浮修改按钮 */
     .pw-float-quote-btn { position: fixed; top: calc(20% + 60px); right: 0; background: linear-gradient(135deg, #e0af68, #d08f40); color: #1a1a1a; padding: 8px 12px; border-radius: 20px 0 0 20px; font-weight: bold; font-size: 0.85em; box-shadow: -2px 2px 8px rgba(0,0,0,0.4); cursor: pointer; z-index: 9999; display: none; align-items: center; gap: 4px; border: 1px solid rgba(255,255,255,0.3); border-right: none; backdrop-filter: blur(5px); }
     .pw-float-quote-btn:hover { padding-right: 18px; transform: translateX(-2px); }
-
-    /* Diff Tab 样式更新 */
-    .pw-diff-tab { display: flex; flex-direction: column; align-items: center; justify-content: center; line-height: 1.2; padding: 6px 15px; text-align: center; height: 42px; }
-    .pw-diff-tab .main-text { font-size: 0.95em; font-weight: bold; }
-    .pw-diff-tab .sub-text { font-size: 0.75em; font-weight: normal; opacity: 0.7; margin-top: 2px; }
-    .pw-diff-tab.active .sub-text { color: #e0af68; opacity: 0.9; }
     `;
     $('<style>').attr('id', styleId).text(css).appendTo('head');
 }
@@ -630,6 +641,7 @@ async function runGeneration(data, apiConfig) {
 
 // 轮播控制函数
 function updateCarousel() {
+    if (totalSlides === 0) return;
     const offset = -currentSlideIndex * 100;
     $('#pw-carousel-track').css('transform', `translateX(${offset}%)`);
     $('#pw-slide-indicator').text(`${currentSlideIndex + 1} / ${totalSlides}`);
@@ -637,35 +649,36 @@ function updateCarousel() {
     $('#pw-next-slide').prop('disabled', currentSlideIndex === totalSlides - 1);
 }
 
-// 开场白结果渲染 - 增强解析
+// [Req 2.4] 开场白结果渲染 - 增强版逻辑
 function renderOpeningResults(rawText) {
     const $container = $('#pw-opening-results').empty();
     
-    // 尝试按照分隔符分割
-    let parts = rawText.split(/---+【开场白选项\d+】---+/);
-    // 过滤掉分割后可能产生的空首项
-    if (parts.length > 0 && !parts[0].trim()) parts.shift();
+    // 尝试正则匹配代码块
+    let matches = [...rawText.matchAll(/```[\s\S]*?```/g)].map(m => m[0].replace(/```[a-z]*\n?/g, '').replace(/```$/, ''));
     
-    // 如果分割失败（只有1项且内容很长），尝试回退到之前的正则或直接显示
-    if (parts.length === 0) {
-        parts = [rawText];
+    // 如果没有找到代码块，尝试用分隔符匹配
+    if (!matches || matches.length === 0) {
+        if (rawText.includes('---')) {
+            matches = rawText.split(/---+[^\n]*---+/g).map(s => s.trim()).filter(s => s.length > 10);
+        }
     }
-
-    // 清理内容中的 markdown 代码块标记
-    const slidesContent = parts.map(p => {
-        return p.replace(/^[\s\n]*```[a-z]*[\s\n]*/i, '').replace(/[\s\n]*```[\s\n]*$/i, '').trim();
-    }).filter(p => p.length > 0);
-
-    totalSlides = slidesContent.length;
+    
+    // 如果还是没找到，或者文本太短，就当做只有这一个选项
+    if (!matches || matches.length === 0) {
+        matches = [rawText.trim()];
+    }
+    
     let slidesHtml = '';
-
-    slidesContent.forEach((content, i) => {
+    totalSlides = matches.length;
+    
+    // [Req 2.1, 2.3] 构建 HTML
+    matches.forEach((content, i) => {
         slidesHtml += `
-            <div class="pw-opening-card">
+            <div class="pw-opening-card" data-index="${i}">
                 <div class="pw-opening-header">
                     <span>开场白选项 ${i + 1}</span>
                 </div>
-                <textarea class="pw-opening-textarea">${content}</textarea>
+                <textarea class="pw-opening-textarea">${content.trim()}</textarea>
                 
                 <div class="pw-card-refine-box">
                     <textarea class="pw-card-refine-input" placeholder="对此开场白提出修改意见..."></textarea>
@@ -676,7 +689,7 @@ function renderOpeningResults(rawText) {
 
                 <div class="pw-opening-actions">
                     <button class="pw-mini-btn toggle-refine-btn"><i class="fa-solid fa-pen-fancy"></i> 润色</button>
-                    <button class="pw-mini-btn snapshot-btn"><i class="fa-solid fa-save"></i> 存入草稿</button>
+                    <button class="pw-mini-btn pw-save-draft-btn"><i class="fa-solid fa-save"></i> 存入草稿</button>
                     <button class="pw-btn save apply-btn"><i class="fa-solid fa-check"></i> 应用</button>
                 </div>
             </div>
@@ -689,7 +702,6 @@ function renderOpeningResults(rawText) {
                 ${slidesHtml}
             </div>
         </div>
-        <!-- 导航放在下方 -->
         <div class="pw-carousel-nav">
             <button id="pw-prev-slide" class="pw-nav-btn"><i class="fa-solid fa-chevron-left"></i></button>
             <span id="pw-slide-indicator" class="pw-slide-indicator">1 / ${totalSlides}</span>
@@ -701,8 +713,7 @@ function renderOpeningResults(rawText) {
     currentSlideIndex = 0;
     updateCarousel();
 
-    // 注意：事件绑定现在统一在 bindEvents 中通过 delegation 处理，
-    // 避免每次渲染都重新绑定导致事件丢失或内存泄漏。
+    // 注意：事件绑定已移动到 bindEvents，通过委托处理，解决 [Req 2.2] 卡死问题
 }
 
 async function openCreatorPopup() {
@@ -811,12 +822,10 @@ async function openCreatorPopup() {
         <div class="pw-scroll-area">
             <div class="pw-info-display">
                 <div class="pw-info-item"><i class="fa-solid fa-comment-dots"></i><span>开场白生成器</span></div>
-                <!-- 加上人设/开场白标题 -->
-                <div class="pw-info-item" style="margin-left:auto; font-size:0.9em; opacity:0.8;">
-                   ${context.characters[context.characterId]?.name ? `${currentName} & ${context.characters[context.characterId].name}` : currentName}
-                </div>
             </div>
-            <div style="font-size:0.9em; opacity:0.8; margin-bottom:5px;">附加要求（如：发生在一个雨夜，地点在酒吧...）：</div>
+            <!-- [Req 1] Added User & Char info -->
+            <div style="font-size:0.85em; opacity:0.7; margin-bottom:5px;">User: ${currentName} & Char: ${getContext().characters[getContext().characterId]?.name || "None"}</div>
+            
             <textarea id="pw-opening-req" class="pw-textarea pw-auto-height" placeholder="在此输入场景、时间、地点等要求..."></textarea>
             <button id="pw-btn-gen-opening" class="pw-btn gen" style="margin-top:10px;">生成开场白</button>
             <div id="pw-opening-results" class="pw-opening-result-container"></div>
@@ -825,14 +834,12 @@ async function openCreatorPopup() {
 
     <div id="pw-diff-overlay" class="pw-diff-container" style="display:none;">
         <div class="pw-diff-tabs-bar">
-            <!-- 修改Tab显示结构 -->
+            <!-- [Req 3] Updated Diff Tab layout -->
             <div class="pw-diff-tab active" data-view="diff">
-                <div class="main-text">智能对比</div>
-                <div class="sub-text">选择编辑</div>
+                <div>智能对比</div><div class="pw-tab-sub">选择编辑</div>
             </div>
             <div class="pw-diff-tab" data-view="raw">
-                <div class="main-text">新版原文</div>
-                <div class="sub-text">直接编辑</div>
+                <div>新版原文</div><div class="pw-tab-sub">直接编辑</div>
             </div>
         </div>
         
@@ -942,6 +949,104 @@ function bindEvents() {
         }
     }, { once: true }); 
 
+    // --- 轮播图控制事件 ---
+    // [Req 2.2] 使用事件委托处理，避免 DOM 刷新后事件丢失
+    $(document).on('click.pw', '#pw-prev-slide', () => { if (currentSlideIndex > 0) { currentSlideIndex--; updateCarousel(); } });
+    $(document).on('click.pw', '#pw-next-slide', () => { if (currentSlideIndex < totalSlides - 1) { currentSlideIndex++; updateCarousel(); } });
+
+    // --- 开场白卡片内部按钮事件 ---
+    // [Req 2.3] Save Draft
+    $(document).on('click.pw', '.pw-save-draft-btn', function() {
+        const content = $(this).closest('.pw-opening-card').find('.pw-opening-textarea').val();
+        const req = $('#pw-opening-req').val();
+        saveHistory({ 
+            request: req || "开场白生成", 
+            timestamp: new Date().toLocaleString(), 
+            title: "", // saveHistory logic will fill default
+            data: { name: "Opening", resultText: content, type: 'opening' } 
+        });
+        toastr.success(TEXT.TOAST_SNAPSHOT);
+    });
+
+    // Apply Opening
+    $(document).on('click.pw', '.apply-btn', async function() {
+        const finalContent = $(this).closest('.pw-opening-card').find('.pw-opening-textarea').val();
+        if(confirm("确定将此内容替换为当前对话的开场白（第0层消息）吗？")) {
+            const context = getContext();
+            if (context.chat && context.chat.length > 0) {
+                context.chat[0].mes = finalContent;
+                await saveChat();
+                await reloadCurrentChat();
+                toastr.success("开场白已更新");
+            } else {
+                toastr.warning("当前没有对话可修改");
+            }
+        }
+    });
+
+    // Toggle Refine
+    $(document).on('click.pw', '.toggle-refine-btn', function() {
+        $(this).closest('.pw-opening-card').find('.pw-card-refine-box').slideToggle();
+    });
+
+    // Confirm Refine (Opening)
+    $(document).on('click.pw', '.refine-confirm-btn', async function() {
+        const $card = $(this).closest('.pw-opening-card');
+        const refineInput = $card.find('.pw-card-refine-input').val();
+        if(!refineInput) return toastr.warning("请输入要求");
+        
+        const oldContent = $card.find('.pw-opening-textarea').val();
+        const btn = $(this);
+        btn.prop('disabled', true).html('<i class="fas fa-spinner fa-spin"></i> 处理中');
+        
+        try {
+            const wiContent = await collectActiveWorldInfoContent();
+            const charPersona = getCharacterPersonaString();
+            const userPersona = $('#pw-result-text').val() || getActivePersonaDescription();
+            const modelVal = $('#pw-api-source').val() === 'independent' ? $('#pw-api-model-select').val() : null;
+
+            const config = {
+                mode: 'opening_refine', request: refineInput, currentText: oldContent,
+                wiContext: wiContent, charPersona: charPersona, userPersona: userPersona,
+                apiSource: $('#pw-api-source').val(), indepApiUrl: $('#pw-api-url').val(),
+                indepApiKey: $('#pw-api-key').val(), indepApiModel: modelVal
+            };
+            
+            const refinedText = await runGeneration(config, config);
+            currentRefiningCard = $card;
+            
+            $('#pw-diff-overlay').data('source', 'opening');
+            $('#pw-diff-raw-textarea').val(lastRawResponse);
+            $('#pw-diff-list').empty();
+
+            // Render Diff view specifically for opening
+            const oldTabHtml = `<textarea class="pw-diff-raw-textarea" readonly>${oldContent}</textarea>`;
+            const newTabHtml = `<textarea class="pw-diff-raw-textarea" id="pw-opening-new-textarea">${refinedText}</textarea>`;
+            
+            // Temporary title change for opening context
+            $('.pw-diff-tab[data-view="diff"] div:first-child').text('原版本');
+            $('.pw-diff-tab[data-view="diff"] .pw-tab-sub').text('只读');
+            $('.pw-diff-tab[data-view="raw"] div:first-child').text('新版本');
+            $('.pw-diff-tab[data-view="raw"] .pw-tab-sub').text('直接编辑');
+            
+            $('.pw-diff-tab[data-view="raw"]').addClass('active');
+            $('.pw-diff-tab[data-view="diff"]').removeClass('active');
+
+            $('#pw-diff-list-view').html(oldTabHtml).hide();
+            $('#pw-diff-raw-view').html(newTabHtml).show();
+
+            $('#pw-diff-overlay').fadeIn();
+            $card.find('.pw-card-refine-input').val(''); 
+
+        } catch(e) {
+            console.error(e);
+            toastr.error("润色失败: " + e.message);
+        } finally {
+            btn.prop('disabled', false).html('<i class="fa-solid fa-magic"></i> 确认润色');
+        }
+    });
+
+    // --- Tabs ---
     $(document).on('click.pw', '.pw-tab', function () {
         $('.pw-tab').removeClass('active'); $(this).addClass('active');
         $('.pw-view').removeClass('active');
@@ -949,6 +1054,7 @@ function bindEvents() {
         if ($(this).data('tab') === 'history') renderHistoryList();
     });
 
+    // --- Template Editing ---
     $(document).on('click.pw', '#pw-toggle-edit-template', () => {
         isEditingTemplate = !isEditingTemplate;
         if (isEditingTemplate) {
@@ -975,6 +1081,7 @@ function bindEvents() {
         toastr.success("模版已更新");
     });
 
+    // --- Shortcuts ---
     $(document).on('click.pw', '.pw-shortcut-btn', function () {
         const key = $(this).data('key');
         const $text = $('#pw-template-text');
@@ -1002,6 +1109,7 @@ function bindEvents() {
         }
     });
 
+    // --- Float Button Selection Check ---
     let selectionTimeout;
     const checkSelection = () => {
         clearTimeout(selectionTimeout);
@@ -1078,26 +1186,23 @@ function bindEvents() {
     };
     $(document).on('input.pw change.pw', '#pw-request, #pw-result-text, #pw-wi-toggle, .pw-input, .pw-select', saveCurrentState);
 
-    // Diff 标签切换逻辑
+    // --- Diff View Logic ---
     $(document).on('click.pw', '.pw-diff-tab', function () {
         $('.pw-diff-tab').removeClass('active');
         $(this).addClass('active');
         const view = $(this).data('view');
         
-        // 检查是不是开场白模式
         const isOpeningMode = $('#pw-diff-overlay').data('source') === 'opening';
 
         if (isOpeningMode) {
-            // 开场白模式下切换 Tab
-            if (view === 'diff') { // 原版本
+            if (view === 'diff') { 
                 $('#pw-diff-list-view').show();
                 $('#pw-diff-raw-view').hide();
-            } else { // 新版本
+            } else { 
                 $('#pw-diff-list-view').hide();
                 $('#pw-diff-raw-view').show();
             }
         } else {
-            // 人设模式下切换 Tab
             if (view === 'diff') {
                 $('#pw-diff-list-view').show();
                 $('#pw-diff-raw-view').hide();
@@ -1111,6 +1216,7 @@ function bindEvents() {
         }
     });
 
+    // Refine (Persona)
     $(document).on('click.pw', '#pw-btn-refine', async function (e) {
         e.preventDefault();
         const refineReq = $('#pw-refine-input').val();
@@ -1182,14 +1288,15 @@ function bindEvents() {
             });
 
             $('#pw-diff-overlay').data('source', 'persona');
-            // 修改人设模式的标题 - 采用新结构
-            $('.pw-diff-tab[data-view="diff"]').find('.main-text').text('智能对比');
-            $('.pw-diff-tab[data-view="diff"]').find('.sub-text').text('选择编辑');
-            $('.pw-diff-tab[data-view="raw"]').find('.main-text').text('新版原文');
-            $('.pw-diff-tab[data-view="raw"]').find('.sub-text').text('直接编辑');
+            
+            // Restore Tab names
+            $('.pw-diff-tab[data-view="diff"] div:first-child').text('智能对比');
+            $('.pw-diff-tab[data-view="diff"] .pw-tab-sub').text('选择编辑');
+            $('.pw-diff-tab[data-view="raw"] div:first-child').text('新版原文');
+            $('.pw-diff-tab[data-view="raw"] .pw-tab-sub').text('直接编辑');
 
             if (changeCount === 0 && !responseText) {
-                toastr.warning("返回内容为空，请切换到“原文编辑”查看");
+                toastr.warning("返回内容为空，请切换到“直接编辑”查看");
             } else if (changeCount === 0) {
                 toastr.info("没有检测到内容变化");
             }
@@ -1223,12 +1330,9 @@ function bindEvents() {
         let finalContent = "";
 
         if (source === 'opening') {
-            // 开场白模式逻辑
             if (activeTab === 'diff') {
-                // 原版本 Tab
                 finalContent = $('#pw-diff-list-view').find('textarea').val();
             } else {
-                // 新版本 Tab
                 finalContent = $('#pw-diff-raw-view').find('textarea').val();
             }
             
@@ -1237,7 +1341,6 @@ function bindEvents() {
                 currentRefiningCard.find('.pw-card-refine-box').slideUp();
             }
         } else {
-            // 人设模式逻辑
             if (activeTab === 'raw') {
                 finalContent = $('#pw-diff-raw-textarea').val();
             } else {
@@ -1262,6 +1365,7 @@ function bindEvents() {
 
     $(document).on('click.pw', '#pw-diff-cancel', () => $('#pw-diff-overlay').fadeOut());
 
+    // Generate Persona
     $(document).on('click.pw', '#pw-btn-gen', async function (e) {
         e.preventDefault();
         const req = $('#pw-request').val();
@@ -1296,115 +1400,7 @@ function bindEvents() {
         }
     });
 
-    // ===================================
-    // 开场白相关事件 (使用 Delegation)
-    // ===================================
-
-    // 轮播导航
-    $(document).on('click.pw', '#pw-prev-slide', () => { if (currentSlideIndex > 0) { currentSlideIndex--; updateCarousel(); } });
-    $(document).on('click.pw', '#pw-next-slide', () => { if (currentSlideIndex < totalSlides - 1) { currentSlideIndex++; updateCarousel(); } });
-
-    // 开场白按钮：存入草稿
-    $(document).on('click.pw', '.snapshot-btn', function() {
-        const content = $(this).closest('.pw-opening-card').find('.pw-opening-textarea').val();
-        const context = getContext();
-        const userName = $('.persona_name').first().text().trim() || "User";
-        const charName = context.characters[context.characterId]?.name || "";
-        const title = `${userName} & ${charName} (Opening) - ${new Date().toLocaleDateString()}`;
-        
-        saveHistory({ 
-            request: $('#pw-opening-req').val() || "单独保存开场白", 
-            timestamp: new Date().toLocaleString(), 
-            title: title, 
-            data: { name: "Opening", resultText: content, type: 'opening' } 
-        });
-        toastr.success("已存入草稿箱");
-    });
-
-    // 开场白按钮：应用
-    $(document).on('click.pw', '.apply-btn', async function() {
-        const finalContent = $(this).closest('.pw-opening-card').find('.pw-opening-textarea').val();
-        if(confirm("确定将此内容替换为当前对话的开场白（第0层消息）吗？")) {
-            const context = getContext();
-            if (context.chat && context.chat.length > 0) {
-                context.chat[0].mes = finalContent;
-                await saveChat();
-                await reloadCurrentChat();
-                toastr.success("开场白已更新");
-            } else {
-                toastr.warning("当前没有对话可修改");
-            }
-        }
-    });
-
-    // 开场白按钮：显示润色框
-    $(document).on('click.pw', '.toggle-refine-btn', function() {
-        $(this).closest('.pw-opening-card').find('.pw-card-refine-box').slideToggle();
-    });
-
-    // 开场白按钮：执行润色
-    $(document).on('click.pw', '.refine-confirm-btn', async function() {
-        const $card = $(this).closest('.pw-opening-card');
-        const refineInput = $card.find('.pw-card-refine-input').val();
-        if(!refineInput) return toastr.warning("请输入要求");
-        
-        const oldContent = $card.find('.pw-opening-textarea').val();
-        const btn = $(this);
-        btn.prop('disabled', true).html('<i class="fas fa-spinner fa-spin"></i> 处理中');
-        
-        try {
-            // 准备上下文
-            const wiContent = await collectActiveWorldInfoContent();
-            const charPersona = getCharacterPersonaString();
-            const userPersona = $('#pw-result-text').val() || getActivePersonaDescription();
-            const modelVal = $('#pw-api-source').val() === 'independent' ? $('#pw-api-model-select').val() : null;
-
-            const config = {
-                mode: 'opening_refine', request: refineInput, currentText: oldContent,
-                wiContext: wiContent, charPersona: charPersona, userPersona: userPersona,
-                apiSource: $('#pw-api-source').val(), indepApiUrl: $('#pw-api-url').val(),
-                indepApiKey: $('#pw-api-key').val(), indepApiModel: modelVal
-            };
-            
-            const refinedText = await runGeneration(config, config);
-            currentRefiningCard = $card;
-            
-            // 标记Diff来源为开场白
-            $('#pw-diff-overlay').data('source', 'opening');
-            $('#pw-diff-raw-textarea').val(lastRawResponse);
-            
-            // 清空列表，因为开场白用专用Tab视图
-            $('#pw-diff-list').empty();
-
-            // 渲染开场白专用的 Diff Tab 内容
-            // 原版本 (readonly)
-            const oldTabHtml = `<textarea class="pw-diff-raw-textarea" readonly>${oldContent}</textarea>`;
-            // 新版本 (editable)
-            const newTabHtml = `<textarea class="pw-diff-raw-textarea" id="pw-opening-new-textarea">${refinedText}</textarea>`;
-            
-            // 修改 Tab 标题和内容逻辑
-            $('.pw-diff-tab[data-view="diff"]').find('.main-text').text('原版本');
-            $('.pw-diff-tab[data-view="diff"]').find('.sub-text').text('（只读）');
-            $('.pw-diff-tab[data-view="diff"]').removeClass('active');
-            
-            $('.pw-diff-tab[data-view="raw"]').find('.main-text').text('新版本');
-            $('.pw-diff-tab[data-view="raw"]').find('.sub-text').text('（可编辑）');
-            $('.pw-diff-tab[data-view="raw"]').addClass('active');
-
-            $('#pw-diff-list-view').html(oldTabHtml).hide();
-            $('#pw-diff-raw-view').html(newTabHtml).show();
-
-            $('#pw-diff-overlay').fadeIn();
-            $card.find('.pw-card-refine-input').val(''); 
-
-        } catch(e) {
-            console.error(e);
-            toastr.error("润色失败: " + e.message);
-        } finally {
-            btn.prop('disabled', false).html('<i class="fa-solid fa-magic"></i> 确认润色');
-        }
-    });
-
+    // Generate Opening
     $(document).on('click.pw', '#pw-btn-gen-opening', async function(e) {
         e.preventDefault();
         const req = $('#pw-opening-req').val();
@@ -1431,19 +1427,8 @@ function bindEvents() {
             
             const rawText = await runGeneration(config, config);
             
-            // 生成完整开场白集合的草稿
-            const context = getContext();
-            const userName = $('.persona_name').first().text().trim() || "User";
-            const charName = context.characters[context.characterId]?.name || "";
-            const title = `${userName} & ${charName} (Opening Set) - ${new Date().toLocaleDateString()}`;
-
-            saveHistory({ 
-                request: req || "开场白生成", 
-                timestamp: new Date().toLocaleString(), 
-                title: title, 
-                data: { name: "Opening", resultText: rawText, type: 'opening' } 
-            });
-
+            // [Req 2.3] Remove auto-save to drafts. Only explicit save does that.
+            // But we keep render.
             renderOpeningResults(rawText);
             
         } catch (e) {
@@ -1494,16 +1479,17 @@ function bindEvents() {
         }
     });
 
+    // Save Draft (Persona)
     $(document).on('click.pw', '#pw-snapshot', function () {
         const text = $('#pw-result-text').val();
         const req = $('#pw-request').val();
         if (!text && !req) return toastr.warning("没有任何内容可保存");
-        const context = getContext();
-        const userName = $('.persona_name').first().text().trim() || "User";
-        const charName = context.characters[context.characterId]?.name || "";
-        // 草稿标题逻辑 - 人设
-        const defaultTitle = charName ? `${userName} & ${charName} (Persona) - ${new Date().toLocaleDateString()}` : `${userName} (Persona) - ${new Date().toLocaleDateString()}`;
-        saveHistory({ request: req || "无", timestamp: new Date().toLocaleString(), title: defaultTitle, data: { name: userName, resultText: text || "(无)", type: 'persona' } });
+        saveHistory({ 
+            request: req || "无", 
+            timestamp: new Date().toLocaleString(), 
+            title: "", // Let default logic handle it
+            data: { name: "Persona", resultText: text || "(无)", type: 'persona' } 
+        });
         toastr.success(TEXT.TOAST_SNAPSHOT);
     });
 
@@ -1638,8 +1624,8 @@ const renderHistoryList = () => {
 
     filtered.forEach((item, index) => {
         const previewText = item.data.resultText || '无内容';
-        const displayTitle = item.title || "未命名";
-        const typeLabel = item.data.type === 'opening' ? '<span style="color:#e0af68; font-size:0.8em; border:1px solid #e0af68; border-radius:3px; padding:0 3px; margin-right:5px;">开场白</span>' : '';
+        const displayTitle = item.title || "User & Char"; // Fallback default
+        const typeLabel = item.data.type === 'opening' ? '<span style="color:#e0af68; font-size:0.8em; border:1px solid #e0af68; border-radius:3px; padding:0 3px; margin-right:5px;">开场白</span>' : '<span style="color:#9ece6a; font-size:0.8em; border:1px solid #9ece6a; border-radius:3px; padding:0 3px; margin-right:5px;">人设</span>';
 
         const $el = $(`
         <div class="pw-history-item">
