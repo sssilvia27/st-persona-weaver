@@ -478,7 +478,7 @@ async function getWorldBookEntries(bookName) {
     return [];
 }
 
-// [Updated] Generation Logic
+// [Updated] Generation Logic (FIXED: Reverted Main API to simple quiet prompt)
 async function runGeneration(data, apiConfig) {
     const context = getContext();
     const charId = context.characterId;
@@ -511,10 +511,7 @@ async function runGeneration(data, apiConfig) {
             let baseUrl = apiConfig.indepApiUrl.replace(/\/$/, '');
             if (baseUrl.endsWith('/chat/completions')) baseUrl = baseUrl.replace(/\/chat\/completions$/, '');
             const url = `${baseUrl}/chat/completions`;
-            
-            // [FIXED] Changed role from 'system' to 'user' to satisfy Gemini/Google API requirements
             const messages = [{ role: 'user', content: systemPrompt }];
-            
             const res = await fetch(url, {
                 method: 'POST', 
                 headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiConfig.indepApiKey}` },
@@ -531,29 +528,10 @@ async function runGeneration(data, apiConfig) {
             if (!json.choices || !json.choices.length) throw new Error("API 返回格式错误: 找不到 choices");
             responseContent = json.choices[0].message.content;
         } else {
-            if (window.TavernHelper && typeof window.TavernHelper.generateRaw === 'function') {
-                console.log("[PW] Using TavernHelper.generateRaw");
-                responseContent = await window.TavernHelper.generateRaw({
-                    user_input: '',
-                    // [FIXED] Changed role from 'system' to 'user' for compatibility
-                    ordered_prompts: [{ role: 'user', content: systemPrompt }],
-                    overrides: {
-                        chat_history: { prompts: [] },
-                        world_info_before: '',
-                        world_info_after: '',
-                        persona_description: '',
-                        char_description: '',
-                        char_personality: '',
-                        scenario: '',
-                        dialogue_examples: ''
-                    }
-                });
-            } else if (typeof context.generateQuietPrompt === 'function') {
-                console.log("[PW] Using context.generateQuietPrompt (Legacy)");
-                responseContent = await context.generateQuietPrompt(systemPrompt, false, false, null, "System");
-            } else {
-                throw new Error("ST版本过旧或未安装 TavernHelper，不支持主API生成");
-            }
+            // [Fix] Reverted to the simple method that worked in your original code
+            if (typeof context.generateQuietPrompt !== 'function') throw new Error("ST版本过旧，不支持后台生成");
+            // Note: generateQuietPrompt automatically uses the Main API logic
+            responseContent = await context.generateQuietPrompt(systemPrompt, false, false, null, "System");
         }
     } finally { clearTimeout(timeoutId); }
     
