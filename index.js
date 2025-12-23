@@ -1,5 +1,5 @@
-import { extension_settings, getContext } from "../../../extensions.js";
-import { saveSettingsDebounced, callPopup, getRequestHeaders, saveChat, reloadCurrentChat, saveCharacterDebounced } from "../../../../script.js";
+import { extension_settings } from "../../../extensions.js";
+import { saveSettingsDebounced, callPopup, getRequestHeaders, saveSettings } from "../../../../script.js";
 
 const extensionName = "st-persona-weaver";
 const STORAGE_KEY_HISTORY = 'pw_history_v20';
@@ -134,7 +134,6 @@ const defaultSettings = {
 };
 
 const TEXT = {
-    // [修改] 移除了内联 style，改用 class="pw-title-icon"
     PANEL_TITLE: `<span class="pw-title-icon"><i class="fa-solid fa-wand-magic-sparkles"></i></span>User人设生成器`,
     BTN_TITLE: "打开设定生成器",
     TOAST_SAVE_SUCCESS: (name) => `Persona "${name}" 已保存并覆盖！`,
@@ -158,13 +157,14 @@ let isProcessing = false;
 let currentGreetingsList = []; 
 
 // ============================================================================
-// 工具函数
+// 工具函数 (修复了数据获取源)
 // ============================================================================
 const yieldToBrowser = () => new Promise(resolve => requestAnimationFrame(resolve));
 const forcePaint = () => new Promise(resolve => setTimeout(resolve, 50));
 
+// [修复] 使用全局 window.SillyTavern.getContext() 确保获取到最新数据
 function getCharacterInfoText() {
-    const context = getContext();
+    const context = window.SillyTavern.getContext();
     const charId = context.characterId;
     if (charId === undefined || !context.characters[charId]) return "";
 
@@ -179,8 +179,9 @@ function getCharacterInfoText() {
     return parts.join('\n\n');
 }
 
+// [修复] 使用全局上下文获取开场白
 function getCharacterGreetingsList() {
-    const context = getContext();
+    const context = window.SillyTavern.getContext();
     const charId = context.characterId;
     if (charId === undefined || !context.characters[charId]) return [];
 
@@ -297,6 +298,7 @@ async function collectContextData() {
         for (const bookName of allBooks) {
             await yieldToBrowser();
             try {
+                // 注意：这里依赖 DOM，必须保证 Context 标签页渲染正确
                 $('#pw-wi-container .pw-wi-list[data-book="' + bookName + '"] .pw-wi-check:checked').each(function() {
                     const content = decodeURIComponent($(this).data('content'));
                     wiContent.push(`[Entry from ${bookName}]:\n${content}`);
@@ -317,10 +319,12 @@ async function collectContextData() {
     };
 }
 
+// [修复] 使用全局上下文
 function getActivePersonaDescription() {
     const domVal = $('#persona_description').val();
     if (domVal !== undefined && domVal !== null) return domVal;
-    const context = getContext();
+    
+    const context = window.SillyTavern.getContext();
     if (context && context.powerUserSettings) {
         if (context.powerUserSettings.persona_description) return context.powerUserSettings.persona_description;
         const selected = context.powerUserSettings.persona_selected;
@@ -363,7 +367,7 @@ function saveHistory(item) {
     const limit = extension_settings[extensionName]?.historyLimit || 50;
     
     if (!item.title || item.title === "未命名") {
-        const context = getContext();
+        const context = window.SillyTavern.getContext();
         const userName = $('.persona_name').first().text().trim() || "User";
         const charName = context.characters[context.characterId]?.name || "Char";
         item.title = `${userName} & ${charName}`;
@@ -378,16 +382,19 @@ function saveState(data) { localStorage.setItem(STORAGE_KEY_STATE, JSON.stringif
 function loadState() { try { return JSON.parse(localStorage.getItem(STORAGE_KEY_STATE)) || {}; } catch { return {}; } }
 
 async function forceSavePersona(name, description) {
-    const context = getContext();
+    const context = window.SillyTavern.getContext();
     if (!context.powerUserSettings.personas) context.powerUserSettings.personas = {};
     context.powerUserSettings.personas[name] = description;
     context.powerUserSettings.persona_selected = name;
+    
+    // UI Update
     const $nameInput = $('#your_name');
     const $descInput = $('#persona_description');
     if ($nameInput.length) $nameInput.val(name).trigger('input').trigger('change');
     if ($descInput.length) $descInput.val(description).trigger('input').trigger('change');
     const $h5Name = $('h5#your_name');
     if ($h5Name.length) $h5Name.text(name);
+    
     await saveSettingsDebounced();
     return true;
 }
@@ -454,8 +461,9 @@ async function loadAvailableWorldBooks() {
     availableWorldBooks = [...new Set(availableWorldBooks)].filter(x => x).sort();
 }
 
+// [修复] 使用全局上下文获取绑定的世界书
 async function getContextWorldBooks(extras = []) {
-    const context = getContext();
+    const context = window.SillyTavern.getContext();
     const books = new Set(extras);
     const charId = context.characterId;
     if (charId !== undefined && context.characters[charId]) {
@@ -480,13 +488,12 @@ async function getWorldBookEntries(bookName) {
 }
 
 // ============================================================================
-// [兼容性优化版] Generation Logic - 纯净上下文 + User 角色发送
+// [纯净版] Generation Logic
 // ============================================================================
 async function runGeneration(data, apiConfig) {
     // 获取全局上下文
     const stContext = window.SillyTavern.getContext(); 
     
-    // 获取当前用户名称 (仅用于替换变量)
     let currentName = $('.persona_name').first().text().trim();
     if (!currentName) currentName = $('h5#your_name').text().trim();
     if (!currentName) currentName = "User";
@@ -496,14 +503,13 @@ async function runGeneration(data, apiConfig) {
 
     if (!promptsCache || !promptsCache.initial) loadData(); 
 
-    // 获取用于构建 Prompt 的片段
     const charInfoText = getCharacterInfoText();
 
-    // 1. 手动构建 Prompt 内容
+    // 1. 手动构建 Prompt (包含 Context Tab 选中的内容)
     let systemTemplate = promptsCache.initial;
     if (data.mode === 'refine') systemTemplate = promptsCache.refine;
 
-    // 虽然变量名还是 systemPrompt，但我们会把它作为 User 消息发送
+    // 所有的上下文都在这里被填入了 Prompt
     let finalPromptContent = systemTemplate
         .replace(/{{user}}/g, currentName)
         .replace(/{{char}}/g, charName)
@@ -519,7 +525,6 @@ async function runGeneration(data, apiConfig) {
     // 2. 开始生成
     try {
         if (apiConfig.apiSource === 'independent') {
-            // === 独立 API 逻辑 ===
             console.log("[PW] Using Independent API (Role: User)");
             const controller = new AbortController();
             const timeoutId = setTimeout(() => controller.abort(), 120000); 
@@ -536,7 +541,6 @@ async function runGeneration(data, apiConfig) {
                     },
                     body: JSON.stringify({ 
                         model: apiConfig.indepApiModel, 
-                        // [修改] 将 role 改为 user 以获得最大兼容性
                         messages: [{ role: 'user', content: finalPromptContent }], 
                         temperature: 0.7 
                     }),
@@ -551,36 +555,27 @@ async function runGeneration(data, apiConfig) {
             }
 
         } else {
-            // === 主 API 逻辑 ===
             console.log("[PW] Using Main API (Clean Context, Role: User)");
 
             if (window.TavernHelper && typeof window.TavernHelper.generateRaw === 'function') {
                 
                 responseContent = await window.TavernHelper.generateRaw({
-                    // 不传 user_input，防止酒馆自动拼接
                     user_input: '', 
                     
-                    // [修改] 将 role 改为 user
-                    // 这样对于 Claude/Gemini 等模型，这就是一条标准的 User 指令
                     ordered_prompts: [
                         { role: 'user', content: finalPromptContent }
                     ],
 
-                    // 依然保持强制清空所有上下文，防止污染
+                    // 屏蔽自动注入，防止 AI 收到双倍信息
                     overrides: {
-                        chat_history: { prompts: [] }, // 确保不发送历史记录
-                        
+                        chat_history: { prompts: [] }, 
                         world_info_before: '',
                         world_info_after: '',
-                        
-                        persona_description: '', // 确保不发送 User 人设
-                        
+                        persona_description: '', 
                         char_description: '',
                         char_personality: '',
                         scenario: '',
-                        
                         dialogue_examples: '',
-                        
                         chat_history: {
                             author_note: '', 
                             prompts: []
@@ -588,8 +583,7 @@ async function runGeneration(data, apiConfig) {
                     }
                 });
             } else {
-                const errorMsg = "错误：主 API 纯净模式需要安装 TavernHelper 插件。\n\n" +
-                               "原因：SillyTavern 原生方法无法彻底屏蔽默认的人设、世界书和聊天记录。";
+                const errorMsg = "错误：主 API 纯净模式需要安装 TavernHelper 插件。";
                 toastr.error(errorMsg, "缺少依赖");
                 throw new Error(errorMsg);
             }
@@ -608,7 +602,7 @@ async function runGeneration(data, apiConfig) {
 // ============================================================================
 
 async function openCreatorPopup() {
-    const context = getContext();
+    const context = window.SillyTavern.getContext(); // [修复]
     loadData();
     await loadAvailableWorldBooks();
     const savedState = loadState();
@@ -635,7 +629,7 @@ async function openCreatorPopup() {
         return `<option disabled>未找到世界书</option>`;
     };
 
-    const charName = getContext().characters[getContext().characterId]?.name || "None";
+    const charName = context.characters[context.characterId]?.name || "None";
     const headerTitle = `${TEXT.PANEL_TITLE}<span class="pw-header-subtitle">User: ${currentName} & Char: ${charName}</span>`;
 
     const html = `
@@ -815,7 +809,6 @@ async function openCreatorPopup() {
                     <textarea id="pw-prompt-initial" class="pw-textarea pw-auto-height" style="min-height:150px; font-size:0.85em;">${promptsCache.initial}</textarea>
                     
                     <div style="display:flex; justify-content:space-between; margin-top:15px;"><span class="pw-prompt-label">人设润色指令 (System Prompt)</span><button class="pw-mini-btn" id="pw-reset-refine" style="font-size:0.7em;">恢复默认</button></div>
-                    <!-- [Updated] Added missing buttons for refine -->
                     <div class="pw-var-btns">
                         <div class="pw-var-btn" data-ins="{{char}}"><span>Char名</span><span class="code">{{char}}</span></div>
                         <div class="pw-var-btn" data-ins="{{charInfo}}"><span>角色设定</span><span class="code">{{charInfo}}</span></div>
@@ -866,7 +859,7 @@ function bindEvents() {
 
     console.log("[PW] Binding Events (Standard)...");
 
-    const context = getContext();
+    const context = window.SillyTavern.getContext(); // [修复]
     if (context && context.eventSource) {
         context.eventSource.on(context.eventTypes.APP_READY, addPersonaButton);
         context.eventSource.on(context.eventTypes.MOVABLE_PANELS_RESET, addPersonaButton);
@@ -892,10 +885,7 @@ function bindEvents() {
             $toggleBtn.hide();
         } else if (currentGreetingsList[idx]) {
             $preview.val(currentGreetingsList[idx].content).show();
-            // Reset Toggle State to "Expanded"
             $toggleBtn.show().html('<i class="fa-solid fa-angle-up"></i> 收起预览');
-            
-            // Adjust height
             requestAnimationFrame(() => {
                 $preview.height('auto');
                 $preview.height($preview[0].scrollHeight + 'px');
@@ -932,7 +922,6 @@ function bindEvents() {
     });
 
     // --- Template Editing ---
-    // [修改] 移除了 .css('color', ...) 改用 .addClass('editing') 和 .removeClass('editing')
     $(document).on('click.pw', '#pw-toggle-edit-template', () => {
         isEditingTemplate = !isEditingTemplate;
         if (isEditingTemplate) {
@@ -987,7 +976,7 @@ function bindEvents() {
         }
     });
 
-    // --- Float Button Selection Check ---
+    // --- Float Button ---
     let selectionTimeout;
     const checkSelection = () => {
         clearTimeout(selectionTimeout);
@@ -1072,7 +1061,7 @@ function bindEvents() {
         }
     });
 
-    // Refine (Persona)
+    // Refine
     $(document).on('click.pw', '#pw-btn-refine', async function (e) {
         e.preventDefault();
         
@@ -1160,7 +1149,6 @@ function bindEvents() {
 
             $('#pw-diff-overlay').data('source', 'persona');
             
-            // Restore Tab names
             $('.pw-diff-tab[data-view="diff"] div:first-child').text('智能对比');
             $('.pw-diff-tab[data-view="diff"] .pw-tab-sub').text('选择编辑');
             $('.pw-diff-tab[data-view="raw"] div:first-child').text('新版原文');
@@ -1197,9 +1185,7 @@ function bindEvents() {
 
     $(document).on('click.pw', '#pw-diff-confirm', function () {
         const activeTab = $('.pw-diff-tab.active').data('view');
-        
         let finalContent = "";
-
         if (activeTab === 'raw') {
             finalContent = $('#pw-diff-raw-textarea').val();
         } else {
@@ -1215,7 +1201,6 @@ function bindEvents() {
             finalContent = finalLines.join('\n\n');
         }
         $('#pw-result-text').val(finalContent).trigger('input');
-
         $('#pw-diff-overlay').fadeOut();
         saveCurrentState();
         toastr.success("修改已应用");
@@ -1223,7 +1208,7 @@ function bindEvents() {
 
     $(document).on('click.pw', '#pw-diff-cancel', () => $('#pw-diff-overlay').fadeOut());
 
-    // Generate Persona
+    // Generate
     $(document).on('click.pw', '#pw-btn-gen', async function (e) {
         e.preventDefault();
         
@@ -1246,6 +1231,7 @@ function bindEvents() {
         $('#pw-result-text').val('');
 
         try {
+            // Context collection will now work because rendering is fixed
             const contextData = await collectContextData();
             const modelVal = $('#pw-api-source').val() === 'independent' ? $('#pw-api-model-select').val() : null;
             const config = {
@@ -1313,7 +1299,6 @@ function bindEvents() {
         }
     });
 
-    // Save Draft (Persona)
     $(document).on('click.pw', '#pw-snapshot', function () {
         const text = $('#pw-result-text').val();
         const req = $('#pw-request').val();
@@ -1321,7 +1306,7 @@ function bindEvents() {
         saveHistory({ 
             request: req || "无", 
             timestamp: new Date().toLocaleString(), 
-            title: "", // Let default logic handle it
+            title: "",
             data: { name: "Persona", resultText: text || "(无)", type: 'persona' } 
         });
         toastr.success(TEXT.TOAST_SNAPSHOT);
