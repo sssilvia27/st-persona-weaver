@@ -286,6 +286,7 @@ async function collectContextData() {
     let wiContent = [];
     let greetingsContent = "";
 
+    // 1. 收集世界书
     try {
         const boundBooks = await getContextWorldBooks();
         const manualBooks = window.pwExtraBooks || [];
@@ -303,6 +304,7 @@ async function collectContextData() {
         }
     } catch (e) { console.warn(e); }
 
+    // 2. 收集开场白
     const selectedIdx = $('#pw-greetings-select').val();
     if (selectedIdx !== "" && selectedIdx !== null && currentGreetingsList[selectedIdx]) {
         greetingsContent = currentGreetingsList[selectedIdx].content;
@@ -381,15 +383,23 @@ function injectStyles() {
     const css = `
     #pw-api-model-select { flex: 1; width: 0; min-width: 0; text-overflow: ellipsis; overflow: hidden; white-space: nowrap; }
     
-    /* [Updated] Transparent button with gold border */
+    /* [Updated] Load Button Style */
     .pw-load-btn { 
-        font-size: 0.85em; background: transparent; 
-        border: 1px solid #e0af68; color: #e0af68; 
-        padding: 4px 12px; border-radius: 4px; cursor: pointer; 
-        font-weight: bold; margin-left: auto; display: inline-flex; 
-        align-items: center; transition: all 0.2s; 
+        font-size: 0.85em; 
+        background: transparent; /* No fill */
+        border: 1px solid #e0af68; 
+        padding: 4px 12px; 
+        border-radius: 4px; 
+        cursor: pointer; 
+        color: #e0af68; 
+        font-weight: bold; 
+        margin-left: auto; 
+        display: inline-flex; align-items: center; transition: all 0.2s; 
     }
-    .pw-load-btn:hover { background: rgba(224, 175, 104, 0.1); transform: translateY(-1px); box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+    .pw-load-btn:hover { 
+        background: rgba(224, 175, 104, 0.1); 
+        box-shadow: 0 0 5px rgba(224, 175, 104, 0.3); 
+    }
 
     .pw-template-textarea { background: var(--smart-theme-input-bg, rgba(0, 0, 0, 0.5)) !important; color: var(--smart-theme-body-color, #eee) !important; font-family: 'Consolas', 'Monaco', monospace; line-height: 1.4; height: 350px !important; border-radius: 0 0 6px 6px !important; border-top: none !important; }
     
@@ -439,35 +449,21 @@ function injectStyles() {
     .pw-float-quote-btn { position: fixed; top: calc(20% + 60px); right: 0; background: linear-gradient(135deg, #e0af68, #d08f40); color: #1a1a1a; padding: 8px 12px; border-radius: 20px 0 0 20px; font-weight: bold; font-size: 0.85em; box-shadow: -2px 2px 8px rgba(0,0,0,0.4); cursor: pointer; z-index: 9999; display: none; align-items: center; gap: 4px; border: 1px solid rgba(255,255,255,0.3); border-right: none; backdrop-filter: blur(5px); }
     .pw-float-quote-btn:hover { padding-right: 18px; transform: translateX(-2px); }
     
-    /* Z-Index for diff overlay */
     .pw-diff-container { z-index: 2000 !important; background: var(--smart-theme-bg, #151515); }
 
-    /* Collapsible headers */
     .pw-context-header { padding: 10px; background: rgba(0,0,0,0.2); cursor: pointer; display: flex; justify-content: space-between; align-items: center; border-radius: 6px; user-select: none; }
     .pw-context-header:hover { background: rgba(0,0,0,0.3); }
     
-    /* [Updated] Greeting Preview & Buttons */
-    .pw-greetings-preview-box { display:none; border:1px solid var(--SmartThemeBorderColor); border-radius:4px; margin-top:8px; overflow:hidden; }
-    /* Dark semi-transparent background for readability */
-    #pw-greetings-preview { display:block; background: rgba(0, 0, 0, 0.5) !important; border:none; padding:8px; color: #eee !important; font-size:0.9em; width:100%; box-sizing:border-box; resize:vertical; min-height:60px; line-height: 1.5; }
+    /* [Updated] Greetings Preview - Unified style with WI Desc */
+    .pw-greetings-preview-box { display:none; background: rgba(0,0,0,0.3); border-radius:4px; margin-top:8px; overflow:hidden; }
+    #pw-greetings-preview { display:block; background: transparent !important; border:none; padding:8px; color: inherit !important; font-size:0.9em; width:100%; box-sizing:border-box; resize:vertical; min-height:60px; line-height: 1.5; }
     
-    /* Bottom Collapse Button */
-    .pw-preview-close.bottom { 
-        font-size:0.85em; text-align:center; padding:5px; cursor:pointer; opacity:0.8; 
-        background: rgba(0,0,0,0.4); color: #ccc; 
-        border-top: 1px solid rgba(128,128,128,0.3);
-        display:flex; align-items:center; justify-content:center; gap:5px; transition:all 0.2s; 
-    }
-    .pw-preview-close.bottom:hover { opacity:1; background:rgba(0,0,0,0.6); color: #fff; }
-
-    /* Expand Bar (shown when collapsed) */
-    .pw-preview-expand-bar {
-        display: none; text-align: center; padding: 6px; cursor: pointer;
-        font-size: 0.85em; color: #aaa; background: rgba(0,0,0,0.2);
-        border: 1px solid var(--SmartThemeBorderColor); border-radius: 4px; margin-top: 8px;
+    .pw-preview-close { 
+        text-align:center; font-size:0.8em; opacity:0.6; cursor:pointer; 
+        margin: 0; padding: 4px 0;
         transition: all 0.2s;
     }
-    .pw-preview-expand-bar:hover { background: rgba(0,0,0,0.3); color: #fff; border-color: #7aa2f7; }
+    .pw-preview-close:hover { opacity:1; color: #5b8db8; }
     `;
     $('<style>').attr('id', styleId).text(css).appendTo('head');
 }
@@ -800,16 +796,14 @@ async function openCreatorPopup() {
                         <option value="">(不使用开场白)</option>
                     </select>
                 </div>
-                <!-- Preview box with only BOTTOM close button -->
                 <div class="pw-greetings-preview-box">
-                    <textarea id="pw-greetings-preview" readonly></textarea>
-                    <div class="pw-preview-close bottom" id="pw-greetings-close-bottom">
+                    <div class="pw-preview-close" id="pw-greetings-close-top">
                         <i class="fa-solid fa-angle-up"></i> 收起预览
                     </div>
-                </div>
-                <!-- Expand Bar (shown when collapsed) -->
-                <div id="pw-greetings-show-bar" class="pw-preview-expand-bar">
-                    <i class="fa-solid fa-angle-down"></i> 展开开场白预览
+                    <textarea id="pw-greetings-preview" readonly></textarea>
+                    <div class="pw-preview-close" id="pw-greetings-close-bottom">
+                        <i class="fa-solid fa-angle-up"></i> 收起预览
+                    </div>
                 </div>
             </div>
 
@@ -868,6 +862,7 @@ async function openCreatorPopup() {
                     <textarea id="pw-prompt-initial" class="pw-textarea pw-auto-height" style="min-height:150px; font-size:0.85em;">${promptsCache.initial}</textarea>
                     
                     <div style="display:flex; justify-content:space-between; margin-top:15px;"><span class="pw-prompt-label">人设润色指令 (System Prompt)</span><button class="pw-mini-btn" id="pw-reset-refine" style="font-size:0.7em;">恢复默认</button></div>
+                    <!-- [Updated] Added missing buttons for refine -->
                     <div class="pw-var-btns">
                         <div class="pw-var-btn" data-ins="{{char}}"><span>Char名</span><span class="code">{{char}}</span></div>
                         <div class="pw-var-btn" data-ins="{{charInfo}}"><span>角色设定</span><span class="code">{{charInfo}}</span></div>
@@ -938,10 +933,7 @@ function bindEvents() {
         const idx = $(this).val();
         const $box = $('.pw-greetings-preview-box');
         const $preview = $('#pw-greetings-preview');
-        const $bar = $('#pw-greetings-show-bar');
         
-        $bar.hide(); // reset bar state
-
         if (idx === "") {
             $box.slideUp();
         } else if (currentGreetingsList[idx]) {
@@ -955,16 +947,9 @@ function bindEvents() {
         }
     });
 
-    // --- Greetings Close Button (Bottom only) ---
-    $(document).on('click.pw', '#pw-greetings-close-bottom', function() {
+    // --- Greetings Close Button (Both Top & Bottom) ---
+    $(document).on('click.pw', '.pw-preview-close', function() {
         $('.pw-greetings-preview-box').slideUp();
-        $('#pw-greetings-show-bar').slideDown(); // Show the expand button
-    });
-
-    // --- Greetings Expand Bar ---
-    $(document).on('click.pw', '#pw-greetings-show-bar', function() {
-        $('.pw-greetings-preview-box').slideDown();
-        $(this).slideUp();
     });
 
     // --- 复制功能 ---
