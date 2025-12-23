@@ -5,7 +5,7 @@ const extensionName = "st-persona-weaver";
 const STORAGE_KEY_HISTORY = 'pw_history_v20';
 const STORAGE_KEY_STATE = 'pw_state_v20';
 const STORAGE_KEY_TEMPLATE = 'pw_template_v2';
-const STORAGE_KEY_PROMPTS = 'pw_prompts_v8'; // Bumped version for opening prompts
+const STORAGE_KEY_PROMPTS = 'pw_prompts_v8'; // Version bumped
 const BUTTON_ID = 'pw_persona_tool_btn';
 
 const defaultYamlTemplate =
@@ -164,8 +164,7 @@ Strictly follow this format for each option (generate 3-4 options):
 \`\`\`
 [Content of Option 2]
 \`\`\`
-...
-`;
+...`;
 
 const defaultSystemPromptOpeningRefine =
 `Refine the following Opening Scene (First Message).
@@ -217,7 +216,7 @@ let promptsCache = {
     initial: defaultSystemPromptInitial, 
     refine: defaultSystemPromptRefine,
     opening: defaultSystemPromptOpening,
-    openingRefine: defaultSystemPromptOpeningRefine 
+    openingRefine: defaultSystemPromptOpeningRefine
 };
 let availableWorldBooks = [];
 let isEditingTemplate = false;
@@ -251,19 +250,6 @@ function getCharacterInfoText() {
     return parts.join('\n\n');
 }
 
-// [New] More detailed char info for Opening Generation
-function getCharacterPersonaString() {
-    const context = getContext();
-    if (!context.characterId && context.characterId !== 0) return "No Character Selected";
-    const char = context.characters[context.characterId];
-    let parts = [];
-    if (char.name) parts.push(`Name: ${char.name}`);
-    if (char.description) parts.push(`Description:\n${char.description}`);
-    if (char.personality) parts.push(`Personality:\n${char.personality}`);
-    if (char.scenario) parts.push(`Scenario:\n${char.scenario}`);
-    return parts.join('\n\n');
-}
-
 function getCharacterGreetingsList() {
     const context = getContext();
     const charId = context.characterId;
@@ -284,78 +270,17 @@ function getCharacterGreetingsList() {
     return list;
 }
 
-// [New] Carousel Logic
-function updateCarousel() {
-    if (totalSlides === 0) return;
-    const offset = -currentSlideIndex * 100;
-    $('#pw-carousel-track').css('transform', `translateX(${offset}%)`);
-    $('#pw-slide-indicator').text(`${currentSlideIndex + 1} / ${totalSlides}`);
-    $('#pw-prev-slide').prop('disabled', currentSlideIndex === 0);
-    $('#pw-next-slide').prop('disabled', currentSlideIndex === totalSlides - 1);
-}
-
-function renderOpeningResults(rawText) {
-    const $container = $('#pw-opening-results').empty();
-    
-    // Parse response for code blocks or separators
-    let matches = [...rawText.matchAll(/```[\s\S]*?```/g)].map(m => m[0].replace(/```[a-z]*\n?/g, '').replace(/```$/, ''));
-    if (!matches || matches.length === 0) {
-        if (rawText.includes('---')) {
-            matches = rawText.split(/---+[^\n]*---+/g).map(s => s.trim()).filter(s => s.length > 10);
-        }
-    }
-    if (!matches || matches.length === 0) {
-        matches = [rawText.trim()];
-    }
-    
-    let slidesHtml = '';
-    totalSlides = matches.length;
-    
-    matches.forEach((content, i) => {
-        slidesHtml += `
-            <div class="pw-opening-card" data-index="${i}">
-                <div class="pw-opening-header">
-                    <span>开场白选项 ${i + 1}</span>
-                </div>
-                <textarea class="pw-opening-textarea">${content.trim()}</textarea>
-                
-                <div class="pw-card-refine-box">
-                    <textarea class="pw-card-refine-input" placeholder="对此开场白提出修改意见..."></textarea>
-                    <div style="text-align:right;">
-                        <button class="pw-btn save refine-confirm-btn"><i class="fa-solid fa-magic"></i> 确认润色</button>
-                    </div>
-                </div>
-
-                <div class="pw-opening-actions">
-                    <div class="pw-footer-group">
-                        <div class="pw-compact-btn pw-copy-opening-btn" title="复制内容"><i class="fa-solid fa-copy"></i></div>
-                        <div class="pw-compact-btn pw-save-draft-btn" title="保存"><i class="fa-solid fa-save"></i></div>
-                    </div>
-                    <div class="pw-footer-group" style="flex:1; justify-content:flex-end; gap: 8px;">
-                        <button class="pw-btn toggle-refine-btn" style="background:rgba(255,255,255,0.1); border-color:var(--SmartThemeBorderColor); color:var(--smart-theme-body-color);"><i class="fa-solid fa-pen-fancy"></i> 润色</button>
-                        <button class="pw-btn save apply-btn"><i class="fa-solid fa-plus-circle"></i> 加入开场白列表</button>
-                    </div>
-                </div>
-            </div>
-        `;
-    });
-
-    const carouselHtml = `
-        <div class="pw-carousel-container">
-            <div id="pw-carousel-track" class="pw-carousel-track">
-                ${slidesHtml}
-            </div>
-        </div>
-        <div class="pw-carousel-nav">
-            <button id="pw-prev-slide" class="pw-nav-btn"><i class="fa-solid fa-chevron-left"></i></button>
-            <span id="pw-slide-indicator" class="pw-slide-indicator">1 / ${totalSlides}</span>
-            <button id="pw-next-slide" class="pw-nav-btn"><i class="fa-solid fa-chevron-right"></i></button>
-        </div>
-    `;
-    
-    $container.html(carouselHtml);
-    currentSlideIndex = 0;
-    updateCarousel();
+// [New] Get full persona for opening generation
+function getCharacterPersonaString() {
+    const context = getContext();
+    if (!context.characterId && context.characterId !== 0) return "No Character Selected";
+    const char = context.characters[context.characterId];
+    let parts = [];
+    if (char.name) parts.push(`Name: ${char.name}`);
+    if (char.description) parts.push(`Description:\n${char.description}`);
+    if (char.personality) parts.push(`Personality:\n${char.personality}`);
+    if (char.scenario) parts.push(`Scenario:\n${char.scenario}`);
+    return parts.join('\n\n');
 }
 
 // ============================================================================
@@ -507,7 +432,7 @@ function loadData() {
             ...{ initial: defaultSystemPromptInitial, refine: defaultSystemPromptRefine, opening: defaultSystemPromptOpening, openingRefine: defaultSystemPromptOpeningRefine }, 
             ...p 
         };
-        // Ensure new keys exist
+        // Ensure new prompts exist if upgrading
         if (!promptsCache.opening) promptsCache.opening = defaultSystemPromptOpening;
         if (!promptsCache.openingRefine) promptsCache.openingRefine = defaultSystemPromptOpeningRefine;
     } catch { 
@@ -641,7 +566,7 @@ async function getWorldBookEntries(bookName) {
     return [];
 }
 
-// [Updated] Generation Logic supporting all modes
+// [Updated] Generation Logic - supports Opening mode
 async function runGeneration(data, apiConfig) {
     const context = getContext();
     const charId = context.characterId;
@@ -650,7 +575,6 @@ async function runGeneration(data, apiConfig) {
 
     if (!promptsCache || !promptsCache.initial) loadData(); 
 
-    // Context preparation
     const charInfoText = getCharacterInfoText();
 
     let systemTemplate = promptsCache.initial;
@@ -667,9 +591,8 @@ async function runGeneration(data, apiConfig) {
         .replace(/{{tags}}/g, currentTemplate)
         .replace(/{{input}}/g, data.request)
         .replace(/{{current}}/g, data.currentText || "")
-        // New variables for opening generation
-        .replace(/{{userPersona}}/g, data.userPersona || "")
-        .replace(/{{charPersona}}/g, data.charPersona || "");
+        .replace(/{{userPersona}}/g, data.userPersona || "") // For opening
+        .replace(/{{charPersona}}/g, data.charPersona || ""); // For opening
 
     let responseContent = "";
     const controller = new AbortController();
@@ -723,16 +646,85 @@ async function runGeneration(data, apiConfig) {
     } finally { clearTimeout(timeoutId); }
     
     lastRawResponse = responseContent;
-    
-    // Opening mode returns raw text (contains ``` blocks), others return cleaned text
-    if (data.mode === 'opening') return responseContent;
-    
+    if (data.mode === 'opening') return responseContent; // Return raw options for opening
     return responseContent.replace(/```[a-z]*\n?/g, '').replace(/```/g, '').trim();
 }
 
 // ============================================================================
 // 3. UI 渲染 logic
 // ============================================================================
+
+function updateCarousel() {
+    if (totalSlides === 0) return;
+    const offset = -currentSlideIndex * 100;
+    $('#pw-carousel-track').css('transform', `translateX(${offset}%)`);
+    $('#pw-slide-indicator').text(`${currentSlideIndex + 1} / ${totalSlides}`);
+    $('#pw-prev-slide').prop('disabled', currentSlideIndex === 0);
+    $('#pw-next-slide').prop('disabled', currentSlideIndex === totalSlides - 1);
+}
+
+function renderOpeningResults(rawText) {
+    const $container = $('#pw-opening-results').empty();
+    
+    let matches = [...rawText.matchAll(/```[\s\S]*?```/g)].map(m => m[0].replace(/```[a-z]*\n?/g, '').replace(/```$/, ''));
+    if (!matches || matches.length === 0) {
+        if (rawText.includes('---')) {
+            matches = rawText.split(/---+[^\n]*---+/g).map(s => s.trim()).filter(s => s.length > 10);
+        }
+    }
+    if (!matches || matches.length === 0) {
+        matches = [rawText.trim()];
+    }
+    
+    let slidesHtml = '';
+    totalSlides = matches.length;
+    
+    matches.forEach((content, i) => {
+        slidesHtml += `
+            <div class="pw-opening-card" data-index="${i}">
+                <div class="pw-opening-header">
+                    <span>开场白选项 ${i + 1}</span>
+                </div>
+                <textarea class="pw-opening-textarea">${content.trim()}</textarea>
+                
+                <div class="pw-card-refine-box">
+                    <textarea class="pw-card-refine-input" placeholder="对此开场白提出修改意见..."></textarea>
+                    <div style="text-align:right;">
+                        <button class="pw-btn save refine-confirm-btn"><i class="fa-solid fa-magic"></i> 确认润色</button>
+                    </div>
+                </div>
+
+                <div class="pw-opening-actions">
+                    <div class="pw-footer-group">
+                        <div class="pw-compact-btn pw-copy-opening-btn" title="复制内容"><i class="fa-solid fa-copy"></i></div>
+                        <div class="pw-compact-btn pw-save-draft-btn" title="保存"><i class="fa-solid fa-save"></i></div>
+                    </div>
+                    <div class="pw-footer-group" style="flex:1; justify-content:flex-end; gap: 8px;">
+                        <button class="pw-btn toggle-refine-btn" style="background:rgba(255,255,255,0.1); border-color:var(--SmartThemeBorderColor); color:var(--smart-theme-body-color);"><i class="fa-solid fa-pen-fancy"></i> 润色</button>
+                        <button class="pw-btn save apply-btn"><i class="fa-solid fa-plus-circle"></i> 加入开场白列表</button>
+                    </div>
+                </div>
+            </div>
+        `;
+    });
+
+    const carouselHtml = `
+        <div class="pw-carousel-container">
+            <div id="pw-carousel-track" class="pw-carousel-track">
+                ${slidesHtml}
+            </div>
+        </div>
+        <div class="pw-carousel-nav">
+            <button id="pw-prev-slide" class="pw-nav-btn"><i class="fa-solid fa-chevron-left"></i></button>
+            <span id="pw-slide-indicator" class="pw-slide-indicator">1 / ${totalSlides}</span>
+            <button id="pw-next-slide" class="pw-nav-btn"><i class="fa-solid fa-chevron-right"></i></button>
+        </div>
+    `;
+    
+    $container.html(carouselHtml);
+    currentSlideIndex = 0;
+    updateCarousel();
+}
 
 async function openCreatorPopup() {
     const context = getContext();
@@ -839,11 +831,10 @@ async function openCreatorPopup() {
         </div>
     </div>
 
-    <!-- Opening Scene View -->
     <div id="pw-view-opening" class="pw-view">
         <div class="pw-scroll-area">
             
-            <div class="pw-input-label">附加要求</div>
+            <div class="pw-section-label pw-label-gold">附加要求</div>
             <textarea id="pw-opening-req" class="pw-textarea pw-auto-height" placeholder="在此输入场景、时间、地点等要求..."></textarea>
             <button id="pw-btn-gen-opening" class="pw-btn gen" style="margin-top:10px;">生成开场白</button>
             <div id="pw-opening-results" class="pw-opening-result-container"></div>
@@ -881,7 +872,7 @@ async function openCreatorPopup() {
     <div id="pw-view-context" class="pw-view">
         <div class="pw-scroll-area">
             
-            <!-- Greetings Section -->
+            <!-- Greetings Section (Select Box + Persistent Toggle Bar) -->
             <div class="pw-card-section">
                 <div class="pw-row">
                     <label class="pw-section-label pw-label-gold">角色开场白</label>
@@ -969,6 +960,10 @@ async function openCreatorPopup() {
                     <textarea id="pw-prompt-opening" class="pw-textarea pw-auto-height" style="min-height:150px; font-size:0.85em;">${promptsCache.opening}</textarea>
 
                     <div style="display:flex; justify-content:space-between; margin-top:15px;"><span class="pw-prompt-label">开场白润色指令 (System Prompt)</span><button class="pw-mini-btn" id="pw-reset-opening-refine" style="font-size:0.7em;">恢复默认</button></div>
+                    <div class="pw-var-btns">
+                        <div class="pw-var-btn" data-ins="{{current}}"><span>原开场白</span><span class="code">{{current}}</span></div>
+                        <div class="pw-var-btn" data-ins="{{input}}"><span>要求</span><span class="code">{{input}}</span></div>
+                    </div>
                     <textarea id="pw-prompt-opening-refine" class="pw-textarea pw-auto-height" style="min-height:150px; font-size:0.85em;">${promptsCache.openingRefine}</textarea>
 
                     <div style="text-align:right; margin-top:5px;"><button id="pw-api-save" class="pw-btn primary" style="width:100%;">保存 Prompts</button></div>
@@ -1018,6 +1013,10 @@ function bindEvents() {
     }
     window.openPersonaWeaver = openCreatorPopup;
 
+    // --- 轮播图控制事件 ---
+    $(document).on('click.pw', '#pw-prev-slide', () => { if (currentSlideIndex > 0) { currentSlideIndex--; updateCarousel(); } });
+    $(document).on('click.pw', '#pw-next-slide', () => { if (currentSlideIndex < totalSlides - 1) { currentSlideIndex++; updateCarousel(); } });
+
     // --- Header Toggles (Prompt) ---
     $(document).on('click.pw', '#pw-prompt-header', function() {
         const $body = $('#pw-prompt-container');
@@ -1037,8 +1036,10 @@ function bindEvents() {
             $toggleBtn.hide();
         } else if (currentGreetingsList[idx]) {
             $preview.val(currentGreetingsList[idx].content).show();
+            // Reset Toggle State to "Expanded"
             $toggleBtn.show().html('<i class="fa-solid fa-angle-up"></i> 收起预览');
             
+            // Adjust height
             requestAnimationFrame(() => {
                 $preview.height('auto');
                 $preview.height($preview[0].scrollHeight + 'px');
@@ -1070,6 +1071,95 @@ function bindEvents() {
         const text = $(this).closest('.pw-opening-card').find('.pw-opening-textarea').val();
         navigator.clipboard.writeText(text);
         toastr.success("开场白已复制");
+    });
+
+    // --- Save Draft (Opening) ---
+    $(document).on('click.pw', '.pw-save-draft-btn', function() {
+        const content = $(this).closest('.pw-opening-card').find('.pw-opening-textarea').val();
+        const req = $('#pw-opening-req').val();
+        saveHistory({ 
+            request: req || "开场白生成", 
+            timestamp: new Date().toLocaleString(), 
+            title: "", 
+            data: { name: "Opening", resultText: content, type: 'opening' } 
+        });
+        toastr.success(TEXT.TOAST_SNAPSHOT);
+    });
+
+    // --- Apply Opening ---
+    $(document).on('click.pw', '.apply-btn', async function() {
+        const finalContent = $(this).closest('.pw-opening-card').find('.pw-opening-textarea').val();
+        const context = getContext();
+        if (context.characterId === undefined || context.characterId === null) {
+            return toastr.warning("未打开角色卡，无法添加到开场白列表");
+        }
+        const char = context.characters[context.characterId];
+        if (!char.data) char.data = {};
+        if (!char.data.alternate_greetings) char.data.alternate_greetings = [];
+        char.data.alternate_greetings.push(finalContent);
+        await saveCharacterDebounced();
+        toastr.success("已添加到角色卡开场白列表");
+    });
+
+    // --- Toggle Refine Box ---
+    $(document).on('click.pw', '.toggle-refine-btn', function() {
+        $(this).closest('.pw-opening-card').find('.pw-card-refine-box').slideToggle();
+    });
+
+    // --- Confirm Refine (Opening) -> Diff ---
+    $(document).on('click.pw', '.refine-confirm-btn', async function() {
+        console.log("[PW] Opening Refine Clicked");
+        const $card = $(this).closest('.pw-opening-card');
+        const refineInput = $card.find('.pw-card-refine-input').val();
+        if(!refineInput) return toastr.warning("请输入要求");
+        
+        const oldContent = $card.find('.pw-opening-textarea').val();
+        const btn = $(this);
+        btn.prop('disabled', true).html('<i class="fas fa-spinner fa-spin"></i> 处理中');
+        
+        try {
+            const wiContent = await collectActiveWorldInfoContent();
+            const charPersona = getCharacterPersonaString();
+            const userPersona = $('#pw-result-text').val() || getActivePersonaDescription();
+            const modelVal = $('#pw-api-source').val() === 'independent' ? $('#pw-api-model-select').val() : null;
+
+            const config = {
+                mode: 'opening_refine', request: refineInput, currentText: oldContent,
+                wiContext: wiContent, charPersona: charPersona, userPersona: userPersona,
+                apiSource: $('#pw-api-source').val(), indepApiUrl: $('#pw-api-url').val(),
+                indepApiKey: $('#pw-api-key').val(), indepApiModel: modelVal
+            };
+            
+            const refinedText = await runGeneration(config, config);
+            currentRefiningCard = $card;
+            
+            $('#pw-diff-overlay').data('source', 'opening');
+            $('#pw-diff-raw-textarea').val(lastRawResponse);
+            $('#pw-diff-list').empty();
+
+            const oldTabHtml = `<textarea class="pw-diff-raw-textarea" id="pw-opening-old-textarea" spellcheck="false">${oldContent}</textarea>`;
+            const newTabHtml = `<textarea class="pw-diff-raw-textarea" id="pw-opening-new-textarea" spellcheck="false">${refinedText}</textarea>`;
+            
+            $('.pw-diff-tab[data-view="diff"] div:first-child').text('原版本');
+            $('.pw-diff-tab[data-view="diff"] .pw-tab-sub').text('直接编辑');
+            $('.pw-diff-tab[data-view="raw"] div:first-child').text('新版本');
+            $('.pw-diff-tab[data-view="raw"] .pw-tab-sub').text('直接编辑');
+            
+            $('.pw-diff-tab[data-view="raw"]').addClass('active');
+            $('.pw-diff-tab[data-view="diff"]').removeClass('active');
+
+            $('#pw-diff-list-view').html(oldTabHtml).hide();
+            $('#pw-diff-raw-view').html(newTabHtml).show();
+
+            $('#pw-diff-overlay').fadeIn();
+            $card.find('.pw-card-refine-input').val(''); 
+
+        } catch(e) {
+            console.error(e);
+            toastr.error("润色失败: " + e.message);
+        } finally {
+            btn.prop('disabled', false).html('<i class="fa-solid fa-magic"></i> 确认润色');
+        }
     });
 
     // --- Tabs ---
@@ -1218,8 +1308,9 @@ function bindEvents() {
         $(this).addClass('active');
         const view = $(this).data('view');
         
-        // Handle Opening Refine diff view
-        if ($('#pw-diff-overlay').data('source') === 'opening') {
+        const isOpeningMode = $('#pw-diff-overlay').data('source') === 'opening';
+
+        if (isOpeningMode) {
             if (view === 'diff') { 
                 $('#pw-diff-list-view').show();
                 $('#pw-diff-raw-view').hide();
@@ -1228,7 +1319,6 @@ function bindEvents() {
                 $('#pw-diff-raw-view').show();
             }
         } else {
-            // Handle Persona Refine diff view
             if (view === 'diff') {
                 $('#pw-diff-list-view').show();
                 $('#pw-diff-raw-view').hide();
@@ -1245,17 +1335,9 @@ function bindEvents() {
     // Refine (Persona)
     $(document).on('click.pw', '#pw-btn-refine', async function (e) {
         e.preventDefault();
-        
-        if (isProcessing) return;
-        isProcessing = true;
-
         console.log("[PW] Refine Clicked");
         const refineReq = $('#pw-refine-input').val();
-        if (!refineReq) {
-            toastr.warning("请输入润色意见");
-            isProcessing = false;
-            return;
-        }
+        if (!refineReq) return toastr.warning("请输入润色意见");
         
         if(!promptsCache.initial) loadData();
 
@@ -1268,15 +1350,10 @@ function bindEvents() {
             const contextData = await collectContextData();
             const modelVal = $('#pw-api-source').val() === 'independent' ? $('#pw-api-model-select').val() : null;
             const config = {
-                mode: 'refine', 
-                request: refineReq, 
-                currentText: oldText, 
-                wiText: contextData.wi,           
-                greetingsText: contextData.greetings,
-                apiSource: $('#pw-api-source').val(), 
-                indepApiUrl: $('#pw-api-url').val(),
-                indepApiKey: $('#pw-api-key').val(), 
-                indepApiModel: modelVal
+                mode: 'refine', request: refineReq, currentText: oldText, 
+                wiText: contextData.wi, greetingsText: contextData.greetings,
+                apiSource: $('#pw-api-source').val(), indepApiUrl: $('#pw-api-url').val(),
+                indepApiKey: $('#pw-api-key').val(), indepApiModel: modelVal
             };
             const responseText = await runGeneration(config, config);
 
@@ -1349,8 +1426,7 @@ function bindEvents() {
             console.error(e);
             toastr.error("润色失败: " + e.message); 
         } finally { 
-            $btn.removeClass('fa-spinner fa-spin').addClass('fa-magic');
-            isProcessing = false;
+            $btn.removeClass('fa-spinner fa-spin').addClass('fa-magic'); 
         }
     });
 
@@ -1377,6 +1453,7 @@ function bindEvents() {
             } else {
                 finalContent = $('#pw-opening-new-textarea').val();
             }
+            
             if (currentRefiningCard) {
                 currentRefiningCard.find('.pw-opening-textarea').val(finalContent);
                 currentRefiningCard.find('.pw-card-refine-box').slideUp();
@@ -1409,17 +1486,9 @@ function bindEvents() {
     // Generate Persona
     $(document).on('click.pw', '#pw-btn-gen', async function (e) {
         e.preventDefault();
-        
-        if (isProcessing) return;
-        isProcessing = true;
-
         console.log("[PW] Gen Clicked");
         const req = $('#pw-request').val();
-        if (!req) {
-            toastr.warning("请输入要求");
-            isProcessing = false;
-            return;
-        }
+        if (!req) return toastr.warning("请输入要求");
         const $btn = $(this);
         $btn.prop('disabled', true).html('<i class="fas fa-spinner fa-spin"></i> 生成中...');
         
@@ -1432,14 +1501,10 @@ function bindEvents() {
             const contextData = await collectContextData();
             const modelVal = $('#pw-api-source').val() === 'independent' ? $('#pw-api-model-select').val() : null;
             const config = {
-                mode: 'initial', 
-                request: req, 
-                wiText: contextData.wi,
-                greetingsText: contextData.greetings,
-                apiSource: $('#pw-api-source').val(), 
-                indepApiUrl: $('#pw-api-url').val(),
-                indepApiKey: $('#pw-api-key').val(), 
-                indepApiModel: modelVal
+                mode: 'initial', request: req, 
+                wiText: contextData.wi, greetingsText: contextData.greetings,
+                apiSource: $('#pw-api-source').val(), indepApiUrl: $('#pw-api-url').val(),
+                indepApiKey: $('#pw-api-key').val(), indepApiModel: modelVal
             };
             const text = await runGeneration(config, config);
             $('#pw-result-text').val(text);
@@ -1452,7 +1517,6 @@ function bindEvents() {
             toastr.error("生成失败: " + e.message); 
         } finally { 
             $btn.prop('disabled', false).html('生成设定'); 
-            isProcessing = false;
         }
     });
 
@@ -1462,9 +1526,10 @@ function bindEvents() {
         console.log("[PW] Opening Gen Clicked");
         const req = $('#pw-opening-req').val();
         const $btn = $(this);
+        const $results = $('#pw-opening-results');
         
         $btn.prop('disabled', true).html('<i class="fas fa-spinner fa-spin"></i> 构思开场白中...');
-        $('#pw-opening-results').empty();
+        $results.empty();
         
         await forcePaint();
 
@@ -1482,6 +1547,7 @@ function bindEvents() {
             };
             
             const rawText = await runGeneration(config, config);
+            
             renderOpeningResults(rawText);
             
         } catch (e) {
@@ -1489,98 +1555,6 @@ function bindEvents() {
             toastr.error("生成失败: " + e.message);
         } finally {
             $btn.prop('disabled', false).html('生成开场白');
-        }
-    });
-
-    // Carousel Navigation
-    $(document).on('click.pw', '#pw-prev-slide', () => { if (currentSlideIndex > 0) { currentSlideIndex--; updateCarousel(); } });
-    $(document).on('click.pw', '#pw-next-slide', () => { if (currentSlideIndex < totalSlides - 1) { currentSlideIndex++; updateCarousel(); } });
-
-    // Save Draft (Opening)
-    $(document).on('click.pw', '.pw-save-draft-btn', function() {
-        const content = $(this).closest('.pw-opening-card').find('.pw-opening-textarea').val();
-        const req = $('#pw-opening-req').val();
-        saveHistory({ 
-            request: req || "开场白生成", 
-            timestamp: new Date().toLocaleString(), 
-            title: "", 
-            data: { name: "Opening", resultText: content, type: 'opening' } 
-        });
-        toastr.success(TEXT.TOAST_SNAPSHOT);
-    });
-
-    // Apply to Card (Opening)
-    $(document).on('click.pw', '.apply-btn', async function() {
-        const finalContent = $(this).closest('.pw-opening-card').find('.pw-opening-textarea').val();
-        const context = getContext();
-        if (context.characterId === undefined || context.characterId === null) {
-            return toastr.warning("未打开角色卡，无法添加到开场白列表");
-        }
-        const char = context.characters[context.characterId];
-        if (!char.data) char.data = {};
-        if (!char.data.alternate_greetings) char.data.alternate_greetings = [];
-        char.data.alternate_greetings.push(finalContent);
-        await saveCharacterDebounced();
-        toastr.success("已添加到角色卡开场白列表");
-    });
-
-    // Toggle Refine (Opening)
-    $(document).on('click.pw', '.toggle-refine-btn', function() {
-        $(this).closest('.pw-opening-card').find('.pw-card-refine-box').slideToggle();
-    });
-
-    // Confirm Refine (Opening)
-    $(document).on('click.pw', '.refine-confirm-btn', async function() {
-        console.log("[PW] Opening Refine Clicked");
-        const $card = $(this).closest('.pw-opening-card');
-        const refineInput = $card.find('.pw-card-refine-input').val();
-        if(!refineInput) return toastr.warning("请输入要求");
-        
-        const oldContent = $card.find('.pw-opening-textarea').val();
-        const btn = $(this);
-        btn.prop('disabled', true).html('<i class="fas fa-spinner fa-spin"></i> 处理中');
-        
-        try {
-            const wiContent = await collectActiveWorldInfoContent();
-            const charPersona = getCharacterPersonaString();
-            const userPersona = $('#pw-result-text').val() || getActivePersonaDescription();
-            const modelVal = $('#pw-api-source').val() === 'independent' ? $('#pw-api-model-select').val() : null;
-
-            const config = {
-                mode: 'opening_refine', request: refineInput, currentText: oldContent,
-                wiContext: wiContent, charPersona: charPersona, userPersona: userPersona,
-                apiSource: $('#pw-api-source').val(), indepApiUrl: $('#pw-api-url').val(),
-                indepApiKey: $('#pw-api-key').val(), indepApiModel: modelVal
-            };
-            
-            const refinedText = await runGeneration(config, config);
-            currentRefiningCard = $card;
-            
-            $('#pw-diff-overlay').data('source', 'opening');
-            $('#pw-diff-raw-textarea').val(lastRawResponse);
-            $('#pw-diff-list').empty();
-
-            const oldTabHtml = `<textarea class="pw-diff-raw-textarea" id="pw-opening-old-textarea" spellcheck="false">${oldContent}</textarea>`;
-            const newTabHtml = `<textarea class="pw-diff-raw-textarea" id="pw-opening-new-textarea" spellcheck="false">${refinedText}</textarea>`;
-            
-            // Reconfigure Tab labels for raw view only
-            $('.pw-diff-tab[data-view="diff"] div:first-child').text('原版本');
-            $('.pw-diff-tab[data-view="raw"] div:first-child').text('新版本');
-            
-            // Force RAW view for openings
-            $('.pw-diff-tab[data-view="raw"]').addClass('active');
-            $('.pw-diff-tab[data-view="diff"]').removeClass('active');
-            $('#pw-diff-list-view').html(oldTabHtml).hide();
-            $('#pw-diff-raw-view').html(newTabHtml).show();
-
-            $('#pw-diff-overlay').fadeIn();
-            $card.find('.pw-card-refine-input').val(''); 
-
-        } catch(e) {
-            console.error(e);
-            toastr.error("润色失败: " + e.message);
-        } finally {
-            btn.prop('disabled', false).html('<i class="fa-solid fa-magic"></i> 确认润色');
         }
     });
 
@@ -1742,7 +1716,8 @@ function addPersonaButton() {
 }
 
 jQuery(async () => {
+    // injectStyles(); // REMOVED: Styles are handled by style.css
     addPersonaButton(); // Try once immediately
     bindEvents(); // Standard event binding
-    console.log("[PW] Persona Weaver Loaded (v2.9 Full Features)");
+    console.log("[PW] Persona Weaver Loaded (v2.8 Merged Features)");
 });
