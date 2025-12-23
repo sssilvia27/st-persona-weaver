@@ -383,10 +383,10 @@ function injectStyles() {
     const css = `
     #pw-api-model-select { flex: 1; width: 0; min-width: 0; text-overflow: ellipsis; overflow: hidden; white-space: nowrap; }
     
-    /* [Updated] Load Button Style */
+    /* [Updated] Load Button Style: No background, only border */
     .pw-load-btn { 
         font-size: 0.85em; 
-        background: transparent; /* No fill */
+        background: transparent; 
         border: 1px solid #e0af68; 
         padding: 4px 12px; 
         border-radius: 4px; 
@@ -398,7 +398,6 @@ function injectStyles() {
     }
     .pw-load-btn:hover { 
         background: rgba(224, 175, 104, 0.1); 
-        box-shadow: 0 0 5px rgba(224, 175, 104, 0.3); 
     }
 
     .pw-template-textarea { background: var(--smart-theme-input-bg, rgba(0, 0, 0, 0.5)) !important; color: var(--smart-theme-body-color, #eee) !important; font-family: 'Consolas', 'Monaco', monospace; line-height: 1.4; height: 350px !important; border-radius: 0 0 6px 6px !important; border-top: none !important; }
@@ -454,16 +453,44 @@ function injectStyles() {
     .pw-context-header { padding: 10px; background: rgba(0,0,0,0.2); cursor: pointer; display: flex; justify-content: space-between; align-items: center; border-radius: 6px; user-select: none; }
     .pw-context-header:hover { background: rgba(0,0,0,0.3); }
     
-    /* [Updated] Greetings Preview - Unified style with WI Desc */
-    .pw-greetings-preview-box { display:none; background: rgba(0,0,0,0.3); border-radius:4px; margin-top:8px; overflow:hidden; }
-    #pw-greetings-preview { display:block; background: transparent !important; border:none; padding:8px; color: inherit !important; font-size:0.9em; width:100%; box-sizing:border-box; resize:vertical; min-height:60px; line-height: 1.5; }
-    
-    .pw-preview-close { 
-        text-align:center; font-size:0.8em; opacity:0.6; cursor:pointer; 
-        margin: 0; padding: 4px 0;
-        transition: all 0.2s;
+    /* [Updated] Labels - Removed backgrounds */
+    .pw-section-label { font-weight: bold; font-size: 1em; padding: 2px 4px; }
+    .pw-label-gold { color: #e0af68; }
+    .pw-label-blue { color: #7aa2f7; }
+
+    /* [Updated] Toggle Bar - Persistent bar style */
+    .pw-preview-toggle-bar {
+        background: rgba(0,0,0,0.2);
+        color: var(--smart-theme-body-color, #ccc);
+        font-size: 0.85em;
+        text-align: center;
+        padding: 6px;
+        margin-top: 8px;
+        border-radius: 4px;
+        cursor: pointer;
+        transition: background 0.2s;
+        border: 1px solid var(--SmartThemeBorderColor);
+        user-select: none;
     }
-    .pw-preview-close:hover { opacity:1; color: #5b8db8; }
+    .pw-preview-toggle-bar:hover { background: rgba(0,0,0,0.3); color: #fff; }
+
+    /* Greeting Content Box */
+    #pw-greetings-preview {
+        display: none;
+        background: rgba(0, 0, 0, 0.5) !important; 
+        border: 1px solid var(--SmartThemeBorderColor); 
+        border-top: none;
+        border-radius: 0 0 4px 4px; 
+        padding: 8px; 
+        color: #eee !important; 
+        font-size: 0.9em; 
+        width: 100%; 
+        box-sizing: border-box; 
+        resize: vertical; 
+        min-height: 60px; 
+        line-height: 1.5;
+        margin-top: -1px; /* Overlap border */
+    }
     `;
     $('<style>').attr('id', styleId).text(css).appendTo('head');
 }
@@ -788,29 +815,28 @@ async function openCreatorPopup() {
     <div id="pw-view-context" class="pw-view">
         <div class="pw-scroll-area">
             
-            <!-- Greetings Section (Select Box) -->
+            <!-- Greetings Section (Select Box + Persistent Toggle Bar) -->
             <div class="pw-card-section">
                 <div class="pw-row">
-                    <label style="font-weight:bold; color:#e0af68;">角色开场白</label>
+                    <label class="pw-section-label pw-label-gold">角色开场白</label>
                     <select id="pw-greetings-select" class="pw-input" style="flex:1; max-width:60%;">
                         <option value="">(不使用开场白)</option>
                     </select>
                 </div>
-                <div class="pw-greetings-preview-box">
-                    <div class="pw-preview-close" id="pw-greetings-close-top">
-                        <i class="fa-solid fa-angle-up"></i> 收起预览
-                    </div>
-                    <textarea id="pw-greetings-preview" readonly></textarea>
-                    <div class="pw-preview-close" id="pw-greetings-close-bottom">
-                        <i class="fa-solid fa-angle-up"></i> 收起预览
-                    </div>
+                
+                <!-- Persistent Toggle Button (Initially Hidden) -->
+                <div id="pw-greetings-toggle-bar" class="pw-preview-toggle-bar" style="display:none;">
+                    <i class="fa-solid fa-angle-up"></i> 收起预览
                 </div>
+                
+                <!-- Textarea (Hidden/Shown by toggle) -->
+                <textarea id="pw-greetings-preview"></textarea>
             </div>
 
             <!-- World Info Section -->
             <div class="pw-card-section">
                 <div class="pw-row" style="margin-bottom:5px;">
-                    <label style="font-weight:bold; color:#7aa2f7;">世界书</label>
+                    <label class="pw-section-label pw-label-blue">世界书</label>
                 </div>
                 
                 <div id="pw-wi-body" style="display:block; padding-top:5px;">
@@ -928,17 +954,20 @@ function bindEvents() {
         else { $body.slideDown(); $arrow.addClass('fa-flip-vertical'); }
     });
 
-    // --- Greetings Select Handling ---
+    // --- Greetings Select & Toggle Handling ---
     $(document).on('change.pw', '#pw-greetings-select', function() {
         const idx = $(this).val();
-        const $box = $('.pw-greetings-preview-box');
         const $preview = $('#pw-greetings-preview');
+        const $toggleBtn = $('#pw-greetings-toggle-bar');
         
         if (idx === "") {
-            $box.slideUp();
+            $preview.hide();
+            $toggleBtn.hide();
         } else if (currentGreetingsList[idx]) {
-            $preview.val(currentGreetingsList[idx].content);
-            $box.slideDown();
+            $preview.val(currentGreetingsList[idx].content).show();
+            // Reset Toggle State to "Expanded"
+            $toggleBtn.show().html('<i class="fa-solid fa-angle-up"></i> 收起预览');
+            
             // Adjust height
             requestAnimationFrame(() => {
                 $preview.height('auto');
@@ -947,9 +976,16 @@ function bindEvents() {
         }
     });
 
-    // --- Greetings Close Button (Both Top & Bottom) ---
-    $(document).on('click.pw', '.pw-preview-close', function() {
-        $('.pw-greetings-preview-box').slideUp();
+    // --- Greetings Toggle Button Click ---
+    $(document).on('click.pw', '#pw-greetings-toggle-bar', function() {
+        const $preview = $('#pw-greetings-preview');
+        if ($preview.is(':visible')) {
+            $preview.slideUp();
+            $(this).html('<i class="fa-solid fa-angle-down"></i> 展开预览');
+        } else {
+            $preview.slideDown();
+            $(this).html('<i class="fa-solid fa-angle-up"></i> 收起预览');
+        }
     });
 
     // --- 复制功能 ---
@@ -1591,5 +1627,5 @@ jQuery(async () => {
     injectStyles();
     addPersonaButton(); // Try once immediately
     bindEvents(); // Standard event binding
-    console.log("[PW] Persona Weaver Loaded (v2.6 Final Polish)");
+    console.log("[PW] Persona Weaver Loaded (v2.7 Visual Refine)");
 });
