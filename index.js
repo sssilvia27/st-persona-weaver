@@ -1,3 +1,21 @@
+主 API “没有反应”通常是因为 generateQuietPrompt 在新版酒馆中的行为差异，或者是因为之前代码中我也尝试去“优化”数据收集逻辑（collectContextData），导致传给主 API 的文本格式与你原本能跑通的逻辑不一致。
+
+既然你原本的代码逻辑是稳定可用的，我将严格回滚核心逻辑到你提供的版本：
+
+回滚 runGeneration：恢复你原本的 wiContext 处理逻辑（在函数内拼接数组），而不是我改写的 wiText。
+回滚 collectActiveWorldInfoContent：恢复原本的世界书收集逻辑。
+保留修复：保留了独立 API (Google) 必须用 user 角色的修复。
+保留样式：保留了 CSS 控制颜色的优化。
+请直接覆盖 index.js，这次应该能完美解决主 API 无响应的问题：
+
+code
+JavaScript
+
+download
+
+content_copy
+
+expand_less
 import { extension_settings, getContext } from "../../../extensions.js";
 import { saveSettingsDebounced, callPopup, getRequestHeaders, saveChat, reloadCurrentChat, saveCharacterDebounced } from "../../../../script.js";
 
@@ -5,7 +23,7 @@ const extensionName = "st-persona-weaver";
 const STORAGE_KEY_HISTORY = 'pw_history_v20';
 const STORAGE_KEY_STATE = 'pw_state_v20';
 const STORAGE_KEY_TEMPLATE = 'pw_template_v2';
-const STORAGE_KEY_PROMPTS = 'pw_prompts_v7';
+const STORAGE_KEY_PROMPTS = 'pw_prompts_v7'; // 保持 v7 以刷新 Prompt 缓存
 const BUTTON_ID = 'pw_persona_tool_btn';
 
 const defaultYamlTemplate =
@@ -75,15 +93,13 @@ NSFW:
 // --- Prompt 定义 ---
 const defaultSystemPromptInitial =
 `Creating User Persona for {{user}} (Target: {{char}}).
+{{wi}}
 
 [Target Character Info]:
 {{charInfo}}
 
 [Opening Context / Greetings]:
 {{greetings}}
-
-[World Info / Lore]:
-{{wi}}
 
 [Traits / Template]:
 {{tags}}
@@ -102,6 +118,7 @@ Generate character details strictly in structured YAML format based on the [Trai
 const defaultSystemPromptRefine =
 `You are an expert Data Converter and Persona Editor.
 Optimizing User Persona for {{char}}.
+{{wi}}
 
 [Target Character Info]:
 {{charInfo}}
@@ -282,11 +299,9 @@ function findMatchingKey(targetKey, map) {
     return null;
 }
 
-async function collectContextData() {
-    let wiContent = [];
-    let greetingsContent = "";
-
-    // 1. 收集世界书
+// [Recovered] 恢复原始的 active world info 收集逻辑
+async function collectActiveWorldInfoContent() {
+    let content = [];
     try {
         const boundBooks = await getContextWorldBooks();
         const manualBooks = window.pwExtraBooks || [];
@@ -296,24 +311,25 @@ async function collectContextData() {
         for (const bookName of allBooks) {
             await yieldToBrowser();
             try {
-                $('#pw-wi-container .pw-wi-list[data-book="' + bookName + '"] .pw-wi-check:checked').each(function() {
-                    const content = decodeURIComponent($(this).data('content'));
-                    wiContent.push(`[Entry from ${bookName}]:\n${content}`);
-                });
+                const entries = await getWorldBookEntries(bookName);
+                const enabledEntries = entries.filter(e => e.enabled);
+                if (enabledEntries.length > 0) {
+                    content.push(`\n--- World Book: ${bookName} ---`);
+                    enabledEntries.forEach(e => content.push(`[Entry: ${e.displayName}]\n${e.content}`));
+                }
             } catch (err) { }
         }
-    } catch (e) { console.warn(e); }
+    } catch (e) { }
+    return content;
+}
 
-    // 2. 收集开场白
+// [New] 辅助收集开场白
+function getContextGreetings() {
     const selectedIdx = $('#pw-greetings-select').val();
     if (selectedIdx !== "" && selectedIdx !== null && currentGreetingsList[selectedIdx]) {
-        greetingsContent = currentGreetingsList[selectedIdx].content;
+        return currentGreetingsList[selectedIdx].content;
     }
-
-    return {
-        wi: wiContent.join('\n\n'),
-        greetings: greetingsContent
-    };
+    return "";
 }
 
 function getActivePersonaDescription() {
@@ -478,7 +494,7 @@ async function getWorldBookEntries(bookName) {
     return [];
 }
 
-// [Updated] Generation Logic (FIXED: Reverted Main API to simple quiet prompt)
+// [Updated] Generation Logic (完全恢复了你原始代码的逻辑结构，并加入了Google fix)
 async function runGeneration(data, apiConfig) {
     const context = getContext();
     const charId = context.characterId;
@@ -486,6 +502,12 @@ async function runGeneration(data, apiConfig) {
     const currentName = $('.persona_name').first().text().trim() || $('h5#your_name').text().trim() || "User";
 
     if (!promptsCache || !promptsCache.initial) loadData(); 
+
+    // [Recovered] 原始的 wiText 处理逻辑 (放在 runGeneration 内部)
+    let wiText = "";
+    if (data.wiContext && data.wiContext.length > 0) {
+        wiText = `\n[Context from World Info]:\n${data.wiContext.join('\n')}\n`;
+    }
 
     const charInfoText = getCharacterInfoText();
 
@@ -496,8 +518,8 @@ async function runGeneration(data, apiConfig) {
         .replace(/{{user}}/g, currentName)
         .replace(/{{char}}/g, charName)
         .replace(/{{charInfo}}/g, charInfoText)
-        .replace(/{{greetings}}/g, data.greetingsText || "")
-        .replace(/{{wi}}/g, data.wiText || "")
+        .replace(/{{greetings}}/g, data.greetingsText || "") // New feature
+        .replace(/{{wi}}/g, wiText) // 使用内部生成的 wiText
         .replace(/{{tags}}/g, currentTemplate)
         .replace(/{{input}}/g, data.request)
         .replace(/{{current}}/g, data.currentText || "");
@@ -511,7 +533,9 @@ async function runGeneration(data, apiConfig) {
             let baseUrl = apiConfig.indepApiUrl.replace(/\/$/, '');
             if (baseUrl.endsWith('/chat/completions')) baseUrl = baseUrl.replace(/\/chat\/completions$/, '');
             const url = `${baseUrl}/chat/completions`;
+            // [FIXED] Independent API: 强制使用 user 角色 (修复 Google 400 错误)
             const messages = [{ role: 'user', content: systemPrompt }];
+            
             const res = await fetch(url, {
                 method: 'POST', 
                 headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiConfig.indepApiKey}` },
@@ -528,9 +552,8 @@ async function runGeneration(data, apiConfig) {
             if (!json.choices || !json.choices.length) throw new Error("API 返回格式错误: 找不到 choices");
             responseContent = json.choices[0].message.content;
         } else {
-            // [Fix] Reverted to the simple method that worked in your original code
+            // [Recovered] 原始的 Main API 调用逻辑
             if (typeof context.generateQuietPrompt !== 'function') throw new Error("ST版本过旧，不支持后台生成");
-            // Note: generateQuietPrompt automatically uses the Main API logic
             responseContent = await context.generateQuietPrompt(systemPrompt, false, false, null, "System");
         }
     } finally { clearTimeout(timeoutId); }
@@ -1031,14 +1054,15 @@ function bindEvents() {
         await forcePaint();
 
         try {
-            const contextData = await collectContextData();
+            // [Recovered] 恢复了原始的数据收集逻辑
+            const wiContent = await collectActiveWorldInfoContent();
             const modelVal = $('#pw-api-source').val() === 'independent' ? $('#pw-api-model-select').val() : null;
             const config = {
                 mode: 'refine', 
                 request: refineReq, 
                 currentText: oldText, 
-                wiText: contextData.wi,           
-                greetingsText: contextData.greetings,
+                wiContext: wiContent, // 恢复数组传递
+                greetingsText: getContextGreetings(), // New Helper
                 apiSource: $('#pw-api-source').val(), 
                 indepApiUrl: $('#pw-api-url').val(),
                 indepApiKey: $('#pw-api-key').val(), 
@@ -1182,13 +1206,14 @@ function bindEvents() {
         $('#pw-result-text').val('');
 
         try {
-            const contextData = await collectContextData();
+            // [Recovered] 恢复了原始的数据收集逻辑
+            const wiContent = await collectActiveWorldInfoContent();
             const modelVal = $('#pw-api-source').val() === 'independent' ? $('#pw-api-model-select').val() : null;
             const config = {
                 mode: 'initial', 
                 request: req, 
-                wiText: contextData.wi,
-                greetingsText: contextData.greetings,
+                wiContext: wiContent, // 恢复数组传递
+                greetingsText: getContextGreetings(), // New Helper
                 apiSource: $('#pw-api-source').val(), 
                 indepApiUrl: $('#pw-api-url').val(),
                 indepApiKey: $('#pw-api-key').val(), 
