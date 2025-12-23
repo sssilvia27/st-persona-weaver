@@ -134,7 +134,7 @@ const defaultSettings = {
 };
 
 const TEXT = {
-    // 使用 class 控制样式，不再内联颜色
+    // [修改] 移除了内联 style，改用 class="pw-title-icon"
     PANEL_TITLE: `<span class="pw-title-icon"><i class="fa-solid fa-wand-magic-sparkles"></i></span>User人设生成器`,
     BTN_TITLE: "打开设定生成器",
     TOAST_SAVE_SUCCESS: (name) => `Persona "${name}" 已保存并覆盖！`,
@@ -479,21 +479,32 @@ async function getWorldBookEntries(bookName) {
     return [];
 }
 
-// [Updated] Generation Logic - 修复打开角色卡时生成中断的问题
+// ============================================================================
+// [兼容性优化版] Generation Logic - 纯净上下文 + User 角色发送
+// ============================================================================
 async function runGeneration(data, apiConfig) {
-    const context = getContext();
-    const charId = context.characterId;
-    const charName = (charId !== undefined && context.characters[charId]) ? context.characters[charId].name : "None";
-    const currentName = $('.persona_name').first().text().trim() || $('h5#your_name').text().trim() || "User";
+    // 获取全局上下文
+    const stContext = window.SillyTavern.getContext(); 
+    
+    // 获取当前用户名称 (仅用于替换变量)
+    let currentName = $('.persona_name').first().text().trim();
+    if (!currentName) currentName = $('h5#your_name').text().trim();
+    if (!currentName) currentName = "User";
+
+    const charId = stContext.characterId;
+    const charName = (charId !== undefined && stContext.characters[charId]) ? stContext.characters[charId].name : "None";
 
     if (!promptsCache || !promptsCache.initial) loadData(); 
 
+    // 获取用于构建 Prompt 的片段
     const charInfoText = getCharacterInfoText();
 
+    // 1. 手动构建 Prompt 内容
     let systemTemplate = promptsCache.initial;
     if (data.mode === 'refine') systemTemplate = promptsCache.refine;
 
-    let systemPrompt = systemTemplate
+    // 虽然变量名还是 systemPrompt，但我们会把它作为 User 消息发送
+    let finalPromptContent = systemTemplate
         .replace(/{{user}}/g, currentName)
         .replace(/{{char}}/g, charName)
         .replace(/{{charInfo}}/g, charInfoText)
@@ -504,69 +515,90 @@ async function runGeneration(data, apiConfig) {
         .replace(/{{current}}/g, data.currentText || "");
 
     let responseContent = "";
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 120000); 
-
+    
+    // 2. 开始生成
     try {
         if (apiConfig.apiSource === 'independent') {
-            let baseUrl = apiConfig.indepApiUrl.replace(/\/$/, '');
-            if (baseUrl.endsWith('/chat/completions')) baseUrl = baseUrl.replace(/\/chat\/completions$/, '');
-            const url = `${baseUrl}/chat/completions`;
-            const messages = [{ role: 'system', content: systemPrompt }];
-            const res = await fetch(url, {
-                method: 'POST', 
-                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiConfig.indepApiKey}` },
-                body: JSON.stringify({ model: apiConfig.indepApiModel, messages: messages, temperature: 0.7 }),
-                signal: controller.signal
-            });
-            const text = await res.text();
-            let json;
-            try { json = JSON.parse(text); } catch (e) { throw new Error(`API 返回非 JSON: ${text.slice(0, 100)}...`); }
-            if (!res.ok) {
-                const errorMsg = json.error?.message || json.message || JSON.stringify(json);
-                throw new Error(`API 请求失败 [${res.status}]: ${errorMsg}`);
+            // === 独立 API 逻辑 ===
+            console.log("[PW] Using Independent API (Role: User)");
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 120000); 
+
+            try {
+                let baseUrl = apiConfig.indepApiUrl.replace(/\/$/, '');
+                if (baseUrl.endsWith('/chat/completions')) baseUrl = baseUrl.replace(/\/chat\/completions$/, '');
+                
+                const res = await fetch(`${baseUrl}/chat/completions`, {
+                    method: 'POST', 
+                    headers: { 
+                        'Content-Type': 'application/json', 
+                        'Authorization': `Bearer ${apiConfig.indepApiKey}` 
+                    },
+                    body: JSON.stringify({ 
+                        model: apiConfig.indepApiModel, 
+                        // [修改] 将 role 改为 user 以获得最大兼容性
+                        messages: [{ role: 'user', content: finalPromptContent }], 
+                        temperature: 0.7 
+                    }),
+                    signal: controller.signal
+                });
+
+                if (!res.ok) throw new Error(`API Error: ${res.status}`);
+                const json = await res.json();
+                responseContent = json.choices[0].message.content;
+            } finally {
+                clearTimeout(timeoutId);
             }
-            if (!json.choices || !json.choices.length) throw new Error("API 返回格式错误: 找不到 choices");
-            responseContent = json.choices[0].message.content;
+
         } else {
+            // === 主 API 逻辑 ===
+            console.log("[PW] Using Main API (Clean Context, Role: User)");
+
             if (window.TavernHelper && typeof window.TavernHelper.generateRaw === 'function') {
-                console.log("[PW] Using TavernHelper.generateRaw");
+                
                 responseContent = await window.TavernHelper.generateRaw({
-                    user_input: ' ', 
+                    // 不传 user_input，防止酒馆自动拼接
+                    user_input: '', 
+                    
+                    // [修改] 将 role 改为 user
+                    // 这样对于 Claude/Gemini 等模型，这就是一条标准的 User 指令
                     ordered_prompts: [
-                        { role: 'system', content: systemPrompt }
+                        { role: 'user', content: finalPromptContent }
                     ],
+
+                    // 依然保持强制清空所有上下文，防止污染
                     overrides: {
-                        chat_history: { prompts: [] },
+                        chat_history: { prompts: [] }, // 确保不发送历史记录
+                        
                         world_info_before: '',
                         world_info_after: '',
-                        persona_description: '',
+                        
+                        persona_description: '', // 确保不发送 User 人设
+                        
                         char_description: '',
                         char_personality: '',
                         scenario: '',
+                        
                         dialogue_examples: '',
-                        author_note: '' // 覆盖 AN
-                    },
-                    custom_api: {
-                        stop: [],
-                        stopping_strings: []
+                        
+                        chat_history: {
+                            author_note: '', 
+                            prompts: []
+                        }
                     }
                 });
-            } else if (typeof context.generateQuietPrompt === 'function') {
-                console.log("[PW] Using context.generateQuietPrompt (Legacy)");
-                // GenerateQuietPrompt 参数: (prompt, quiet_to_loud, skip_wian, image, name)
-                // [关键修改] 第三个参数 skip_wian 改为 true
-                responseContent = await context.generateQuietPrompt(systemPrompt, false, true, null, "System");
             } else {
-                throw new Error("ST版本过旧或未安装 TavernHelper，不支持主API生成");
+                const errorMsg = "错误：主 API 纯净模式需要安装 TavernHelper 插件。\n\n" +
+                               "原因：SillyTavern 原生方法无法彻底屏蔽默认的人设、世界书和聊天记录。";
+                toastr.error(errorMsg, "缺少依赖");
+                throw new Error(errorMsg);
             }
         }
-    } finally { clearTimeout(timeoutId); }
-    
-    if (!responseContent) {
-        throw new Error("生成内容为空 (可能被停止词截断或API未响应)");
+    } catch (e) {
+        console.error("[PW] Generation Error:", e);
+        throw e;
     }
-
+    
     lastRawResponse = responseContent;
     return responseContent.replace(/```[a-z]*\n?/g, '').replace(/```/g, '').trim();
 }
@@ -783,6 +815,7 @@ async function openCreatorPopup() {
                     <textarea id="pw-prompt-initial" class="pw-textarea pw-auto-height" style="min-height:150px; font-size:0.85em;">${promptsCache.initial}</textarea>
                     
                     <div style="display:flex; justify-content:space-between; margin-top:15px;"><span class="pw-prompt-label">人设润色指令 (System Prompt)</span><button class="pw-mini-btn" id="pw-reset-refine" style="font-size:0.7em;">恢复默认</button></div>
+                    <!-- [Updated] Added missing buttons for refine -->
                     <div class="pw-var-btns">
                         <div class="pw-var-btn" data-ins="{{char}}"><span>Char名</span><span class="code">{{char}}</span></div>
                         <div class="pw-var-btn" data-ins="{{charInfo}}"><span>角色设定</span><span class="code">{{charInfo}}</span></div>
@@ -899,7 +932,7 @@ function bindEvents() {
     });
 
     // --- Template Editing ---
-    // [修改] 使用 class 控制编辑状态颜色
+    // [修改] 移除了 .css('color', ...) 改用 .addClass('editing') 和 .removeClass('editing')
     $(document).on('click.pw', '#pw-toggle-edit-template', () => {
         isEditingTemplate = !isEditingTemplate;
         if (isEditingTemplate) {
@@ -1465,7 +1498,7 @@ const renderWiBooks = async () => {
     if (allBooks.length === 0) { container.html('<div style="opacity:0.6; padding:10px; text-align:center;">此角色未绑定世界书，请在“世界书”标签页手动添加或在酒馆主界面绑定。</div>'); return; }
     for (const book of allBooks) {
         const isBound = baseBooks.includes(book);
-        // 使用 class 控制样式
+        // [修改] 移除了内联样式，改用 class="pw-bound-status" 和 class="pw-remove-book-icon"
         const $el = $(`<div class="pw-wi-book"><div class="pw-wi-header"><span><i class="fa-solid fa-book"></i> ${book} ${isBound ? '<span class="pw-bound-status">(已绑定)</span>' : ''}</span><div>${!isBound ? '<i class="fa-solid fa-times remove-book pw-remove-book-icon" title="移除"></i>' : ''}<i class="fa-solid fa-chevron-down arrow"></i></div></div><div class="pw-wi-list" data-book="${book}"></div></div>`);
         $el.find('.remove-book').on('click', (e) => { e.stopPropagation(); window.pwExtraBooks = window.pwExtraBooks.filter(b => b !== book); renderWiBooks(); });
         $el.find('.pw-wi-header').on('click', async function () {
@@ -1482,7 +1515,7 @@ const renderWiBooks = async () => {
                     entries.forEach(entry => {
                         const isChecked = entry.enabled ? 'checked' : '';
                         const $item = $(`<div class="pw-wi-item"><div class="pw-wi-item-row"><input type="checkbox" class="pw-wi-check" ${isChecked} data-content="${encodeURIComponent(entry.content)}"><div style="font-weight:bold; font-size:0.9em; flex:1;">${entry.displayName}</div><i class="fa-solid fa-eye pw-wi-toggle-icon"></i></div><div class="pw-wi-desc">${entry.content}<div class="pw-wi-close-bar"><i class="fa-solid fa-angle-up"></i> 收起</div></div></div>`);
-                        // 使用 class 切换激活状态
+                        // [修改] 移除了 .css('color', ...) 改用 .addClass('active') 和 .removeClass('active')
                         $item.find('.pw-wi-toggle-icon').on('click', function (e) {
                             e.stopPropagation();
                             const $desc = $(this).closest('.pw-wi-item').find('.pw-wi-desc');
@@ -1524,5 +1557,5 @@ jQuery(async () => {
     // injectStyles(); // Removed: Style injection handled by style.css file
     addPersonaButton(); // Try once immediately
     bindEvents(); // Standard event binding
-    console.log("[PW] Persona Weaver Loaded (v2.9 Split Files - CSS Controlled Colors & Gen Fix)");
+    console.log("[PW] Persona Weaver Loaded (v2.8 Split Files - CSS Controlled Colors)");
 });
