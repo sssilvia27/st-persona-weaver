@@ -162,9 +162,9 @@ let currentGreetingsList = [];
 const yieldToBrowser = () => new Promise(resolve => requestAnimationFrame(resolve));
 const forcePaint = () => new Promise(resolve => setTimeout(resolve, 50));
 
-// [Modified] 使用 TavernHelper 获取更完整的角色信息
+// [Modified] 使用 TavernHelper 获取更准确的角色数据
 function getCharacterInfoText() {
-    // 优先尝试使用 TavernHelper (更稳健，支持 V2 深度设定)
+    // 优先尝试使用 TavernHelper (支持 V1/V2 格式自动处理)
     if (window.TavernHelper && typeof window.TavernHelper.getCharData === 'function') {
         const data = window.TavernHelper.getCharData('current');
         if (!data) return "";
@@ -174,17 +174,15 @@ function getCharacterInfoText() {
         if (data.personality) parts.push(`Personality:\n${data.personality}`);
         if (data.scenario) parts.push(`Scenario:\n${data.scenario}`);
         
-        // 尝试获取 V2 卡片的深度设定 (depth_prompt)
-        // 注意：getCharData 返回的是 v1CharData 结构，V2 数据通常在 data 字段中
-        if (data.data && data.data.extensions && data.data.extensions.depth_prompt) {
-             const dp = data.data.extensions.depth_prompt;
-             if (dp.prompt) parts.push(`Depth Prompt:\n${dp.prompt}`);
+        // 额外支持 V2 卡片的 Depth Prompt
+        if (data.extensions?.depth_prompt?.prompt) {
+             parts.push(`Depth Prompt:\n${data.extensions.depth_prompt.prompt}`);
         }
         
         return parts.join('\n\n');
     }
 
-    // 降级方案：直接访问 context (旧逻辑)
+    // 降级方案：直接读取 Context
     const context = getContext();
     const charId = context.characterId;
     if (charId === undefined || !context.characters[charId]) return "";
@@ -200,13 +198,24 @@ function getCharacterInfoText() {
     return parts.join('\n\n');
 }
 
+// [Modified] 同样优化开场白获取逻辑
 function getCharacterGreetingsList() {
-    const context = getContext();
-    const charId = context.characterId;
-    if (charId === undefined || !context.characters[charId]) return [];
+    let data = null;
 
-    const char = context.characters[charId];
-    const data = char.data || char;
+    // 优先 TavernHelper
+    if (window.TavernHelper && typeof window.TavernHelper.getCharData === 'function') {
+        data = window.TavernHelper.getCharData('current');
+    } else {
+        // 降级方案
+        const context = getContext();
+        const charId = context.characterId;
+        if (charId !== undefined && context.characters[charId]) {
+            const char = context.characters[charId];
+            data = char.data || char;
+        }
+    }
+
+    if (!data) return [];
 
     const list = [];
     if (data.first_mes) {
@@ -1527,7 +1536,6 @@ function addPersonaButton() {
 }
 
 jQuery(async () => {
-    // injectStyles(); // Removed: Style injection handled by style.css file
     addPersonaButton(); // Try once immediately
     bindEvents(); // Standard event binding
     console.log("[PW] Persona Weaver Loaded (v2.8 Split Files)");
