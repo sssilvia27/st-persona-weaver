@@ -1505,7 +1505,8 @@ function addPersonaButton() {
 }
 
 jQuery(async () => {
+    // injectStyles(); // Removed: Style injection handled by style.css file
     addPersonaButton(); // Try once immediately
     bindEvents(); // Standard event binding
-    console.log("[PW] Persona Weaver Loaded (v2.7 Visual Refine)");
+    console.log("[PW] Persona Weaver Loaded (v2.8 Split Files)");
 });
