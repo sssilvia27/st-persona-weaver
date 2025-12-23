@@ -1,5 +1,5 @@
-import { extension_settings } from "../../../extensions.js";
-import { saveSettingsDebounced, callPopup, getRequestHeaders } from "../../../../script.js";
+import { extension_settings, getContext } from "../../../extensions.js";
+import { saveSettingsDebounced, callPopup, getRequestHeaders, saveChat, reloadCurrentChat, saveCharacterDebounced } from "../../../../script.js";
 
 const extensionName = "st-persona-weaver";
 const STORAGE_KEY_HISTORY = 'pw_history_v20';
@@ -72,11 +72,9 @@ NSFW:
   性癖好:
   禁忌底线:`;
 
-// --- Prompt 定义 (增加了忽略指令) ---
+// --- Prompt 定义 ---
 const defaultSystemPromptInitial =
-`[System Instruction: IGNORE all previous Character/User definitions and World Info in the context. Focus ONLY on the data provided below.]
-
-Creating User Persona for {{user}} (Target: {{char}}).
+`Creating User Persona for {{user}} (Target: {{char}}).
 
 [Target Character Info]:
 {{charInfo}}
@@ -102,9 +100,7 @@ Generate character details strictly in structured YAML format based on the [Trai
 5. Response: ONLY the YAML content.`;
 
 const defaultSystemPromptRefine =
-`[System Instruction: IGNORE all previous Character/User definitions. Focus ONLY on the data provided below.]
-
-You are an expert Data Converter and Persona Editor.
+`You are an expert Data Converter and Persona Editor.
 Optimizing User Persona for {{char}}.
 
 [Target Character Info]:
@@ -138,6 +134,7 @@ const defaultSettings = {
 };
 
 const TEXT = {
+    // [修改] 移除了内联 style，改用 class="pw-title-icon"
     PANEL_TITLE: `<span class="pw-title-icon"><i class="fa-solid fa-wand-magic-sparkles"></i></span>User人设生成器`,
     BTN_TITLE: "打开设定生成器",
     TOAST_SAVE_SUCCESS: (name) => `Persona "${name}" 已保存并覆盖！`,
@@ -161,25 +158,15 @@ let isProcessing = false;
 let currentGreetingsList = []; 
 
 // ============================================================================
-// 工具函数 (安全增强版)
+// 工具函数
 // ============================================================================
 const yieldToBrowser = () => new Promise(resolve => requestAnimationFrame(resolve));
 const forcePaint = () => new Promise(resolve => setTimeout(resolve, 50));
 
-// [核心修复] 使用 window.SillyTavern.getContext() 确保数据源正确
-function getSafeContext() {
-    if (typeof window.SillyTavern !== 'undefined' && window.SillyTavern.getContext) {
-        return window.SillyTavern.getContext();
-    }
-    return null;
-}
-
 function getCharacterInfoText() {
-    const context = getSafeContext();
-    if (!context) return "";
-    
+    const context = getContext();
     const charId = context.characterId;
-    if (charId === undefined || !context.characters || !context.characters[charId]) return "";
+    if (charId === undefined || !context.characters[charId]) return "";
 
     const char = context.characters[charId];
     const data = char.data || char; 
@@ -193,11 +180,9 @@ function getCharacterInfoText() {
 }
 
 function getCharacterGreetingsList() {
-    const context = getSafeContext();
-    if (!context) return [];
-
+    const context = getContext();
     const charId = context.characterId;
-    if (charId === undefined || !context.characters || !context.characters[charId]) return [];
+    if (charId === undefined || !context.characters[charId]) return [];
 
     const char = context.characters[charId];
     const data = char.data || char;
@@ -298,39 +283,33 @@ function findMatchingKey(targetKey, map) {
     return null;
 }
 
-// [修复] 确保在 openCreatorPopup 之后调用时，能正确获取到世界书
 async function collectContextData() {
     let wiContent = [];
     let greetingsContent = "";
 
+    // 1. 收集世界书
     try {
-        // 使用 getSafeContext 确保环境
         const boundBooks = await getContextWorldBooks();
         const manualBooks = window.pwExtraBooks || [];
         const allBooks = [...new Set([...boundBooks, ...manualBooks])];
         if (allBooks.length > 20) allBooks.length = 20;
 
-        // 这里需要给 DOM 一点渲染时间，确保 checkbox 存在
-        await yieldToBrowser();
-
         for (const bookName of allBooks) {
+            await yieldToBrowser();
             try {
-                // 关键修正：确保选择器能找到正确的元素
-                const $checkedBoxes = $(`#pw-wi-container .pw-wi-list[data-book="${bookName}"] .pw-wi-check:checked`);
-                $checkedBoxes.each(function() {
+                $('#pw-wi-container .pw-wi-list[data-book="' + bookName + '"] .pw-wi-check:checked').each(function() {
                     const content = decodeURIComponent($(this).data('content'));
                     wiContent.push(`[Entry from ${bookName}]:\n${content}`);
                 });
             } catch (err) { }
         }
-    } catch (e) { console.warn("[PW] Error collecting WI:", e); }
+    } catch (e) { console.warn(e); }
 
-    try {
-        const selectedIdx = $('#pw-greetings-select').val();
-        if (selectedIdx !== "" && selectedIdx !== null && currentGreetingsList && currentGreetingsList[selectedIdx]) {
-            greetingsContent = currentGreetingsList[selectedIdx].content;
-        }
-    } catch(e) { console.warn("[PW] Error collecting Greetings:", e); }
+    // 2. 收集开场白
+    const selectedIdx = $('#pw-greetings-select').val();
+    if (selectedIdx !== "" && selectedIdx !== null && currentGreetingsList[selectedIdx]) {
+        greetingsContent = currentGreetingsList[selectedIdx].content;
+    }
 
     return {
         wi: wiContent.join('\n\n'),
@@ -341,8 +320,7 @@ async function collectContextData() {
 function getActivePersonaDescription() {
     const domVal = $('#persona_description').val();
     if (domVal !== undefined && domVal !== null) return domVal;
-    
-    const context = getSafeContext();
+    const context = getContext();
     if (context && context.powerUserSettings) {
         if (context.powerUserSettings.persona_description) return context.powerUserSettings.persona_description;
         const selected = context.powerUserSettings.persona_selected;
@@ -358,20 +336,14 @@ function getActivePersonaDescription() {
 // ============================================================================
 
 function loadData() {
-    try { 
-        const h = JSON.parse(localStorage.getItem(STORAGE_KEY_HISTORY));
-        historyCache = Array.isArray(h) ? h : []; 
-    } catch { historyCache = []; }
-
+    try { historyCache = JSON.parse(localStorage.getItem(STORAGE_KEY_HISTORY)) || []; } catch { historyCache = []; }
     try {
         const t = localStorage.getItem(STORAGE_KEY_TEMPLATE);
         if (!t || t.length < 50) currentTemplate = defaultYamlTemplate;
         else currentTemplate = t;
     } catch { currentTemplate = defaultYamlTemplate; }
-
     try {
         const p = JSON.parse(localStorage.getItem(STORAGE_KEY_PROMPTS));
-        if (!p) throw new Error("No saved prompts");
         promptsCache = { 
             ...{ initial: defaultSystemPromptInitial, refine: defaultSystemPromptRefine }, 
             ...p 
@@ -391,9 +363,9 @@ function saveHistory(item) {
     const limit = extension_settings[extensionName]?.historyLimit || 50;
     
     if (!item.title || item.title === "未命名") {
-        const context = getSafeContext();
+        const context = getContext();
         const userName = $('.persona_name').first().text().trim() || "User";
-        const charName = (context && context.characters && context.characters[context.characterId]) ? context.characters[context.characterId].name : "Char";
+        const charName = context.characters[context.characterId]?.name || "Char";
         item.title = `${userName} & ${charName}`;
     }
 
@@ -406,20 +378,16 @@ function saveState(data) { localStorage.setItem(STORAGE_KEY_STATE, JSON.stringif
 function loadState() { try { return JSON.parse(localStorage.getItem(STORAGE_KEY_STATE)) || {}; } catch { return {}; } }
 
 async function forceSavePersona(name, description) {
-    const context = getSafeContext();
-    if (!context) return;
-
+    const context = getContext();
     if (!context.powerUserSettings.personas) context.powerUserSettings.personas = {};
     context.powerUserSettings.personas[name] = description;
     context.powerUserSettings.persona_selected = name;
-    
     const $nameInput = $('#your_name');
     const $descInput = $('#persona_description');
     if ($nameInput.length) $nameInput.val(name).trigger('input').trigger('change');
     if ($descInput.length) $descInput.val(description).trigger('input').trigger('change');
     const $h5Name = $('h5#your_name');
     if ($h5Name.length) $h5Name.text(name);
-    
     await saveSettingsDebounced();
     return true;
 }
@@ -487,12 +455,10 @@ async function loadAvailableWorldBooks() {
 }
 
 async function getContextWorldBooks(extras = []) {
-    const context = getSafeContext();
-    if (!context) return extras;
-
+    const context = getContext();
     const books = new Set(extras);
     const charId = context.characterId;
-    if (charId !== undefined && context.characters && context.characters[charId]) {
+    if (charId !== undefined && context.characters[charId]) {
         const char = context.characters[charId];
         const data = char.data || char;
         if (data.character_book?.name) books.add(data.character_book.name);
@@ -513,18 +479,12 @@ async function getWorldBookEntries(bookName) {
     return [];
 }
 
-// ============================================================================
-// [稳定版] Generation Logic - 使用原生方法 + Prompt 覆盖
-// ============================================================================
+// [Updated] Generation Logic - 修复了模型不回复 System Role 的问题
 async function runGeneration(data, apiConfig) {
-    const stContext = getSafeContext();
-    
-    let currentName = $('.persona_name').first().text().trim();
-    if (!currentName) currentName = $('h5#your_name').text().trim();
-    if (!currentName) currentName = "User";
-
-    const charId = stContext ? stContext.characterId : undefined;
-    const charName = (charId !== undefined && stContext.characters && stContext.characters[charId]) ? stContext.characters[charId].name : "None";
+    const context = getContext();
+    const charId = context.characterId;
+    const charName = (charId !== undefined) ? context.characters[charId].name : "None";
+    const currentName = $('.persona_name').first().text().trim() || $('h5#your_name').text().trim() || "User";
 
     if (!promptsCache || !promptsCache.initial) loadData(); 
 
@@ -533,7 +493,7 @@ async function runGeneration(data, apiConfig) {
     let systemTemplate = promptsCache.initial;
     if (data.mode === 'refine') systemTemplate = promptsCache.refine;
 
-    let finalPromptContent = systemTemplate
+    let finalPrompt = systemTemplate
         .replace(/{{user}}/g, currentName)
         .replace(/{{char}}/g, charName)
         .replace(/{{charInfo}}/g, charInfoText)
@@ -544,71 +504,58 @@ async function runGeneration(data, apiConfig) {
         .replace(/{{current}}/g, data.currentText || "");
 
     let responseContent = "";
-    
-    // 2. 开始生成
-    if (apiConfig.apiSource === 'independent') {
-        // === 独立 API ===
-        console.log("[PW] Using Independent API");
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 120000); 
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 120000); 
 
-        try {
+    try {
+        if (apiConfig.apiSource === 'independent') {
             let baseUrl = apiConfig.indepApiUrl.replace(/\/$/, '');
             if (baseUrl.endsWith('/chat/completions')) baseUrl = baseUrl.replace(/\/chat\/completions$/, '');
-            
-            const res = await fetch(`${baseUrl}/chat/completions`, {
+            const url = `${baseUrl}/chat/completions`;
+            // [FIX] role changed from 'system' to 'user'
+            const messages = [{ role: 'user', content: finalPrompt }];
+            const res = await fetch(url, {
                 method: 'POST', 
-                headers: { 
-                    'Content-Type': 'application/json', 
-                    'Authorization': `Bearer ${apiConfig.indepApiKey}` 
-                },
-                body: JSON.stringify({ 
-                    model: apiConfig.indepApiModel, 
-                    messages: [{ role: 'user', content: finalPromptContent }], 
-                    temperature: 0.7 
-                }),
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiConfig.indepApiKey}` },
+                body: JSON.stringify({ model: apiConfig.indepApiModel, messages: messages, temperature: 0.7 }),
                 signal: controller.signal
             });
-
-            if (!res.ok) throw new Error(`API Error: ${res.status}`);
-            const json = await res.json();
-            responseContent = json.choices[0].message.content;
-        } catch (e) {
-            console.error("[PW] Independent API Error:", e);
-            throw e;
-        } finally {
-            clearTimeout(timeoutId);
-        }
-
-    } else {
-        // === 主 API (原生安全版) ===
-        // 我们不再使用 generateRaw，因为它容易导致崩溃。
-        // 我们改用 generateQuietPrompt，这是最原生的后台生成方法。
-        // 我们使用 skip_wian=true 参数来屏蔽世界书和作者注释。
-        // 至于可能残留的 Character Persona，我们在 Prompt 里加了 "IGNORE all previous..." 来覆盖。
-        
-        console.log("[PW] Using Main API (Native Quiet Prompt)");
-
-        if (stContext && typeof stContext.generateQuietPrompt === 'function') {
-            try {
-                // 参数含义: prompt, quiet_to_loud, skip_wian, quiet_image, quiet_name
-                // 关键点：skip_wian = true (跳过世界书和作者注释)
-                // 关键点：quiet_name = "User" (以User身份发送，解决Claude不接受System消息的问题)
-                responseContent = await stContext.generateQuietPrompt(finalPromptContent, false, true, null, "User");
-                
-                if (!responseContent) throw new Error("生成结果为空");
-            } catch (e) {
-                console.error("[PW] Main API Error:", e);
-                // 捕获特定错误并给出建议
-                if (e.message && e.message.includes('reading')) {
-                    throw new Error("酒馆内部参数读取失败。请尝试刷新页面或检查 API 连接状态。");
-                }
-                throw e;
+            const text = await res.text();
+            let json;
+            try { json = JSON.parse(text); } catch (e) { throw new Error(`API 返回非 JSON: ${text.slice(0, 100)}...`); }
+            if (!res.ok) {
+                const errorMsg = json.error?.message || json.message || JSON.stringify(json);
+                throw new Error(`API 请求失败 [${res.status}]: ${errorMsg}`);
             }
+            if (!json.choices || !json.choices.length) throw new Error("API 返回格式错误: 找不到 choices");
+            responseContent = json.choices[0].message.content;
         } else {
-            throw new Error("无法找到生成方法 (Window Context 失效)。请刷新页面重试。");
+            if (window.TavernHelper && typeof window.TavernHelper.generateRaw === 'function') {
+                console.log("[PW] Using TavernHelper.generateRaw (Role: User)");
+                responseContent = await window.TavernHelper.generateRaw({
+                    user_input: '',
+                    // [FIX] role changed from 'system' to 'user'
+                    ordered_prompts: [{ role: 'user', content: finalPrompt }],
+                    overrides: {
+                        chat_history: { prompts: [] },
+                        world_info_before: '',
+                        world_info_after: '',
+                        persona_description: '',
+                        char_description: '',
+                        char_personality: '',
+                        scenario: '',
+                        dialogue_examples: ''
+                    }
+                });
+            } else if (typeof context.generateQuietPrompt === 'function') {
+                console.log("[PW] Using context.generateQuietPrompt (Legacy)");
+                // [FIX] sender name changed from "System" to currentName
+                responseContent = await context.generateQuietPrompt(finalPrompt, false, false, null, currentName);
+            } else {
+                throw new Error("ST版本过旧或未安装 TavernHelper，不支持主API生成");
+            }
         }
-    }
+    } finally { clearTimeout(timeoutId); }
     
     lastRawResponse = responseContent;
     return responseContent.replace(/```[a-z]*\n?/g, '').replace(/```/g, '').trim();
@@ -619,7 +566,7 @@ async function runGeneration(data, apiConfig) {
 // ============================================================================
 
 async function openCreatorPopup() {
-    const context = getSafeContext();
+    const context = getContext();
     loadData();
     await loadAvailableWorldBooks();
     const savedState = loadState();
@@ -627,7 +574,7 @@ async function openCreatorPopup() {
 
     let currentName = $('.persona_name').first().text().trim();
     if (!currentName) currentName = $('h5#your_name').text().trim();
-    if (!currentName && context) currentName = context.powerUserSettings?.persona_selected || "User";
+    if (!currentName) currentName = context.powerUserSettings?.persona_selected || "User";
 
     const activePersonaContent = getActivePersonaDescription();
     
@@ -646,7 +593,7 @@ async function openCreatorPopup() {
         return `<option disabled>未找到世界书</option>`;
     };
 
-    const charName = (context && context.characters && context.characters[context.characterId]) ? context.characters[context.characterId].name : "None";
+    const charName = getContext().characters[getContext().characterId]?.name || "None";
     const headerTitle = `${TEXT.PANEL_TITLE}<span class="pw-header-subtitle">User: ${currentName} & Char: ${charName}</span>`;
 
     const html = `
@@ -877,7 +824,7 @@ function bindEvents() {
 
     console.log("[PW] Binding Events (Standard)...");
 
-    const context = getSafeContext();
+    const context = getContext();
     if (context && context.eventSource) {
         context.eventSource.on(context.eventTypes.APP_READY, addPersonaButton);
         context.eventSource.on(context.eventTypes.MOVABLE_PANELS_RESET, addPersonaButton);
@@ -901,9 +848,12 @@ function bindEvents() {
         if (idx === "") {
             $preview.hide();
             $toggleBtn.hide();
-        } else if (currentGreetingsList && currentGreetingsList[idx]) {
+        } else if (currentGreetingsList[idx]) {
             $preview.val(currentGreetingsList[idx].content).show();
+            // Reset Toggle State to "Expanded"
             $toggleBtn.show().html('<i class="fa-solid fa-angle-up"></i> 收起预览');
+            
+            // Adjust height
             requestAnimationFrame(() => {
                 $preview.height('auto');
                 $preview.height($preview[0].scrollHeight + 'px');
@@ -940,6 +890,7 @@ function bindEvents() {
     });
 
     // --- Template Editing ---
+    // [修改] 移除了 .css('color', ...) 改用 .addClass('editing') 和 .removeClass('editing')
     $(document).on('click.pw', '#pw-toggle-edit-template', () => {
         isEditingTemplate = !isEditingTemplate;
         if (isEditingTemplate) {
@@ -994,7 +945,7 @@ function bindEvents() {
         }
     });
 
-    // --- Float Button ---
+    // --- Float Button Selection Check ---
     let selectionTimeout;
     const checkSelection = () => {
         clearTimeout(selectionTimeout);
@@ -1079,7 +1030,7 @@ function bindEvents() {
         }
     });
 
-    // Refine
+    // Refine (Persona)
     $(document).on('click.pw', '#pw-btn-refine', async function (e) {
         e.preventDefault();
         
@@ -1116,12 +1067,6 @@ function bindEvents() {
                 indepApiModel: modelVal
             };
             const responseText = await runGeneration(config, config);
-            
-            if (responseText === null) {
-                 isProcessing = false;
-                 $btn.removeClass('fa-spinner fa-spin').addClass('fa-magic');
-                 return; 
-            }
 
             $('#pw-diff-raw-textarea').val(lastRawResponse);
 
@@ -1173,6 +1118,7 @@ function bindEvents() {
 
             $('#pw-diff-overlay').data('source', 'persona');
             
+            // Restore Tab names
             $('.pw-diff-tab[data-view="diff"] div:first-child').text('智能对比');
             $('.pw-diff-tab[data-view="diff"] .pw-tab-sub').text('选择编辑');
             $('.pw-diff-tab[data-view="raw"] div:first-child').text('新版原文');
@@ -1209,7 +1155,9 @@ function bindEvents() {
 
     $(document).on('click.pw', '#pw-diff-confirm', function () {
         const activeTab = $('.pw-diff-tab.active').data('view');
+        
         let finalContent = "";
+
         if (activeTab === 'raw') {
             finalContent = $('#pw-diff-raw-textarea').val();
         } else {
@@ -1225,6 +1173,7 @@ function bindEvents() {
             finalContent = finalLines.join('\n\n');
         }
         $('#pw-result-text').val(finalContent).trigger('input');
+
         $('#pw-diff-overlay').fadeOut();
         saveCurrentState();
         toastr.success("修改已应用");
@@ -1232,7 +1181,7 @@ function bindEvents() {
 
     $(document).on('click.pw', '#pw-diff-cancel', () => $('#pw-diff-overlay').fadeOut());
 
-    // Generate
+    // Generate Persona
     $(document).on('click.pw', '#pw-btn-gen', async function (e) {
         e.preventDefault();
         
@@ -1268,14 +1217,11 @@ function bindEvents() {
                 indepApiModel: modelVal
             };
             const text = await runGeneration(config, config);
-            
-            if (text) {
-                $('#pw-result-text').val(text);
-                $('#pw-result-area').fadeIn();
-                $('#pw-request').addClass('minimized');
-                saveCurrentState();
-                $('#pw-result-text').trigger('input');
-            }
+            $('#pw-result-text').val(text);
+            $('#pw-result-area').fadeIn();
+            $('#pw-request').addClass('minimized');
+            saveCurrentState();
+            $('#pw-result-text').trigger('input');
         } catch (e) { 
             console.error(e);
             toastr.error("生成失败: " + e.message); 
@@ -1325,6 +1271,7 @@ function bindEvents() {
         }
     });
 
+    // Save Draft (Persona)
     $(document).on('click.pw', '#pw-snapshot', function () {
         const text = $('#pw-result-text').val();
         const req = $('#pw-request').val();
@@ -1332,7 +1279,7 @@ function bindEvents() {
         saveHistory({ 
             request: req || "无", 
             timestamp: new Date().toLocaleString(), 
-            title: "",
+            title: "", // Let default logic handle it
             data: { name: "Persona", resultText: text || "(无)", type: 'persona' } 
         });
         toastr.success(TEXT.TOAST_SNAPSHOT);
@@ -1501,6 +1448,61 @@ const renderHistoryList = () => {
     });
 };
 
+window.pwExtraBooks = [];
+const renderWiBooks = async () => {
+    const container = $('#pw-wi-container').empty();
+    const baseBooks = await getContextWorldBooks();
+    const allBooks = [...new Set([...baseBooks, ...(window.pwExtraBooks || [])])];
+    if (allBooks.length === 0) { container.html('<div style="opacity:0.6; padding:10px; text-align:center;">此角色未绑定世界书，请在“世界书”标签页手动添加或在酒馆主界面绑定。</div>'); return; }
+    for (const book of allBooks) {
+        const isBound = baseBooks.includes(book);
+        // [修改] 移除了内联样式，改用 class="pw-bound-status" 和 class="pw-remove-book-icon"
+        const $el = $(`<div class="pw-wi-book"><div class="pw-wi-header"><span><i class="fa-solid fa-book"></i> ${book} ${isBound ? '<span class="pw-bound-status">(已绑定)</span>' : ''}</span><div>${!isBound ? '<i class="fa-solid fa-times remove-book pw-remove-book-icon" title="移除"></i>' : ''}<i class="fa-solid fa-chevron-down arrow"></i></div></div><div class="pw-wi-list" data-book="${book}"></div></div>`);
+        $el.find('.remove-book').on('click', (e) => { e.stopPropagation(); window.pwExtraBooks = window.pwExtraBooks.filter(b => b !== book); renderWiBooks(); });
+        $el.find('.pw-wi-header').on('click', async function () {
+            const $list = $el.find('.pw-wi-list');
+            const $arrow = $(this).find('.arrow');
+            if ($list.is(':visible')) { $list.slideUp(); $arrow.removeClass('fa-flip-vertical'); }
+            else {
+                $list.slideDown(); $arrow.addClass('fa-flip-vertical');
+                if (!$list.data('loaded')) {
+                    $list.html('<div style="padding:10px;text-align:center;"><i class="fas fa-spinner fa-spin"></i></div>');
+                    const entries = await getWorldBookEntries(book);
+                    $list.empty();
+                    if (entries.length === 0) $list.html('<div style="padding:10px;opacity:0.5;">无条目</div>');
+                    entries.forEach(entry => {
+                        const isChecked = entry.enabled ? 'checked' : '';
+                        const $item = $(`<div class="pw-wi-item"><div class="pw-wi-item-row"><input type="checkbox" class="pw-wi-check" ${isChecked} data-content="${encodeURIComponent(entry.content)}"><div style="font-weight:bold; font-size:0.9em; flex:1;">${entry.displayName}</div><i class="fa-solid fa-eye pw-wi-toggle-icon"></i></div><div class="pw-wi-desc">${entry.content}<div class="pw-wi-close-bar"><i class="fa-solid fa-angle-up"></i> 收起</div></div></div>`);
+                        // [修改] 移除了 .css('color', ...) 改用 .addClass('active') 和 .removeClass('active')
+                        $item.find('.pw-wi-toggle-icon').on('click', function (e) {
+                            e.stopPropagation();
+                            const $desc = $(this).closest('.pw-wi-item').find('.pw-wi-desc');
+                            if ($desc.is(':visible')) { $desc.slideUp(); $(this).removeClass('active'); } else { $desc.slideDown(); $(this).addClass('active'); }
+                        });
+                        $item.find('.pw-wi-close-bar').on('click', function () { $(this).parent().slideUp(); $item.find('.pw-wi-toggle-icon').removeClass('active'); });
+                        $list.append($item);
+                    });
+                    $list.data('loaded', true);
+                }
+            }
+        });
+        container.append($el);
+    }
+};
+
+// [New] Render Greetings List as Options
+const renderGreetingsList = () => {
+    const list = getCharacterGreetingsList();
+    currentGreetingsList = list;
+    const $select = $('#pw-greetings-select').empty();
+    
+    $select.append('<option value="">(不使用开场白)</option>');
+    
+    list.forEach((item, idx) => {
+        $select.append(`<option value="${idx}">${item.label}</option>`);
+    });
+};
+
 function addPersonaButton() {
     const container = $('.persona_controls_buttons_block');
     if (container.length === 0 || $(`#${BUTTON_ID}`).length > 0) return;
@@ -1510,7 +1512,8 @@ function addPersonaButton() {
 }
 
 jQuery(async () => {
-    addPersonaButton();
-    bindEvents();
-    console.log("[PW] Persona Weaver Loaded (v3.0 - Robust Native API)");
+    // injectStyles(); // Removed: Style injection handled by style.css file
+    addPersonaButton(); // Try once immediately
+    bindEvents(); // Standard event binding
+    console.log("[PW] Persona Weaver Loaded (v2.8 Split Files - CSS Controlled Colors)");
 });
