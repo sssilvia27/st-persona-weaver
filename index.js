@@ -139,16 +139,16 @@ let promptsCache = {
 };
 let availableWorldBooks = [];
 let isEditingTemplate = false;
-let pollInterval = null;
 let lastRawResponse = "";
 
-// 全局处理锁
+// [Fix] 全局处理锁，防止连点
 let isProcessing = false;
 
 // ============================================================================
 // 工具函数
 // ============================================================================
-const yieldToBrowser = () => new Promise(resolve => setTimeout(resolve, 0));
+// [Fix] 优化 yield
+const yieldToBrowser = () => new Promise(resolve => requestAnimationFrame(resolve));
 const forcePaint = () => new Promise(resolve => setTimeout(resolve, 50));
 
 // ============================================================================
@@ -235,23 +235,12 @@ function findMatchingKey(targetKey, map) {
     return null;
 }
 
-// [Updated] 收集上下文（开场白 + 世界书）
 async function collectActiveWorldInfoContent() {
     let content = [];
     try {
-        // 1. 收集选中的开场白
-        $('.pw-greeting-check:checked').each(function() {
-            const text = $(this).data('content');
-            if (text) {
-                content.push(`\n[Reference - Character Greeting / Plot Context]:\n${decodeURIComponent(text)}`);
-            }
-        });
-
-        // 2. 收集世界书
         const boundBooks = await getContextWorldBooks();
         const manualBooks = window.pwExtraBooks || [];
         const allBooks = [...new Set([...boundBooks, ...manualBooks])];
-        
         if (allBooks.length > 20) allBooks.length = 20;
 
         for (const bookName of allBooks) {
@@ -263,9 +252,9 @@ async function collectActiveWorldInfoContent() {
                     content.push(`\n--- World Book: ${bookName} ---`);
                     enabledEntries.forEach(e => content.push(`[Entry: ${e.displayName}]\n${e.content}`));
                 }
-            } catch (err) { console.warn(`[PW] Error loading book ${bookName}`, err); }
+            } catch (err) { }
         }
-    } catch (e) { console.error("Error collecting context:", e); }
+    } catch (e) { }
     return content;
 }
 
@@ -330,9 +319,10 @@ function saveState(data) { localStorage.setItem(STORAGE_KEY_STATE, JSON.stringif
 function loadState() { try { return JSON.parse(localStorage.getItem(STORAGE_KEY_STATE)) || {}; } catch { return {}; } }
 
 function injectStyles() {
-    const styleId = 'persona-weaver-css-v50-lite'; // Version bumped
+    const styleId = 'persona-weaver-css-v46-lite'; 
     if ($(`#${styleId}`).length) return;
     
+    // [Fix] Z-Index adjusted for compatibility
     const css = `
     #pw-api-model-select { flex: 1; width: 0; min-width: 0; text-overflow: ellipsis; overflow: hidden; white-space: nowrap; }
     
@@ -384,11 +374,11 @@ function injectStyles() {
     
     .pw-diff-raw-textarea { min-height: 350px !important; }
 
-    /* Updated Reference Section Styles */
-    .pw-section-title { font-weight: bold; color: #e0af68; margin-bottom: 8px; font-size: 0.95em; border-bottom: 1px solid var(--SmartThemeBorderColor); padding-bottom: 4px; display:flex; align-items:center; gap:6px; margin-top: 5px; }
-    
     .pw-float-quote-btn { position: fixed; top: calc(20% + 60px); right: 0; background: linear-gradient(135deg, #e0af68, #d08f40); color: #1a1a1a; padding: 8px 12px; border-radius: 20px 0 0 20px; font-weight: bold; font-size: 0.85em; box-shadow: -2px 2px 8px rgba(0,0,0,0.4); cursor: pointer; z-index: 9999; display: none; align-items: center; gap: 4px; border: 1px solid rgba(255,255,255,0.3); border-right: none; backdrop-filter: blur(5px); }
     .pw-float-quote-btn:hover { padding-right: 18px; transform: translateX(-2px); }
+
+    /* Fix: Z-Index for diff overlay */
+    .pw-diff-container { z-index: 2000 !important; }
     `;
     $('<style>').attr('id', styleId).text(css).appendTo('head');
 }
@@ -408,45 +398,61 @@ async function forceSavePersona(name, description) {
     return true;
 }
 
+// [Updated] Modern World Info Sync using updateWorldbookWith
 async function syncToWorldInfoViaHelper(userName, content) {
     if (!window.TavernHelper) return toastr.error(TEXT.TOAST_WI_ERROR);
+
     let targetBook = null;
     try {
         const charBooks = window.TavernHelper.getCharWorldbookNames('current');
         if (charBooks && charBooks.primary) targetBook = charBooks.primary;
         else if (charBooks && charBooks.additional && charBooks.additional.length > 0) targetBook = charBooks.additional[0];
     } catch (e) { }
+    
     if (!targetBook) {
         const boundBooks = await getContextWorldBooks();
         if (boundBooks.length > 0) targetBook = boundBooks[0];
     }
+    
     if (!targetBook) return toastr.warning(TEXT.TOAST_WI_FAIL);
+
     try {
-        const entries = await window.TavernHelper.getLorebookEntries(targetBook);
-        const entryComment = `User: ${userName}`;
-        const existingEntry = entries.find(e => e.comment === entryComment);
-        if (existingEntry) {
-            await window.TavernHelper.setLorebookEntries(targetBook, [{ uid: existingEntry.uid, content: content, enabled: true }]);
-        } else {
-            const newEntry = { comment: entryComment, keys: [userName, "User"], content: content, enabled: true, selective: true, constant: false, position: { type: 'before_character_definition' } };
-            await window.TavernHelper.createLorebookEntries(targetBook, [newEntry]);
-        }
+        // Atomic update via TavernHelper
+        await window.TavernHelper.updateWorldbookWith(targetBook, (entries) => {
+            const entryComment = `User: ${userName}`;
+            const existingEntry = entries.find(e => e.comment === entryComment);
+
+            if (existingEntry) {
+                existingEntry.content = content;
+                existingEntry.enabled = true;
+            } else {
+                entries.push({ 
+                    comment: entryComment, 
+                    keys: [userName, "User"], 
+                    content: content, 
+                    enabled: true, 
+                    selective: true, 
+                    constant: false, 
+                    position: { type: 'before_character_definition' } 
+                });
+            }
+            return entries;
+        });
         toastr.success(TEXT.TOAST_WI_SUCCESS(targetBook));
-    } catch (e) { toastr.error("写入世界书失败"); }
+    } catch (e) { 
+        console.error("[PW] World Info Sync Error:", e);
+        toastr.error("写入世界书失败: " + (e.message || "未知错误")); 
+    }
 }
 
 async function loadAvailableWorldBooks() {
     availableWorldBooks = [];
-    
-    // [Fix] Reverted to most basic load logic to ensure compatibility
-    if (window.world_names && Array.isArray(window.world_names)) {
-        availableWorldBooks = window.world_names;
-    }
-    
-    if (availableWorldBooks.length === 0 && window.TavernHelper && typeof window.TavernHelper.getWorldbookNames === 'function') {
+    if (window.TavernHelper && typeof window.TavernHelper.getWorldbookNames === 'function') {
         try { availableWorldBooks = window.TavernHelper.getWorldbookNames(); } catch { }
     }
-
+    if (availableWorldBooks.length === 0 && window.world_names && Array.isArray(window.world_names)) {
+        availableWorldBooks = window.world_names;
+    }
     if (availableWorldBooks.length === 0) {
         try {
             const r = await fetch('/api/worldinfo/get', { method: 'POST', headers: getRequestHeaders(), body: JSON.stringify({}) });
@@ -471,7 +477,6 @@ async function getContextWorldBooks(extras = []) {
     return Array.from(books).filter(Boolean);
 }
 
-// [Fix] Reverted to safe/robust logic
 async function getWorldBookEntries(bookName) {
     if (window.TavernHelper && typeof window.TavernHelper.getLorebookEntries === 'function') {
         try {
@@ -482,6 +487,7 @@ async function getWorldBookEntries(bookName) {
     return [];
 }
 
+// [Updated] Generation Logic supporting Independent & Main (Raw) API
 async function runGeneration(data, apiConfig) {
     const context = getContext();
     const charId = context.characterId;
@@ -492,7 +498,7 @@ async function runGeneration(data, apiConfig) {
 
     let wiText = "";
     if (data.wiContext && data.wiContext.length > 0) {
-        wiText = `\n[Context from World Info / References]:\n${data.wiContext.join('\n')}\n`;
+        wiText = `\n[Context from World Info]:\n${data.wiContext.join('\n')}\n`;
     }
 
     let systemTemplate = promptsCache.initial;
@@ -515,7 +521,7 @@ async function runGeneration(data, apiConfig) {
             let baseUrl = apiConfig.indepApiUrl.replace(/\/$/, '');
             if (baseUrl.endsWith('/chat/completions')) baseUrl = baseUrl.replace(/\/chat\/completions$/, '');
             const url = `${baseUrl}/chat/completions`;
-            const messages = [{ role: 'user', content: systemPrompt }];
+            const messages = [{ role: 'system', content: systemPrompt }];
             const res = await fetch(url, {
                 method: 'POST', 
                 headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiConfig.indepApiKey}` },
@@ -532,8 +538,29 @@ async function runGeneration(data, apiConfig) {
             if (!json.choices || !json.choices.length) throw new Error("API 返回格式错误: 找不到 choices");
             responseContent = json.choices[0].message.content;
         } else {
-            if (typeof context.generateQuietPrompt !== 'function') throw new Error("ST版本过旧，不支持后台生成");
-            responseContent = await context.generateQuietPrompt(systemPrompt, false, false, null, "System");
+            // Main API Path
+            if (window.TavernHelper && typeof window.TavernHelper.generateRaw === 'function') {
+                console.log("[PW] Using TavernHelper.generateRaw");
+                responseContent = await window.TavernHelper.generateRaw({
+                    user_input: '',
+                    ordered_prompts: [{ role: 'system', content: systemPrompt }],
+                    overrides: {
+                        chat_history: { prompts: [] },
+                        world_info_before: '',
+                        world_info_after: '',
+                        persona_description: '',
+                        char_description: '',
+                        char_personality: '',
+                        scenario: '',
+                        dialogue_examples: ''
+                    }
+                });
+            } else if (typeof context.generateQuietPrompt === 'function') {
+                console.log("[PW] Using context.generateQuietPrompt (Legacy)");
+                responseContent = await context.generateQuietPrompt(systemPrompt, false, false, null, "System");
+            } else {
+                throw new Error("ST版本过旧或未安装 TavernHelper，不支持主API生成");
+            }
         }
     } finally { clearTimeout(timeoutId); }
     
@@ -582,8 +609,7 @@ async function openCreatorPopup() {
         <div class="pw-top-bar"><div class="pw-title">${headerTitle}</div></div>
         <div class="pw-tabs">
             <div class="pw-tab active" data-tab="editor">人设</div>
-            <!-- [Updated] Tab Name -->
-            <div class="pw-tab" data-tab="context">参考</div>
+            <div class="pw-tab" data-tab="context">世界书</div>
             <div class="pw-tab" data-tab="api">API & Prompt</div>
             <div class="pw-tab" data-tab="history">草稿</div>
         </div>
@@ -677,27 +703,7 @@ async function openCreatorPopup() {
 
     <div id="pw-float-quote-btn" class="pw-float-quote-btn"><i class="fa-solid fa-pen-to-square"></i> 修改此段</div>
 
-    <!-- [Updated] Context Tab with Greetings Section -->
-    <div id="pw-view-context" class="pw-view">
-        <div class="pw-scroll-area">
-            
-            <!-- Greetings Section -->
-            <div class="pw-card-section">
-                <div class="pw-section-title"><i class="fa-solid fa-comment-dots"></i> 角色开场白 (选择以作为参考)</div>
-                <div id="pw-greetings-list" class="pw-wi-list" style="display:block; padding-top:0;"></div>
-            </div>
-
-            <!-- World Book Section -->
-            <div class="pw-card-section">
-                <div class="pw-section-title"><i class="fa-solid fa-book-open"></i> 世界书</div>
-                <div class="pw-wi-controls">
-                    <select id="pw-wi-select" class="pw-input pw-wi-select"><option value="">-- 添加参考/目标世界书 --</option>${renderBookOptions()}</select>
-                    <button id="pw-wi-refresh" class="pw-btn primary pw-wi-refresh-btn"><i class="fa-solid fa-sync"></i></button><button id="pw-wi-add" class="pw-btn primary pw-wi-add-btn"><i class="fa-solid fa-plus"></i></button>
-                </div>
-            </div>
-            <div id="pw-wi-container"></div>
-        </div>
-    </div>
+    <div id="pw-view-context" class="pw-view"><div class="pw-scroll-area"><div class="pw-card-section"><div class="pw-wi-controls"><select id="pw-wi-select" class="pw-input pw-wi-select"><option value="">-- 添加参考/目标世界书 --</option>${renderBookOptions()}</select><button id="pw-wi-refresh" class="pw-btn primary pw-wi-refresh-btn"><i class="fa-solid fa-sync"></i></button><button id="pw-wi-add" class="pw-btn primary pw-wi-add-btn"><i class="fa-solid fa-plus"></i></button></div></div><div id="pw-wi-container"></div></div></div>
     
     <div id="pw-view-api" class="pw-view">
         <div class="pw-scroll-area">
@@ -747,8 +753,6 @@ async function openCreatorPopup() {
 
     renderTemplateChips();
     renderWiBooks();
-    // [New] Render Greetings
-    renderGreetingsList();
 
     $('.pw-auto-height').each(function() {
         this.style.height = 'auto';
@@ -764,72 +768,24 @@ async function openCreatorPopup() {
     }
 }
 
-// [New] Render Greetings List Logic (Referenced from your script)
-function renderGreetingsList() {
-    const $container = $('#pw-greetings-list').empty();
-    
-    // [Fix] Using window.TavernHelper for data access as requested
-    const char = window.TavernHelper.getCharData('current');
-    
-    if (!char) {
-        $container.html('<div style="padding:10px;opacity:0.5;">未加载角色卡</div>');
-        return;
-    }
-
-    const greetings = [];
-
-    // Main Greeting
-    if (char.first_mes) {
-        greetings.push({ label: "默认开场白", content: char.first_mes, default: true });
-    }
-
-    // Alternate Greetings
-    if (char.data && Array.isArray(char.data.alternate_greetings)) {
-        char.data.alternate_greetings.forEach((g, i) => {
-            if(g) greetings.push({ label: `备用开场白 ${i+1}`, content: g, default: false });
-        });
-    }
-
-    if (greetings.length === 0) {
-        $container.html('<div style="padding:10px;opacity:0.5;">无开场白数据</div>');
-        return;
-    }
-
-    greetings.forEach(g => {
-        const isChecked = g.default ? 'checked' : '';
-        const $item = $(`
-            <div class="pw-wi-item">
-                <div class="pw-wi-item-row">
-                    <input type="checkbox" class="pw-greeting-check" ${isChecked} data-content="${encodeURIComponent(g.content)}">
-                    <div style="font-weight:bold; font-size:0.9em; flex:1;">${g.label}</div>
-                    <i class="fa-solid fa-eye pw-wi-toggle-icon"></i>
-                </div>
-                <div class="pw-wi-desc">${g.content}<div class="pw-wi-close-bar"><i class="fa-solid fa-angle-up"></i> 收起</div></div>
-            </div>
-        `);
-
-        // Toggle visibility
-        $item.find('.pw-wi-toggle-icon').on('click', function (e) {
-            e.stopPropagation();
-            const $desc = $(this).closest('.pw-wi-item').find('.pw-wi-desc');
-            if ($desc.is(':visible')) { $desc.slideUp(); $(this).css('color', ''); } else { $desc.slideDown(); $(this).css('color', '#5b8db8'); }
-        });
-        $item.find('.pw-wi-close-bar').on('click', function () { $(this).parent().slideUp(); $item.find('.pw-wi-toggle-icon').css('color', ''); });
-
-        $container.append($item);
-    });
-}
-
 // ============================================================================
 // 4. 事件绑定
 // ============================================================================
 
 function bindEvents() {
-    // [Fix] 移除重复绑定的锁逻辑，确保每次打开都能重新绑定事件委托
-    // 因为是 $(document).on，我们只需要解绑一次即可
-    $(document).off('.pw');
+    if (window.stPersonaWeaverBound) return;
+    window.stPersonaWeaverBound = true;
 
-    console.log("[PW] Binding Events (Lite)...");
+    console.log("[PW] Binding Events (Standard)...");
+
+    // [New] Use Event Source for reliable button injection
+    const context = getContext();
+    if (context && context.eventSource) {
+        context.eventSource.on(context.eventTypes.APP_READY, addPersonaButton);
+        context.eventSource.on(context.eventTypes.MOVABLE_PANELS_RESET, addPersonaButton);
+    }
+    // [New] Global endpoint for slash commands
+    window.openPersonaWeaver = openCreatorPopup;
 
     // --- 复制功能 ---
     $(document).on('click.pw', '#pw-copy-persona', function() {
@@ -1318,32 +1274,134 @@ function bindEvents() {
     $(document).on('click.pw', '#pw-history-clear-all', function () { if (confirm("清空?")) { historyCache = []; saveData(); renderHistoryList(); } });
 }
 
+// ... 辅助渲染函数 ...
+const renderTemplateChips = () => {
+    const $container = $('#pw-template-chips').empty();
+    const blocks = parseYamlToBlocks(currentTemplate);
+    blocks.forEach((content, key) => {
+        const $chip = $(`<div class="pw-tag-chip"><i class="fa-solid fa-cube" style="opacity:0.5; margin-right:4px;"></i><span>${key}</span></div>`);
+        $chip.on('click', () => {
+            const $text = $('#pw-request');
+            const cur = $text.val();
+            const prefix = (cur && !cur.endsWith('\n') && cur.length > 0) ? '\n\n' : '';
+            let insertText = key + ":";
+            if (content && content.trim()) {
+                if (content.includes('\n') || content.startsWith(' ')) insertText += "\n" + content;
+                else insertText += " " + content;
+            } else insertText += " ";
+            $text.val(cur + prefix + insertText).focus();
+            $text.scrollTop($text[0].scrollHeight);
+        });
+        $container.append($chip);
+    });
+};
+
+const renderHistoryList = () => {
+    loadData();
+    const $list = $('#pw-history-list').empty();
+    const search = $('#pw-history-search').val().toLowerCase();
+    
+    // [Lite Fix] Filter out opening types
+    const filtered = historyCache.filter(item => {
+        if (item.data && item.data.type === 'opening') return false; 
+        
+        if (!search) return true;
+        const content = (item.data.resultText || "").toLowerCase();
+        const title = (item.title || "").toLowerCase();
+        return title.includes(search) || content.includes(search);
+    });
+    
+    if (filtered.length === 0) { $list.html('<div style="text-align:center; opacity:0.6; padding:20px;">暂无草稿</div>'); return; }
+
+    filtered.forEach((item, index) => {
+        const previewText = item.data.resultText || '无内容';
+        const displayTitle = item.title || "User & Char";
+
+        const $el = $(`
+        <div class="pw-history-item">
+            <div class="pw-hist-main">
+                <div class="pw-hist-header">
+                    <span class="pw-hist-title-display">${displayTitle}</span>
+                    <input type="text" class="pw-hist-title-input" value="${displayTitle}" style="display:none;">
+                    <div style="display:flex; gap:5px;">
+                        <i class="fa-solid fa-pen pw-hist-action-btn edit" title="编辑标题"></i>
+                        <i class="fa-solid fa-trash pw-hist-action-btn del" data-index="${index}" title="删除"></i>
+                    </div>
+                </div>
+                <div class="pw-hist-meta"><span>${item.timestamp || ''}</span></div>
+                <div class="pw-hist-desc">${previewText}</div>
+            </div>
+        </div>
+    `);
+        $el.on('click', function (e) {
+            if ($(e.target).closest('.pw-hist-action-btn, .pw-hist-title-input').length) return;
+            $('#pw-request').val(item.request); $('#pw-result-text').val(previewText); $('#pw-result-area').show();
+            $('#pw-request').addClass('minimized');
+            $('.pw-tab[data-tab="editor"]').click();
+        });
+        $el.find('.pw-hist-action-btn.del').on('click', function (e) {
+            e.stopPropagation();
+            if (confirm("删除?")) {
+                historyCache.splice(historyCache.indexOf(item), 1);
+                saveData(); renderHistoryList();
+            }
+        });
+        $list.append($el);
+    });
+};
+
+window.pwExtraBooks = [];
+const renderWiBooks = async () => {
+    const container = $('#pw-wi-container').empty();
+    const baseBooks = await getContextWorldBooks();
+    const allBooks = [...new Set([...baseBooks, ...(window.pwExtraBooks || [])])];
+    if (allBooks.length === 0) { container.html('<div style="opacity:0.6; padding:10px; text-align:center;">此角色未绑定世界书，请在“世界书”标签页手动添加或在酒馆主界面绑定。</div>'); return; }
+    for (const book of allBooks) {
+        const isBound = baseBooks.includes(book);
+        const $el = $(`<div class="pw-wi-book"><div class="pw-wi-header"><span><i class="fa-solid fa-book"></i> ${book} ${isBound ? '<span style="color:#9ece6a;font-size:0.8em;margin-left:5px;">(已绑定)</span>' : ''}</span><div>${!isBound ? '<i class="fa-solid fa-times remove-book" style="color:#ff6b6b;margin-right:10px;" title="移除"></i>' : ''}<i class="fa-solid fa-chevron-down arrow"></i></div></div><div class="pw-wi-list" data-book="${book}"></div></div>`);
+        $el.find('.remove-book').on('click', (e) => { e.stopPropagation(); window.pwExtraBooks = window.pwExtraBooks.filter(b => b !== book); renderWiBooks(); });
+        $el.find('.pw-wi-header').on('click', async function () {
+            const $list = $el.find('.pw-wi-list');
+            const $arrow = $(this).find('.arrow');
+            if ($list.is(':visible')) { $list.slideUp(); $arrow.removeClass('fa-flip-vertical'); }
+            else {
+                $list.slideDown(); $arrow.addClass('fa-flip-vertical');
+                if (!$list.data('loaded')) {
+                    $list.html('<div style="padding:10px;text-align:center;"><i class="fas fa-spinner fa-spin"></i></div>');
+                    const entries = await getWorldBookEntries(book);
+                    $list.empty();
+                    if (entries.length === 0) $list.html('<div style="padding:10px;opacity:0.5;">无条目</div>');
+                    entries.forEach(entry => {
+                        const isChecked = entry.enabled ? 'checked' : '';
+                        const $item = $(`<div class="pw-wi-item"><div class="pw-wi-item-row"><input type="checkbox" class="pw-wi-check" ${isChecked} data-content="${encodeURIComponent(entry.content)}"><div style="font-weight:bold; font-size:0.9em; flex:1;">${entry.displayName}</div><i class="fa-solid fa-eye pw-wi-toggle-icon"></i></div><div class="pw-wi-desc">${entry.content}<div class="pw-wi-close-bar"><i class="fa-solid fa-angle-up"></i> 收起</div></div></div>`);
+                        $item.find('.pw-wi-toggle-icon').on('click', function (e) {
+                            e.stopPropagation();
+                            const $desc = $(this).closest('.pw-wi-item').find('.pw-wi-desc');
+                            if ($desc.is(':visible')) { $desc.slideUp(); $(this).css('color', ''); } else { $desc.slideDown(); $(this).css('color', '#5b8db8'); }
+                        });
+                        $item.find('.pw-wi-close-bar').on('click', function () { $(this).parent().slideUp(); $item.find('.pw-wi-toggle-icon').css('color', ''); });
+                        $list.append($item);
+                    });
+                    $list.data('loaded', true);
+                }
+            }
+        });
+        container.append($el);
+    }
+};
+
 function addPersonaButton() {
     const container = $('.persona_controls_buttons_block');
     if (container.length === 0 || $(`#${BUTTON_ID}`).length > 0) return;
     const newButton = $(`<div id="${BUTTON_ID}" class="menu_button fa-solid fa-wand-magic-sparkles interactable" title="${TEXT.BTN_TITLE}" tabindex="0" role="button"></div>`);
-    newButton.on('click', () => {
-        // [Fix] Reset lock on open
-        isProcessing = false;
-        openCreatorPopup();
-    });
+    newButton.on('click', openCreatorPopup);
     container.prepend(newButton);
 }
 
-function startPolling() {
-    if (pollInterval) clearInterval(pollInterval);
-    pollInterval = setInterval(() => {
-        const container = $('.persona_controls_buttons_block');
-        const btn = $(`#${BUTTON_ID}`);
-        if (container.length > 0 && btn.length === 0) {
-            addPersonaButton();
-        }
-    }, 2000);
-}
-
+// [Updated] Initialization
 jQuery(async () => {
     injectStyles();
-    addPersonaButton();
-    startPolling();
-    bindEvents();
+    addPersonaButton(); // Try once immediately
+    bindEvents(); // Standard event binding
+    console.log("[PW] Persona Weaver Loaded (v2.1 Optimized)");
 });
