@@ -162,27 +162,7 @@ let currentGreetingsList = [];
 const yieldToBrowser = () => new Promise(resolve => requestAnimationFrame(resolve));
 const forcePaint = () => new Promise(resolve => setTimeout(resolve, 50));
 
-// [Modified] 使用 TavernHelper 获取更准确的角色数据
 function getCharacterInfoText() {
-    // 优先尝试使用 TavernHelper (支持 V1/V2 格式自动处理)
-    if (window.TavernHelper && typeof window.TavernHelper.getCharData === 'function') {
-        const data = window.TavernHelper.getCharData('current');
-        if (!data) return "";
-
-        const parts = [];
-        if (data.description) parts.push(`Description:\n${data.description}`);
-        if (data.personality) parts.push(`Personality:\n${data.personality}`);
-        if (data.scenario) parts.push(`Scenario:\n${data.scenario}`);
-        
-        // 额外支持 V2 卡片的 Depth Prompt
-        if (data.extensions?.depth_prompt?.prompt) {
-             parts.push(`Depth Prompt:\n${data.extensions.depth_prompt.prompt}`);
-        }
-        
-        return parts.join('\n\n');
-    }
-
-    // 降级方案：直接读取 Context
     const context = getContext();
     const charId = context.characterId;
     if (charId === undefined || !context.characters[charId]) return "";
@@ -198,24 +178,13 @@ function getCharacterInfoText() {
     return parts.join('\n\n');
 }
 
-// [Modified] 同样优化开场白获取逻辑
 function getCharacterGreetingsList() {
-    let data = null;
+    const context = getContext();
+    const charId = context.characterId;
+    if (charId === undefined || !context.characters[charId]) return [];
 
-    // 优先 TavernHelper
-    if (window.TavernHelper && typeof window.TavernHelper.getCharData === 'function') {
-        data = window.TavernHelper.getCharData('current');
-    } else {
-        // 降级方案
-        const context = getContext();
-        const charId = context.characterId;
-        if (charId !== undefined && context.characters[charId]) {
-            const char = context.characters[charId];
-            data = char.data || char;
-        }
-    }
-
-    if (!data) return [];
+    const char = context.characters[charId];
+    const data = char.data || char;
 
     const list = [];
     if (data.first_mes) {
@@ -1536,6 +1505,7 @@ function addPersonaButton() {
 }
 
 jQuery(async () => {
+    // injectStyles(); // Removed: Style injection handled by style.css file
     addPersonaButton(); // Try once immediately
     bindEvents(); // Standard event binding
     console.log("[PW] Persona Weaver Loaded (v2.8 Split Files)");
