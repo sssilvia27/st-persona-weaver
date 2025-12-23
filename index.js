@@ -5,7 +5,7 @@ const extensionName = "st-persona-weaver";
 const STORAGE_KEY_HISTORY = 'pw_history_v20';
 const STORAGE_KEY_STATE = 'pw_state_v20';
 const STORAGE_KEY_TEMPLATE = 'pw_template_v2';
-const STORAGE_KEY_PROMPTS = 'pw_prompts_v6'; 
+const STORAGE_KEY_PROMPTS = 'pw_prompts_v7';
 const BUTTON_ID = 'pw_persona_tool_btn';
 
 const defaultYamlTemplate =
@@ -75,6 +75,14 @@ NSFW:
 // --- Prompt 定义 ---
 const defaultSystemPromptInitial =
 `Creating User Persona for {{user}} (Target: {{char}}).
+
+[Target Character Info]:
+{{charInfo}}
+
+[Opening Context / Greetings]:
+{{greetings}}
+
+[World Info / Lore]:
 {{wi}}
 
 [Traits / Template]:
@@ -84,16 +92,22 @@ const defaultSystemPromptInitial =
 {{input}}
 
 [Task]:
-Generate character details strictly in structured YAML format.
-1. Do NOT wrap the output in a root key like "{{user}}:". Start directly with the first key from the template.
-2. Maintain indentation strictly.
-3. Do NOT output status bars, progress bars, or Chain of Thought/Reasoning/Thinking process.
-4. Response: ONLY the YAML content.`;
+Generate character details strictly in structured YAML format based on the [Traits / Template].
+1. Design a User persona that fits the [Target Character Info] and [Opening Context].
+2. Do NOT wrap the output in a root key like "{{user}}:". Start directly with the first key from the template.
+3. Maintain indentation strictly.
+4. Do NOT output status bars, progress bars, or Chain of Thought.
+5. Response: ONLY the YAML content.`;
 
 const defaultSystemPromptRefine =
 `You are an expert Data Converter and Persona Editor.
 Optimizing User Persona for {{char}}.
-{{wi}}
+
+[Target Character Info]:
+{{charInfo}}
+
+[Opening Context / Greetings]:
+{{greetings}}
 
 [Target Schema / Template]:
 {{tags}}
@@ -107,12 +121,11 @@ Optimizing User Persona for {{char}}.
 "{{input}}"
 
 [Task]:
-1. Parse [Current Data]. If it is unstructured text or uses a different format, MIGRATE it to fit the [Target Schema].
+1. Parse [Current Data]. MIGRATE it to fit the [Target Schema].
 2. Apply the [Instruction] to modify or refine the content.
-3. STRICTLY output in valid YAML format following the [Target Schema] structure.
-4. Do NOT add a root key wrapper (like "User:").
-5. Do NOT output status bars, progress bars, or Chain of Thought.
-6. Response: ONLY the final YAML content.`;
+3. Ensure the persona fits the [Target Character Info].
+4. STRICTLY output in valid YAML format.
+5. Response: ONLY the final YAML content.`;
 
 const defaultSettings = {
     autoSwitchPersona: true, syncToWorldInfo: false,
@@ -139,18 +152,51 @@ let promptsCache = {
 };
 let availableWorldBooks = [];
 let isEditingTemplate = false;
-let pollInterval = null;
 let lastRawResponse = "";
-
-// [Fix] 全局处理锁，防止连点
 let isProcessing = false;
+let currentGreetingsList = []; 
 
 // ============================================================================
 // 工具函数
 // ============================================================================
-// [Fix] 优化 yield
 const yieldToBrowser = () => new Promise(resolve => requestAnimationFrame(resolve));
 const forcePaint = () => new Promise(resolve => setTimeout(resolve, 50));
+
+function getCharacterInfoText() {
+    const context = getContext();
+    const charId = context.characterId;
+    if (charId === undefined || !context.characters[charId]) return "";
+
+    const char = context.characters[charId];
+    const data = char.data || char; 
+
+    const parts = [];
+    if (data.description) parts.push(`Description:\n${data.description}`);
+    if (data.personality) parts.push(`Personality:\n${data.personality}`);
+    if (data.scenario) parts.push(`Scenario:\n${data.scenario}`);
+    
+    return parts.join('\n\n');
+}
+
+function getCharacterGreetingsList() {
+    const context = getContext();
+    const charId = context.characterId;
+    if (charId === undefined || !context.characters[charId]) return [];
+
+    const char = context.characters[charId];
+    const data = char.data || char;
+
+    const list = [];
+    if (data.first_mes) {
+        list.push({ label: "开场白 #0", content: data.first_mes });
+    }
+    if (Array.isArray(data.alternate_greetings)) {
+        data.alternate_greetings.forEach((greeting, index) => {
+            list.push({ label: `开场白 #${index + 1}`, content: greeting });
+        });
+    }
+    return list;
+}
 
 // ============================================================================
 // 1. 核心数据解析逻辑
@@ -236,8 +282,11 @@ function findMatchingKey(targetKey, map) {
     return null;
 }
 
-async function collectActiveWorldInfoContent() {
-    let content = [];
+async function collectContextData() {
+    let wiContent = [];
+    let greetingsContent = "";
+
+    // 1. 收集世界书
     try {
         const boundBooks = await getContextWorldBooks();
         const manualBooks = window.pwExtraBooks || [];
@@ -247,16 +296,24 @@ async function collectActiveWorldInfoContent() {
         for (const bookName of allBooks) {
             await yieldToBrowser();
             try {
-                const entries = await getWorldBookEntries(bookName);
-                const enabledEntries = entries.filter(e => e.enabled);
-                if (enabledEntries.length > 0) {
-                    content.push(`\n--- World Book: ${bookName} ---`);
-                    enabledEntries.forEach(e => content.push(`[Entry: ${e.displayName}]\n${e.content}`));
-                }
+                $('#pw-wi-container .pw-wi-list[data-book="' + bookName + '"] .pw-wi-check:checked').each(function() {
+                    const content = decodeURIComponent($(this).data('content'));
+                    wiContent.push(`[Entry from ${bookName}]:\n${content}`);
+                });
             } catch (err) { }
         }
-    } catch (e) { }
-    return content;
+    } catch (e) { console.warn(e); }
+
+    // 2. 收集开场白
+    const selectedIdx = $('#pw-greetings-select').val();
+    if (selectedIdx !== "" && selectedIdx !== null && currentGreetingsList[selectedIdx]) {
+        greetingsContent = currentGreetingsList[selectedIdx].content;
+    }
+
+    return {
+        wi: wiContent.join('\n\n'),
+        greetings: greetingsContent
+    };
 }
 
 function getActivePersonaDescription() {
@@ -319,67 +376,6 @@ function saveHistory(item) {
 function saveState(data) { localStorage.setItem(STORAGE_KEY_STATE, JSON.stringify(data)); }
 function loadState() { try { return JSON.parse(localStorage.getItem(STORAGE_KEY_STATE)) || {}; } catch { return {}; } }
 
-function injectStyles() {
-    const styleId = 'persona-weaver-css-v46-lite'; 
-    if ($(`#${styleId}`).length) return;
-    
-    const css = `
-    #pw-api-model-select { flex: 1; width: 0; min-width: 0; text-overflow: ellipsis; overflow: hidden; white-space: nowrap; }
-    
-    .pw-load-btn { font-size: 0.85em; background: linear-gradient(135deg, rgba(224, 175, 104, 0.2), rgba(224, 175, 104, 0.1)); border: 1px solid #e0af68; padding: 4px 12px; border-radius: 4px; cursor: pointer; color: #e0af68; font-weight: bold; margin-left: auto; display: inline-flex; align-items: center; transition: all 0.2s; box-shadow: 0 2px 5px rgba(0,0,0,0.2); }
-    .pw-load-btn:hover { background: rgba(224, 175, 104, 0.3); transform: translateY(-1px); box-shadow: 0 4px 8px rgba(0,0,0,0.3); color: #fff; }
-
-    .pw-template-textarea { background: rgba(0, 0, 0, 0.5) !important; color: #eee !important; font-family: 'Consolas', 'Monaco', monospace; line-height: 1.4; height: 350px !important; border-radius: 0 0 6px 6px !important; border-top: none !important; }
-    
-    .pw-shortcut-btn { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 4px 10px; height: auto; gap: 2px; min-width: 40px; }
-    .pw-shortcut-btn span:first-child { font-size: 0.8em; opacity: 0.8; }
-    .pw-shortcut-btn span.code { font-weight: bold; font-family: monospace; color: #e0af68; font-size: 1.1em; }
-
-    .pw-var-btns { gap: 6px; }
-    .pw-var-btn { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 4px 10px; height: auto; gap: 0; border-color: rgba(128,128,128,0.4); }
-    .pw-var-btn span:first-child { font-weight: bold; font-size: 0.8em; }
-    .pw-var-btn span.code { font-size: 0.75em; opacity: 0.7; font-family: monospace; }
-
-    #pw-api-url { background-color: rgba(0, 0, 0, 0.2) !important; border: 1px solid var(--SmartThemeBorderColor) !important; color: var(--smart-theme-body-color) !important; }
-    .pw-auto-height { min-height: 80px; max-height: 500px; overflow-y: auto; }
-    
-    #pw-request { transition: none !important; } 
-
-    #pw-history-clear-all { background: transparent; border: none; color: #ff6b6b; font-size: 0.85em; opacity: 0.6; padding: 5px; width: auto; margin: 10px auto; text-decoration: underline; }
-    #pw-history-clear-all:hover { opacity: 1; background: transparent; transform: none; }
-
-    .pw-diff-row { background: #1a1a1a; border: 1px solid #333; border-radius: 8px; padding: 10px; display: flex; flex-direction: column; gap: 8px; margin-bottom: 10px; }
-    .pw-diff-attr-name { font-weight: bold; color: #9ece6a; font-size: 1em; padding-bottom: 5px; border-bottom: 1px solid #333; margin-bottom: 5px; }
-    
-    .pw-diff-cards { display: flex; gap: 10px; }
-    .pw-diff-card { flex: 1; display: flex; flex-direction: column; border: 2px solid transparent; border-radius: 6px; background: #222; overflow: hidden; transition: all 0.2s; cursor: pointer; opacity: 0.6; position: relative; }
-    .pw-diff-card.selected { border-color: #9ece6a; opacity: 1; background: #252525; box-shadow: 0 0 10px rgba(158, 206, 106, 0.1); }
-    .pw-diff-card:not(.selected):hover { opacity: 0.8; }
-    .pw-diff-card.single-view { flex: 1; opacity: 1; background: rgba(158, 206, 106, 0.05); border-color: #9ece6a; cursor: text; }
-    
-    .pw-diff-label { font-size: 0.75em; padding: 4px 8px; background: rgba(0,0,0,0.3); color: #aaa; text-transform: uppercase; font-weight: bold; }
-    .pw-diff-card.selected .pw-diff-label { color: #9ece6a; background: rgba(158, 206, 106, 0.1); }
-    
-    .pw-diff-textarea { flex: 1; width: 100%; background: transparent; border: none; color: #eee; padding: 8px; font-family: inherit; font-size: 0.95em; resize: none; outline: none; line-height: 1.5; min-height: 80px; box-sizing: border-box; }
-    .pw-diff-card:not(.selected) .pw-diff-textarea { color: #888; pointer-events: none; }
-    
-    @media screen and (max-width: 600px) { .pw-diff-cards { flex-direction: column; } }
-    
-    .pw-btn.wi { background: linear-gradient(135deg, rgba(122, 162, 247, 0.2), rgba(0, 0, 0, 0)); border-color: #7aa2f7; color: #7aa2f7; }
-
-    .pw-tab-sub { display: block; font-size: 0.75em; opacity: 0.6; font-weight: normal; margin-top: 2px; text-align: center; }
-    .pw-diff-tab { display: flex; flex-direction: column; align-items: center; justify-content: center; line-height: 1.1; }
-
-    .pw-header-subtitle { font-size: 0.65em; opacity: 0.6; font-weight: normal; margin-left: 10px; color: #ccc; }
-    
-    .pw-diff-raw-textarea { min-height: 350px !important; }
-
-    .pw-float-quote-btn { position: fixed; top: calc(20% + 60px); right: 0; background: linear-gradient(135deg, #e0af68, #d08f40); color: #1a1a1a; padding: 8px 12px; border-radius: 20px 0 0 20px; font-weight: bold; font-size: 0.85em; box-shadow: -2px 2px 8px rgba(0,0,0,0.4); cursor: pointer; z-index: 9999; display: none; align-items: center; gap: 4px; border: 1px solid rgba(255,255,255,0.3); border-right: none; backdrop-filter: blur(5px); }
-    .pw-float-quote-btn:hover { padding-right: 18px; transform: translateX(-2px); }
-    `;
-    $('<style>').attr('id', styleId).text(css).appendTo('head');
-}
-
 async function forceSavePersona(name, description) {
     const context = getContext();
     if (!context.powerUserSettings.personas) context.powerUserSettings.personas = {};
@@ -397,29 +393,47 @@ async function forceSavePersona(name, description) {
 
 async function syncToWorldInfoViaHelper(userName, content) {
     if (!window.TavernHelper) return toastr.error(TEXT.TOAST_WI_ERROR);
+
     let targetBook = null;
     try {
         const charBooks = window.TavernHelper.getCharWorldbookNames('current');
         if (charBooks && charBooks.primary) targetBook = charBooks.primary;
         else if (charBooks && charBooks.additional && charBooks.additional.length > 0) targetBook = charBooks.additional[0];
     } catch (e) { }
+    
     if (!targetBook) {
         const boundBooks = await getContextWorldBooks();
         if (boundBooks.length > 0) targetBook = boundBooks[0];
     }
+    
     if (!targetBook) return toastr.warning(TEXT.TOAST_WI_FAIL);
+
     try {
-        const entries = await window.TavernHelper.getLorebookEntries(targetBook);
-        const entryComment = `User: ${userName}`;
-        const existingEntry = entries.find(e => e.comment === entryComment);
-        if (existingEntry) {
-            await window.TavernHelper.setLorebookEntries(targetBook, [{ uid: existingEntry.uid, content: content, enabled: true }]);
-        } else {
-            const newEntry = { comment: entryComment, keys: [userName, "User"], content: content, enabled: true, selective: true, constant: false, position: { type: 'before_character_definition' } };
-            await window.TavernHelper.createLorebookEntries(targetBook, [newEntry]);
-        }
+        await window.TavernHelper.updateWorldbookWith(targetBook, (entries) => {
+            const entryComment = `User: ${userName}`;
+            const existingEntry = entries.find(e => e.comment === entryComment);
+
+            if (existingEntry) {
+                existingEntry.content = content;
+                existingEntry.enabled = true;
+            } else {
+                entries.push({ 
+                    comment: entryComment, 
+                    keys: [userName, "User"], 
+                    content: content, 
+                    enabled: true, 
+                    selective: true, 
+                    constant: false, 
+                    position: { type: 'before_character_definition' } 
+                });
+            }
+            return entries;
+        });
         toastr.success(TEXT.TOAST_WI_SUCCESS(targetBook));
-    } catch (e) { toastr.error("写入世界书失败"); }
+    } catch (e) { 
+        console.error("[PW] World Info Sync Error:", e);
+        toastr.error("写入世界书失败: " + (e.message || "未知错误")); 
+    }
 }
 
 async function loadAvailableWorldBooks() {
@@ -464,6 +478,7 @@ async function getWorldBookEntries(bookName) {
     return [];
 }
 
+// [Updated] Generation Logic
 async function runGeneration(data, apiConfig) {
     const context = getContext();
     const charId = context.characterId;
@@ -472,10 +487,7 @@ async function runGeneration(data, apiConfig) {
 
     if (!promptsCache || !promptsCache.initial) loadData(); 
 
-    let wiText = "";
-    if (data.wiContext && data.wiContext.length > 0) {
-        wiText = `\n[Context from World Info]:\n${data.wiContext.join('\n')}\n`;
-    }
+    const charInfoText = getCharacterInfoText();
 
     let systemTemplate = promptsCache.initial;
     if (data.mode === 'refine') systemTemplate = promptsCache.refine;
@@ -483,7 +495,9 @@ async function runGeneration(data, apiConfig) {
     let systemPrompt = systemTemplate
         .replace(/{{user}}/g, currentName)
         .replace(/{{char}}/g, charName)
-        .replace(/{{wi}}/g, wiText)
+        .replace(/{{charInfo}}/g, charInfoText)
+        .replace(/{{greetings}}/g, data.greetingsText || "")
+        .replace(/{{wi}}/g, data.wiText || "")
         .replace(/{{tags}}/g, currentTemplate)
         .replace(/{{input}}/g, data.request)
         .replace(/{{current}}/g, data.currentText || "");
@@ -497,7 +511,7 @@ async function runGeneration(data, apiConfig) {
             let baseUrl = apiConfig.indepApiUrl.replace(/\/$/, '');
             if (baseUrl.endsWith('/chat/completions')) baseUrl = baseUrl.replace(/\/chat\/completions$/, '');
             const url = `${baseUrl}/chat/completions`;
-            const messages = [{ role: 'user', content: systemPrompt }];
+            const messages = [{ role: 'system', content: systemPrompt }];
             const res = await fetch(url, {
                 method: 'POST', 
                 headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiConfig.indepApiKey}` },
@@ -514,8 +528,28 @@ async function runGeneration(data, apiConfig) {
             if (!json.choices || !json.choices.length) throw new Error("API 返回格式错误: 找不到 choices");
             responseContent = json.choices[0].message.content;
         } else {
-            if (typeof context.generateQuietPrompt !== 'function') throw new Error("ST版本过旧，不支持后台生成");
-            responseContent = await context.generateQuietPrompt(systemPrompt, false, false, null, "System");
+            if (window.TavernHelper && typeof window.TavernHelper.generateRaw === 'function') {
+                console.log("[PW] Using TavernHelper.generateRaw");
+                responseContent = await window.TavernHelper.generateRaw({
+                    user_input: '',
+                    ordered_prompts: [{ role: 'system', content: systemPrompt }],
+                    overrides: {
+                        chat_history: { prompts: [] },
+                        world_info_before: '',
+                        world_info_after: '',
+                        persona_description: '',
+                        char_description: '',
+                        char_personality: '',
+                        scenario: '',
+                        dialogue_examples: ''
+                    }
+                });
+            } else if (typeof context.generateQuietPrompt === 'function') {
+                console.log("[PW] Using context.generateQuietPrompt (Legacy)");
+                responseContent = await context.generateQuietPrompt(systemPrompt, false, false, null, "System");
+            } else {
+                throw new Error("ST版本过旧或未安装 TavernHelper，不支持主API生成");
+            }
         }
     } finally { clearTimeout(timeoutId); }
     
@@ -564,7 +598,7 @@ async function openCreatorPopup() {
         <div class="pw-top-bar"><div class="pw-title">${headerTitle}</div></div>
         <div class="pw-tabs">
             <div class="pw-tab active" data-tab="editor">人设</div>
-            <div class="pw-tab" data-tab="context">世界书</div>
+            <div class="pw-tab" data-tab="context">参考</div> 
             <div class="pw-tab" data-tab="api">API & Prompt</div>
             <div class="pw-tab" data-tab="history">草稿</div>
         </div>
@@ -658,7 +692,45 @@ async function openCreatorPopup() {
 
     <div id="pw-float-quote-btn" class="pw-float-quote-btn"><i class="fa-solid fa-pen-to-square"></i> 修改此段</div>
 
-    <div id="pw-view-context" class="pw-view"><div class="pw-scroll-area"><div class="pw-card-section"><div class="pw-wi-controls"><select id="pw-wi-select" class="pw-input pw-wi-select"><option value="">-- 添加参考/目标世界书 --</option>${renderBookOptions()}</select><button id="pw-wi-refresh" class="pw-btn primary pw-wi-refresh-btn"><i class="fa-solid fa-sync"></i></button><button id="pw-wi-add" class="pw-btn primary pw-wi-add-btn"><i class="fa-solid fa-plus"></i></button></div></div><div id="pw-wi-container"></div></div></div>
+    <!-- [Updated] Context View Structure -->
+    <div id="pw-view-context" class="pw-view">
+        <div class="pw-scroll-area">
+            
+            <!-- Greetings Section (Select Box + Persistent Toggle Bar) -->
+            <div class="pw-card-section">
+                <div class="pw-row">
+                    <label class="pw-section-label pw-label-gold">角色开场白</label>
+                    <select id="pw-greetings-select" class="pw-input" style="flex:1; max-width:60%;">
+                        <option value="">(不使用开场白)</option>
+                    </select>
+                </div>
+                
+                <!-- Persistent Toggle Button (Initially Hidden) -->
+                <div id="pw-greetings-toggle-bar" class="pw-preview-toggle-bar" style="display:none;">
+                    <i class="fa-solid fa-angle-up"></i> 收起预览
+                </div>
+                
+                <!-- Textarea (Hidden/Shown by toggle) -->
+                <textarea id="pw-greetings-preview"></textarea>
+            </div>
+
+            <!-- World Info Section -->
+            <div class="pw-card-section">
+                <div class="pw-row" style="margin-bottom:5px;">
+                    <label class="pw-section-label pw-label-blue">世界书</label>
+                </div>
+                
+                <div id="pw-wi-body" style="display:block; padding-top:5px;">
+                    <div class="pw-wi-controls" style="margin-bottom:8px;">
+                        <select id="pw-wi-select" class="pw-input pw-wi-select"><option value="">-- 添加参考/目标世界书 --</option>${renderBookOptions()}</select>
+                        <button id="pw-wi-refresh" class="pw-btn primary pw-wi-refresh-btn"><i class="fa-solid fa-sync"></i></button>
+                        <button id="pw-wi-add" class="pw-btn primary pw-wi-add-btn"><i class="fa-solid fa-plus"></i></button>
+                    </div>
+                    <div id="pw-wi-container"></div>
+                </div>
+            </div>
+        </div>
+    </div>
     
     <div id="pw-view-api" class="pw-view">
         <div class="pw-scroll-area">
@@ -677,26 +749,40 @@ async function openCreatorPopup() {
                 </div>
             </div>
 
-            <div class="pw-card-section pw-prompt-editor-block">
-                <div style="display:flex; justify-content:space-between;"><span class="pw-prompt-label">人设初始生成指令 (System Prompt)</span><button class="pw-mini-btn" id="pw-reset-initial" style="font-size:0.7em;">恢复默认</button></div>
-                <div class="pw-var-btns">
-                    <div class="pw-var-btn" data-ins="{{user}}"><span>User名</span><span class="code">{{user}}</span></div>
-                    <div class="pw-var-btn" data-ins="{{char}}"><span>Char名</span><span class="code">{{char}}</span></div>
-                    <div class="pw-var-btn" data-ins="{{tags}}"><span>模版内容</span><span class="code">{{tags}}</span></div>
-                    <div class="pw-var-btn" data-ins="{{input}}"><span>用户要求</span><span class="code">{{input}}</span></div>
-                    <div class="pw-var-btn" data-ins="{{wi}}"><span>世界书内容</span><span class="code">{{wi}}</span></div>
+            <!-- [Updated] Prompt Editor Collapsible -->
+            <div class="pw-card-section">
+                <div class="pw-context-header" id="pw-prompt-header">
+                    <span><i class="fa-solid fa-terminal"></i> Prompt 查看与编辑</span>
+                    <i class="fa-solid fa-chevron-down arrow"></i>
                 </div>
-                <textarea id="pw-prompt-initial" class="pw-textarea pw-auto-height" style="min-height:150px; font-size:0.85em;">${promptsCache.initial}</textarea>
-                
-                <div style="display:flex; justify-content:space-between; margin-top:15px;"><span class="pw-prompt-label">人设润色指令 (System Prompt)</span><button class="pw-mini-btn" id="pw-reset-refine" style="font-size:0.7em;">恢复默认</button></div>
-                <div class="pw-var-btns">
-                    <div class="pw-var-btn" data-ins="{{tags}}"><span>模版(必要)</span><span class="code">{{tags}}</span></div>
-                    <div class="pw-var-btn" data-ins="{{current}}"><span>当前文本</span><span class="code">{{current}}</span></div>
-                    <div class="pw-var-btn" data-ins="{{input}}"><span>润色意见</span><span class="code">{{input}}</span></div>
+                <div id="pw-prompt-container" style="display:none; padding-top:10px;">
+                    <div style="display:flex; justify-content:space-between;"><span class="pw-prompt-label">人设初始生成指令 (System Prompt)</span><button class="pw-mini-btn" id="pw-reset-initial" style="font-size:0.7em;">恢复默认</button></div>
+                    <div class="pw-var-btns">
+                        <div class="pw-var-btn" data-ins="{{user}}"><span>User名</span><span class="code">{{user}}</span></div>
+                        <div class="pw-var-btn" data-ins="{{char}}"><span>Char名</span><span class="code">{{char}}</span></div>
+                        <div class="pw-var-btn" data-ins="{{charInfo}}"><span>角色设定</span><span class="code">{{charInfo}}</span></div>
+                        <div class="pw-var-btn" data-ins="{{greetings}}"><span>开场白</span><span class="code">{{greetings}}</span></div>
+                        <div class="pw-var-btn" data-ins="{{tags}}"><span>模版内容</span><span class="code">{{tags}}</span></div>
+                        <div class="pw-var-btn" data-ins="{{input}}"><span>用户要求</span><span class="code">{{input}}</span></div>
+                        <div class="pw-var-btn" data-ins="{{wi}}"><span>世界书内容</span><span class="code">{{wi}}</span></div>
+                    </div>
+                    <textarea id="pw-prompt-initial" class="pw-textarea pw-auto-height" style="min-height:150px; font-size:0.85em;">${promptsCache.initial}</textarea>
+                    
+                    <div style="display:flex; justify-content:space-between; margin-top:15px;"><span class="pw-prompt-label">人设润色指令 (System Prompt)</span><button class="pw-mini-btn" id="pw-reset-refine" style="font-size:0.7em;">恢复默认</button></div>
+                    <!-- [Updated] Added missing buttons for refine -->
+                    <div class="pw-var-btns">
+                        <div class="pw-var-btn" data-ins="{{char}}"><span>Char名</span><span class="code">{{char}}</span></div>
+                        <div class="pw-var-btn" data-ins="{{charInfo}}"><span>角色设定</span><span class="code">{{charInfo}}</span></div>
+                        <div class="pw-var-btn" data-ins="{{greetings}}"><span>开场白</span><span class="code">{{greetings}}</span></div>
+                        <div class="pw-var-btn" data-ins="{{wi}}"><span>世界书内容</span><span class="code">{{wi}}</span></div>
+                        <div class="pw-var-btn" data-ins="{{tags}}"><span>模版(必要)</span><span class="code">{{tags}}</span></div>
+                        <div class="pw-var-btn" data-ins="{{current}}"><span>当前文本</span><span class="code">{{current}}</span></div>
+                        <div class="pw-var-btn" data-ins="{{input}}"><span>润色意见</span><span class="code">{{input}}</span></div>
+                    </div>
+                    <textarea id="pw-prompt-refine" class="pw-textarea pw-auto-height" style="min-height:150px; font-size:0.85em;">${promptsCache.refine}</textarea>
+                    <div style="text-align:right; margin-top:5px;"><button id="pw-api-save" class="pw-btn primary" style="width:100%;">保存 Prompts</button></div>
                 </div>
-                <textarea id="pw-prompt-refine" class="pw-textarea pw-auto-height" style="min-height:150px; font-size:0.85em;">${promptsCache.refine}</textarea>
             </div>
-            <div style="text-align:right; margin-top:5px;"><button id="pw-api-save" class="pw-btn primary" style="width:100%;">保存 Prompts</button></div>
         </div>
     </div>
 
@@ -708,7 +794,8 @@ async function openCreatorPopup() {
 
     renderTemplateChips();
     renderWiBooks();
-
+    renderGreetingsList(); 
+    
     $('.pw-auto-height').each(function() {
         this.style.height = 'auto';
         this.style.height = (this.scrollHeight) + 'px';
@@ -731,7 +818,56 @@ function bindEvents() {
     if (window.stPersonaWeaverBound) return;
     window.stPersonaWeaverBound = true;
 
-    console.log("[PW] Binding Events (Lite)...");
+    console.log("[PW] Binding Events (Standard)...");
+
+    const context = getContext();
+    if (context && context.eventSource) {
+        context.eventSource.on(context.eventTypes.APP_READY, addPersonaButton);
+        context.eventSource.on(context.eventTypes.MOVABLE_PANELS_RESET, addPersonaButton);
+    }
+    window.openPersonaWeaver = openCreatorPopup;
+
+    // --- Header Toggles (Prompt) ---
+    $(document).on('click.pw', '#pw-prompt-header', function() {
+        const $body = $('#pw-prompt-container');
+        const $arrow = $(this).find('.arrow');
+        if ($body.is(':visible')) { $body.slideUp(); $arrow.removeClass('fa-flip-vertical'); }
+        else { $body.slideDown(); $arrow.addClass('fa-flip-vertical'); }
+    });
+
+    // --- Greetings Select Handling ---
+    $(document).on('change.pw', '#pw-greetings-select', function() {
+        const idx = $(this).val();
+        const $preview = $('#pw-greetings-preview');
+        const $toggleBtn = $('#pw-greetings-toggle-bar');
+        
+        if (idx === "") {
+            $preview.hide();
+            $toggleBtn.hide();
+        } else if (currentGreetingsList[idx]) {
+            $preview.val(currentGreetingsList[idx].content).show();
+            // Reset Toggle State to "Expanded"
+            $toggleBtn.show().html('<i class="fa-solid fa-angle-up"></i> 收起预览');
+            
+            // Adjust height
+            requestAnimationFrame(() => {
+                $preview.height('auto');
+                $preview.height($preview[0].scrollHeight + 'px');
+            });
+        }
+    });
+
+    // --- Greetings Toggle Button Click ---
+    $(document).on('click.pw', '#pw-greetings-toggle-bar', function() {
+        const $preview = $('#pw-greetings-preview');
+        if ($preview.is(':visible')) {
+            $preview.slideUp();
+            $(this).html('<i class="fa-solid fa-angle-down"></i> 展开预览');
+        } else {
+            $preview.slideDown();
+            $(this).html('<i class="fa-solid fa-angle-up"></i> 收起预览');
+        }
+    });
 
     // --- 复制功能 ---
     $(document).on('click.pw', '#pw-copy-persona', function() {
@@ -912,12 +1048,18 @@ function bindEvents() {
         await forcePaint();
 
         try {
-            const wiContent = await collectActiveWorldInfoContent();
+            const contextData = await collectContextData();
             const modelVal = $('#pw-api-source').val() === 'independent' ? $('#pw-api-model-select').val() : null;
             const config = {
-                mode: 'refine', request: refineReq, currentText: oldText, wiContext: wiContent,
-                apiSource: $('#pw-api-source').val(), indepApiUrl: $('#pw-api-url').val(),
-                indepApiKey: $('#pw-api-key').val(), indepApiModel: modelVal
+                mode: 'refine', 
+                request: refineReq, 
+                currentText: oldText, 
+                wiText: contextData.wi,           
+                greetingsText: contextData.greetings,
+                apiSource: $('#pw-api-source').val(), 
+                indepApiUrl: $('#pw-api-url').val(),
+                indepApiKey: $('#pw-api-key').val(), 
+                indepApiModel: modelVal
             };
             const responseText = await runGeneration(config, config);
 
@@ -1057,12 +1199,17 @@ function bindEvents() {
         $('#pw-result-text').val('');
 
         try {
-            const wiContent = await collectActiveWorldInfoContent();
+            const contextData = await collectContextData();
             const modelVal = $('#pw-api-source').val() === 'independent' ? $('#pw-api-model-select').val() : null;
             const config = {
-                mode: 'initial', request: req, wiContext: wiContent,
-                apiSource: $('#pw-api-source').val(), indepApiUrl: $('#pw-api-url').val(),
-                indepApiKey: $('#pw-api-key').val(), indepApiModel: modelVal
+                mode: 'initial', 
+                request: req, 
+                wiText: contextData.wi,
+                greetingsText: contextData.greetings,
+                apiSource: $('#pw-api-source').val(), 
+                indepApiUrl: $('#pw-api-url').val(),
+                indepApiKey: $('#pw-api-key').val(), 
+                indepApiModel: modelVal
             };
             const text = await runGeneration(config, config);
             $('#pw-result-text').val(text);
@@ -1336,6 +1483,19 @@ const renderWiBooks = async () => {
     }
 };
 
+// [New] Render Greetings List as Options
+const renderGreetingsList = () => {
+    const list = getCharacterGreetingsList();
+    currentGreetingsList = list;
+    const $select = $('#pw-greetings-select').empty();
+    
+    $select.append('<option value="">(不使用开场白)</option>');
+    
+    list.forEach((item, idx) => {
+        $select.append(`<option value="${idx}">${item.label}</option>`);
+    });
+};
+
 function addPersonaButton() {
     const container = $('.persona_controls_buttons_block');
     if (container.length === 0 || $(`#${BUTTON_ID}`).length > 0) return;
@@ -1344,20 +1504,9 @@ function addPersonaButton() {
     container.prepend(newButton);
 }
 
-function startPolling() {
-    if (pollInterval) clearInterval(pollInterval);
-    pollInterval = setInterval(() => {
-        const container = $('.persona_controls_buttons_block');
-        const btn = $(`#${BUTTON_ID}`);
-        if (container.length > 0 && btn.length === 0) {
-            addPersonaButton();
-        }
-    }, 2000);
-}
-
 jQuery(async () => {
-    injectStyles();
-    addPersonaButton();
-    startPolling();
-    bindEvents();
+    // injectStyles(); // Removed: Style injection handled by style.css file
+    addPersonaButton(); // Try once immediately
+    bindEvents(); // Standard event binding
+    console.log("[PW] Persona Weaver Loaded (v2.8 Split Files)");
 });
