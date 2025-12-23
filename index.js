@@ -151,6 +151,8 @@ let availableWorldBooks = [];
 let isEditingTemplate = false;
 let lastRawResponse = "";
 let isProcessing = false;
+// 缓存开场白数据，供Select使用
+let currentGreetingsList = []; 
 
 // ============================================================================
 // 工具函数
@@ -184,11 +186,11 @@ function getCharacterGreetingsList() {
 
     const list = [];
     if (data.first_mes) {
-        list.push({ label: "默认开场白", content: data.first_mes });
+        list.push({ label: "默认开场白 (First Message)", content: data.first_mes });
     }
     if (Array.isArray(data.alternate_greetings)) {
         data.alternate_greetings.forEach((greeting, index) => {
-            list.push({ label: `开场白 #${index + 1}`, content: greeting });
+            list.push({ label: `替代开场白 #${index + 1}`, content: greeting });
         });
     }
     return list;
@@ -278,9 +280,10 @@ function findMatchingKey(targetKey, map) {
     return null;
 }
 
+// [Updated] 收集函数
 async function collectContextData() {
     let wiContent = [];
-    let greetingsContent = [];
+    let greetingsContent = "";
 
     // 1. 收集世界书
     try {
@@ -300,15 +303,16 @@ async function collectContextData() {
         }
     } catch (e) { console.warn(e); }
 
-    // 2. 收集开场白
-    $('#pw-greetings-container .pw-greeting-check:checked').each(function() {
-        const content = decodeURIComponent($(this).data('content'));
-        greetingsContent.push(content);
-    });
+    // 2. 收集开场白 (From Textarea, which is populated by Select)
+    // 直接读取预览框的内容，如果它是可见的且有值
+    const previewVal = $('#pw-greetings-preview').val();
+    if (previewVal && $('#pw-greetings-preview').is(':visible')) {
+        greetingsContent = previewVal;
+    }
 
     return {
         wi: wiContent.join('\n\n'),
-        greetings: greetingsContent.join('\n\n')
+        greetings: greetingsContent
     };
 }
 
@@ -436,6 +440,9 @@ function injectStyles() {
     /* Collapsible headers */
     .pw-context-header { padding: 10px; background: rgba(0,0,0,0.2); cursor: pointer; display: flex; justify-content: space-between; align-items: center; border-radius: 6px; user-select: none; }
     .pw-context-header:hover { background: rgba(0,0,0,0.3); }
+    
+    /* Greeting Preview */
+    #pw-greetings-preview { display:none; background:rgba(0,0,0,0.3); border:1px solid var(--SmartThemeBorderColor); border-radius:4px; padding:8px; margin-top:8px; color:#aaa; font-size:0.9em; width:100%; box-sizing:border-box; resize:vertical; }
     `;
     $('<style>').attr('id', styleId).text(css).appendTo('head');
 }
@@ -551,7 +558,6 @@ async function runGeneration(data, apiConfig) {
 
     if (!promptsCache || !promptsCache.initial) loadData(); 
 
-    // [Revert] Use internal getCharacterInfoText directly, not user input
     const charInfoText = getCharacterInfoText();
 
     let systemTemplate = promptsCache.initial;
@@ -663,7 +669,7 @@ async function openCreatorPopup() {
         <div class="pw-top-bar"><div class="pw-title">${headerTitle}</div></div>
         <div class="pw-tabs">
             <div class="pw-tab active" data-tab="editor">人设</div>
-            <div class="pw-tab" data-tab="context">参考</div> <!-- Renamed -->
+            <div class="pw-tab" data-tab="context">参考</div> 
             <div class="pw-tab" data-tab="api">API & Prompt</div>
             <div class="pw-tab" data-tab="history">草稿</div>
         </div>
@@ -757,27 +763,28 @@ async function openCreatorPopup() {
 
     <div id="pw-float-quote-btn" class="pw-float-quote-btn"><i class="fa-solid fa-pen-to-square"></i> 修改此段</div>
 
-    <!-- [Updated] Context View Structure: Char removed, WI collapsed -->
+    <!-- [Updated] Context View Structure: Char removed, Greetings Select, WI expanded -->
     <div id="pw-view-context" class="pw-view">
         <div class="pw-scroll-area">
             
-            <!-- Greetings Section (Collapsible) -->
+            <!-- Greetings Section (Select Box) -->
             <div class="pw-card-section">
-                <div class="pw-context-header" id="pw-greet-header">
-                    <span><i class="fa-solid fa-comment-dots"></i> 角色开场白 <span style="opacity:0.5;font-size:0.8em;">(勾选作为参考)</span></span>
-                    <i class="fa-solid fa-chevron-down arrow"></i>
+                <div class="pw-row">
+                    <label style="font-weight:bold; color:#e0af68;">角色开场白 (选填)</label>
+                    <select id="pw-greetings-select" class="pw-input" style="flex:1; max-width:60%;">
+                        <option value="">(不使用开场白)</option>
+                    </select>
                 </div>
-                <div id="pw-greetings-container" style="display:none; padding-top:10px; display:flex; flex-direction:column; gap:5px;"></div>
+                <textarea id="pw-greetings-preview" readonly></textarea>
             </div>
 
-            <!-- World Info Section (Collapsible) -->
+            <!-- World Info Section (Expanded by default, body visible) -->
             <div class="pw-card-section">
-                <div class="pw-context-header" id="pw-wi-header">
-                    <span><i class="fa-solid fa-book"></i> 世界书 <span style="opacity:0.5;font-size:0.8em;">(选填)</span></span>
-                    <i class="fa-solid fa-chevron-down arrow"></i>
+                <div class="pw-row" style="margin-bottom:5px;">
+                    <label style="font-weight:bold; color:#7aa2f7;">世界书 (选填)</label>
                 </div>
                 
-                <div id="pw-wi-body" style="display:none; padding-top:10px;">
+                <div id="pw-wi-body" style="display:block; padding-top:5px;">
                     <div class="pw-wi-controls" style="margin-bottom:8px;">
                         <select id="pw-wi-select" class="pw-input pw-wi-select"><option value="">-- 添加参考/目标世界书 --</option>${renderBookOptions()}</select>
                         <button id="pw-wi-refresh" class="pw-btn primary pw-wi-refresh-btn"><i class="fa-solid fa-sync"></i></button>
@@ -848,8 +855,6 @@ async function openCreatorPopup() {
     renderWiBooks();
     renderGreetingsList(); 
     
-    // Auto-fill result (removed the char-info fill logic)
-
     $('.pw-auto-height').each(function() {
         this.style.height = 'auto';
         this.style.height = (this.scrollHeight) + 'px';
@@ -881,26 +886,27 @@ function bindEvents() {
     }
     window.openPersonaWeaver = openCreatorPopup;
 
-    // --- Header Toggles (Greetings, WI, Prompt) ---
-    $(document).on('click.pw', '#pw-greet-header', function() {
-        const $body = $('#pw-greetings-container');
-        const $arrow = $(this).find('.arrow');
-        if ($body.is(':visible')) { $body.slideUp(); $arrow.removeClass('fa-flip-vertical'); }
-        else { $body.slideDown(); $arrow.addClass('fa-flip-vertical'); }
-    });
-
-    $(document).on('click.pw', '#pw-wi-header', function() {
-        const $body = $('#pw-wi-body');
-        const $arrow = $(this).find('.arrow');
-        if ($body.is(':visible')) { $body.slideUp(); $arrow.removeClass('fa-flip-vertical'); }
-        else { $body.slideDown(); $arrow.addClass('fa-flip-vertical'); }
-    });
-
+    // --- Header Toggles (Prompt) ---
     $(document).on('click.pw', '#pw-prompt-header', function() {
         const $body = $('#pw-prompt-container');
         const $arrow = $(this).find('.arrow');
         if ($body.is(':visible')) { $body.slideUp(); $arrow.removeClass('fa-flip-vertical'); }
         else { $body.slideDown(); $arrow.addClass('fa-flip-vertical'); }
+    });
+
+    // --- Greetings Select Handling ---
+    $(document).on('change.pw', '#pw-greetings-select', function() {
+        const idx = $(this).val();
+        const $preview = $('#pw-greetings-preview');
+        
+        if (idx === "") {
+            $preview.val("").hide();
+        } else if (currentGreetingsList[idx]) {
+            $preview.val(currentGreetingsList[idx].content).show();
+            // Adjust height
+            $preview.height('auto');
+            $preview.height($preview[0].scrollHeight + 'px');
+        }
     });
 
     // --- 复制功能 ---
@@ -1233,7 +1239,6 @@ function bindEvents() {
         $('#pw-result-text').val('');
 
         try {
-            // [Updated] Collect context using new logic
             const contextData = await collectContextData();
             const modelVal = $('#pw-api-source').val() === 'independent' ? $('#pw-api-model-select').val() : null;
             const config = {
@@ -1518,41 +1523,16 @@ const renderWiBooks = async () => {
     }
 };
 
-// [New] Render Greetings List (with collapse)
+// [New] Render Greetings List as Options
 const renderGreetingsList = () => {
-    const container = $('#pw-greetings-container').empty();
     const list = getCharacterGreetingsList();
+    currentGreetingsList = list;
+    const $select = $('#pw-greetings-select').empty();
     
-    if (list.length === 0) {
-        container.html('<div style="opacity:0.6; padding:5px; font-size:0.9em;">无可用开场白</div>');
-        return;
-    }
-
+    $select.append('<option value="">(不使用开场白)</option>');
+    
     list.forEach((item, idx) => {
-        const $el = $(`
-            <div class="pw-wi-item">
-                <div class="pw-wi-item-row">
-                    <input type="checkbox" class="pw-greeting-check" data-content="${encodeURIComponent(item.content)}">
-                    <div style="font-weight:bold; font-size:0.9em; flex:1;">${item.label}</div>
-                    <i class="fa-solid fa-eye pw-wi-toggle-icon"></i>
-                </div>
-                <div class="pw-wi-desc">${item.content}<div class="pw-wi-close-bar"><i class="fa-solid fa-angle-up"></i> 收起</div></div>
-            </div>
-        `);
-        
-        $el.find('.pw-wi-toggle-icon').on('click', function (e) {
-            e.stopPropagation();
-            const $desc = $(this).closest('.pw-wi-item').find('.pw-wi-desc');
-            if ($desc.is(':visible')) { $desc.slideUp(); $(this).css('color', ''); } 
-            else { $desc.slideDown(); $(this).css('color', '#5b8db8'); }
-        });
-
-        $el.find('.pw-wi-close-bar').on('click', function () { 
-            $(this).parent().slideUp(); 
-            $el.find('.pw-wi-toggle-icon').css('color', ''); 
-        });
-        
-        container.append($el);
+        $select.append(`<option value="${idx}">${item.label}</option>`);
     });
 };
 
@@ -1568,5 +1548,5 @@ jQuery(async () => {
     injectStyles();
     addPersonaButton(); // Try once immediately
     bindEvents(); // Standard event binding
-    console.log("[PW] Persona Weaver Loaded (v2.3 UI Optimized)");
+    console.log("[PW] Persona Weaver Loaded (v2.4 Context Refine)");
 });
