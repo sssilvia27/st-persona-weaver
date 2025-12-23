@@ -5,7 +5,7 @@ const extensionName = "st-persona-weaver";
 const STORAGE_KEY_HISTORY = 'pw_history_v20';
 const STORAGE_KEY_STATE = 'pw_state_v20';
 const STORAGE_KEY_TEMPLATE = 'pw_template_v2';
-const STORAGE_KEY_PROMPTS = 'pw_prompts_v7'; // 保持 v7 以刷新 Prompt 缓存
+const STORAGE_KEY_PROMPTS = 'pw_prompts_v7';
 const BUTTON_ID = 'pw_persona_tool_btn';
 
 const defaultYamlTemplate =
@@ -75,13 +75,15 @@ NSFW:
 // --- Prompt 定义 ---
 const defaultSystemPromptInitial =
 `Creating User Persona for {{user}} (Target: {{char}}).
-{{wi}}
 
 [Target Character Info]:
 {{charInfo}}
 
 [Opening Context / Greetings]:
 {{greetings}}
+
+[World Info / Lore]:
+{{wi}}
 
 [Traits / Template]:
 {{tags}}
@@ -100,7 +102,6 @@ Generate character details strictly in structured YAML format based on the [Trai
 const defaultSystemPromptRefine =
 `You are an expert Data Converter and Persona Editor.
 Optimizing User Persona for {{char}}.
-{{wi}}
 
 [Target Character Info]:
 {{charInfo}}
@@ -133,6 +134,7 @@ const defaultSettings = {
 };
 
 const TEXT = {
+    // 使用 class 控制样式，不再内联颜色
     PANEL_TITLE: `<span class="pw-title-icon"><i class="fa-solid fa-wand-magic-sparkles"></i></span>User人设生成器`,
     BTN_TITLE: "打开设定生成器",
     TOAST_SAVE_SUCCESS: (name) => `Persona "${name}" 已保存并覆盖！`,
@@ -281,9 +283,11 @@ function findMatchingKey(targetKey, map) {
     return null;
 }
 
-// [Recovered] 恢复原始的 active world info 收集逻辑
-async function collectActiveWorldInfoContent() {
-    let content = [];
+async function collectContextData() {
+    let wiContent = [];
+    let greetingsContent = "";
+
+    // 1. 收集世界书
     try {
         const boundBooks = await getContextWorldBooks();
         const manualBooks = window.pwExtraBooks || [];
@@ -293,25 +297,24 @@ async function collectActiveWorldInfoContent() {
         for (const bookName of allBooks) {
             await yieldToBrowser();
             try {
-                const entries = await getWorldBookEntries(bookName);
-                const enabledEntries = entries.filter(e => e.enabled);
-                if (enabledEntries.length > 0) {
-                    content.push(`\n--- World Book: ${bookName} ---`);
-                    enabledEntries.forEach(e => content.push(`[Entry: ${e.displayName}]\n${e.content}`));
-                }
+                $('#pw-wi-container .pw-wi-list[data-book="' + bookName + '"] .pw-wi-check:checked').each(function() {
+                    const content = decodeURIComponent($(this).data('content'));
+                    wiContent.push(`[Entry from ${bookName}]:\n${content}`);
+                });
             } catch (err) { }
         }
-    } catch (e) { }
-    return content;
-}
+    } catch (e) { console.warn(e); }
 
-// [New] 辅助收集开场白
-function getContextGreetings() {
+    // 2. 收集开场白
     const selectedIdx = $('#pw-greetings-select').val();
     if (selectedIdx !== "" && selectedIdx !== null && currentGreetingsList[selectedIdx]) {
-        return currentGreetingsList[selectedIdx].content;
+        greetingsContent = currentGreetingsList[selectedIdx].content;
     }
-    return "";
+
+    return {
+        wi: wiContent.join('\n\n'),
+        greetings: greetingsContent
+    };
 }
 
 function getActivePersonaDescription() {
@@ -476,20 +479,14 @@ async function getWorldBookEntries(bookName) {
     return [];
 }
 
-// [Updated] Generation Logic (完全恢复了你原始代码的逻辑结构，并加入了Google fix)
+// [Updated] Generation Logic - 修复打开角色卡时生成中断的问题
 async function runGeneration(data, apiConfig) {
     const context = getContext();
     const charId = context.characterId;
-    const charName = (charId !== undefined) ? context.characters[charId].name : "None";
+    const charName = (charId !== undefined && context.characters[charId]) ? context.characters[charId].name : "None";
     const currentName = $('.persona_name').first().text().trim() || $('h5#your_name').text().trim() || "User";
 
     if (!promptsCache || !promptsCache.initial) loadData(); 
-
-    // [Recovered] 原始的 wiText 处理逻辑 (放在 runGeneration 内部)
-    let wiText = "";
-    if (data.wiContext && data.wiContext.length > 0) {
-        wiText = `\n[Context from World Info]:\n${data.wiContext.join('\n')}\n`;
-    }
 
     const charInfoText = getCharacterInfoText();
 
@@ -500,8 +497,8 @@ async function runGeneration(data, apiConfig) {
         .replace(/{{user}}/g, currentName)
         .replace(/{{char}}/g, charName)
         .replace(/{{charInfo}}/g, charInfoText)
-        .replace(/{{greetings}}/g, data.greetingsText || "") // New feature
-        .replace(/{{wi}}/g, wiText) // 使用内部生成的 wiText
+        .replace(/{{greetings}}/g, data.greetingsText || "")
+        .replace(/{{wi}}/g, data.wiText || "")
         .replace(/{{tags}}/g, currentTemplate)
         .replace(/{{input}}/g, data.request)
         .replace(/{{current}}/g, data.currentText || "");
@@ -515,9 +512,7 @@ async function runGeneration(data, apiConfig) {
             let baseUrl = apiConfig.indepApiUrl.replace(/\/$/, '');
             if (baseUrl.endsWith('/chat/completions')) baseUrl = baseUrl.replace(/\/chat\/completions$/, '');
             const url = `${baseUrl}/chat/completions`;
-            // [FIXED] Independent API: 强制使用 user 角色 (修复 Google 400 错误)
-            const messages = [{ role: 'user', content: systemPrompt }];
-            
+            const messages = [{ role: 'system', content: systemPrompt }];
             const res = await fetch(url, {
                 method: 'POST', 
                 headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiConfig.indepApiKey}` },
@@ -534,12 +529,44 @@ async function runGeneration(data, apiConfig) {
             if (!json.choices || !json.choices.length) throw new Error("API 返回格式错误: 找不到 choices");
             responseContent = json.choices[0].message.content;
         } else {
-            // [Recovered] 原始的 Main API 调用逻辑
-            if (typeof context.generateQuietPrompt !== 'function') throw new Error("ST版本过旧，不支持后台生成");
-            responseContent = await context.generateQuietPrompt(systemPrompt, false, false, null, "System");
+            if (window.TavernHelper && typeof window.TavernHelper.generateRaw === 'function') {
+                console.log("[PW] Using TavernHelper.generateRaw");
+                responseContent = await window.TavernHelper.generateRaw({
+                    user_input: ' ', 
+                    ordered_prompts: [
+                        { role: 'system', content: systemPrompt }
+                    ],
+                    overrides: {
+                        chat_history: { prompts: [] },
+                        world_info_before: '',
+                        world_info_after: '',
+                        persona_description: '',
+                        char_description: '',
+                        char_personality: '',
+                        scenario: '',
+                        dialogue_examples: '',
+                        author_note: '' // 覆盖 AN
+                    },
+                    custom_api: {
+                        stop: [],
+                        stopping_strings: []
+                    }
+                });
+            } else if (typeof context.generateQuietPrompt === 'function') {
+                console.log("[PW] Using context.generateQuietPrompt (Legacy)");
+                // GenerateQuietPrompt 参数: (prompt, quiet_to_loud, skip_wian, image, name)
+                // [关键修改] 第三个参数 skip_wian 改为 true
+                responseContent = await context.generateQuietPrompt(systemPrompt, false, true, null, "System");
+            } else {
+                throw new Error("ST版本过旧或未安装 TavernHelper，不支持主API生成");
+            }
         }
     } finally { clearTimeout(timeoutId); }
     
+    if (!responseContent) {
+        throw new Error("生成内容为空 (可能被停止词截断或API未响应)");
+    }
+
     lastRawResponse = responseContent;
     return responseContent.replace(/```[a-z]*\n?/g, '').replace(/```/g, '').trim();
 }
@@ -756,7 +783,6 @@ async function openCreatorPopup() {
                     <textarea id="pw-prompt-initial" class="pw-textarea pw-auto-height" style="min-height:150px; font-size:0.85em;">${promptsCache.initial}</textarea>
                     
                     <div style="display:flex; justify-content:space-between; margin-top:15px;"><span class="pw-prompt-label">人设润色指令 (System Prompt)</span><button class="pw-mini-btn" id="pw-reset-refine" style="font-size:0.7em;">恢复默认</button></div>
-                    <!-- [Updated] Added missing buttons for refine -->
                     <div class="pw-var-btns">
                         <div class="pw-var-btn" data-ins="{{char}}"><span>Char名</span><span class="code">{{char}}</span></div>
                         <div class="pw-var-btn" data-ins="{{charInfo}}"><span>角色设定</span><span class="code">{{charInfo}}</span></div>
@@ -873,7 +899,7 @@ function bindEvents() {
     });
 
     // --- Template Editing ---
-    // [修改] 移除了 .css('color', ...) 改用 .addClass('editing') 和 .removeClass('editing')
+    // [修改] 使用 class 控制编辑状态颜色
     $(document).on('click.pw', '#pw-toggle-edit-template', () => {
         isEditingTemplate = !isEditingTemplate;
         if (isEditingTemplate) {
@@ -1036,15 +1062,14 @@ function bindEvents() {
         await forcePaint();
 
         try {
-            // [Recovered] 恢复了原始的数据收集逻辑
-            const wiContent = await collectActiveWorldInfoContent();
+            const contextData = await collectContextData();
             const modelVal = $('#pw-api-source').val() === 'independent' ? $('#pw-api-model-select').val() : null;
             const config = {
                 mode: 'refine', 
                 request: refineReq, 
                 currentText: oldText, 
-                wiContext: wiContent, // 恢复数组传递
-                greetingsText: getContextGreetings(), // New Helper
+                wiText: contextData.wi,           
+                greetingsText: contextData.greetings,
                 apiSource: $('#pw-api-source').val(), 
                 indepApiUrl: $('#pw-api-url').val(),
                 indepApiKey: $('#pw-api-key').val(), 
@@ -1188,14 +1213,13 @@ function bindEvents() {
         $('#pw-result-text').val('');
 
         try {
-            // [Recovered] 恢复了原始的数据收集逻辑
-            const wiContent = await collectActiveWorldInfoContent();
+            const contextData = await collectContextData();
             const modelVal = $('#pw-api-source').val() === 'independent' ? $('#pw-api-model-select').val() : null;
             const config = {
                 mode: 'initial', 
                 request: req, 
-                wiContext: wiContent, // 恢复数组传递
-                greetingsText: getContextGreetings(), // New Helper
+                wiText: contextData.wi,
+                greetingsText: contextData.greetings,
                 apiSource: $('#pw-api-source').val(), 
                 indepApiUrl: $('#pw-api-url').val(),
                 indepApiKey: $('#pw-api-key').val(), 
@@ -1441,7 +1465,7 @@ const renderWiBooks = async () => {
     if (allBooks.length === 0) { container.html('<div style="opacity:0.6; padding:10px; text-align:center;">此角色未绑定世界书，请在“世界书”标签页手动添加或在酒馆主界面绑定。</div>'); return; }
     for (const book of allBooks) {
         const isBound = baseBooks.includes(book);
-        // [修改] 移除了内联样式，改用 class="pw-bound-status" 和 class="pw-remove-book-icon"
+        // 使用 class 控制样式
         const $el = $(`<div class="pw-wi-book"><div class="pw-wi-header"><span><i class="fa-solid fa-book"></i> ${book} ${isBound ? '<span class="pw-bound-status">(已绑定)</span>' : ''}</span><div>${!isBound ? '<i class="fa-solid fa-times remove-book pw-remove-book-icon" title="移除"></i>' : ''}<i class="fa-solid fa-chevron-down arrow"></i></div></div><div class="pw-wi-list" data-book="${book}"></div></div>`);
         $el.find('.remove-book').on('click', (e) => { e.stopPropagation(); window.pwExtraBooks = window.pwExtraBooks.filter(b => b !== book); renderWiBooks(); });
         $el.find('.pw-wi-header').on('click', async function () {
@@ -1458,7 +1482,7 @@ const renderWiBooks = async () => {
                     entries.forEach(entry => {
                         const isChecked = entry.enabled ? 'checked' : '';
                         const $item = $(`<div class="pw-wi-item"><div class="pw-wi-item-row"><input type="checkbox" class="pw-wi-check" ${isChecked} data-content="${encodeURIComponent(entry.content)}"><div style="font-weight:bold; font-size:0.9em; flex:1;">${entry.displayName}</div><i class="fa-solid fa-eye pw-wi-toggle-icon"></i></div><div class="pw-wi-desc">${entry.content}<div class="pw-wi-close-bar"><i class="fa-solid fa-angle-up"></i> 收起</div></div></div>`);
-                        // [修改] 移除了 .css('color', ...) 改用 .addClass('active') 和 .removeClass('active')
+                        // 使用 class 切换激活状态
                         $item.find('.pw-wi-toggle-icon').on('click', function (e) {
                             e.stopPropagation();
                             const $desc = $(this).closest('.pw-wi-item').find('.pw-wi-desc');
@@ -1500,5 +1524,5 @@ jQuery(async () => {
     // injectStyles(); // Removed: Style injection handled by style.css file
     addPersonaButton(); // Try once immediately
     bindEvents(); // Standard event binding
-    console.log("[PW] Persona Weaver Loaded (v2.8 Split Files - CSS Controlled Colors)");
+    console.log("[PW] Persona Weaver Loaded (v2.9 Split Files - CSS Controlled Colors & Gen Fix)");
 });
