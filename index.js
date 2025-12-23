@@ -278,7 +278,6 @@ function findMatchingKey(targetKey, map) {
     return null;
 }
 
-// [Updated] 收集函数
 async function collectContextData() {
     let wiContent = [];
     let greetingsContent = [];
@@ -552,8 +551,8 @@ async function runGeneration(data, apiConfig) {
 
     if (!promptsCache || !promptsCache.initial) loadData(); 
 
-    // [Update] Get char info from the TEXTAREA (which is editable by user), fallback to auto
-    const charInfoText = $('#pw-char-info-text').val() || getCharacterInfoText();
+    // [Revert] Use internal getCharacterInfoText directly, not user input
+    const charInfoText = getCharacterInfoText();
 
     let systemTemplate = promptsCache.initial;
     if (data.mode === 'refine') systemTemplate = promptsCache.refine;
@@ -758,21 +757,10 @@ async function openCreatorPopup() {
 
     <div id="pw-float-quote-btn" class="pw-float-quote-btn"><i class="fa-solid fa-pen-to-square"></i> 修改此段</div>
 
-    <!-- [Updated] Context View Structure -->
+    <!-- [Updated] Context View Structure: Char removed, WI collapsed -->
     <div id="pw-view-context" class="pw-view">
         <div class="pw-scroll-area">
             
-            <!-- Char Info Section (Collapsible) -->
-            <div class="pw-card-section">
-                <div class="pw-context-header" id="pw-char-header">
-                    <span><i class="fa-solid fa-user-tag"></i> 当前角色设定 <span style="opacity:0.5;font-size:0.8em;">(可编辑)</span></span>
-                    <i class="fa-solid fa-chevron-down arrow"></i>
-                </div>
-                <div id="pw-char-info-container" style="display:none; padding-top:10px;">
-                    <textarea id="pw-char-info-text" class="pw-textarea pw-auto-height" style="min-height:150px; font-size:0.9em;"></textarea>
-                </div>
-            </div>
-
             <!-- Greetings Section (Collapsible) -->
             <div class="pw-card-section">
                 <div class="pw-context-header" id="pw-greet-header">
@@ -782,18 +770,22 @@ async function openCreatorPopup() {
                 <div id="pw-greetings-container" style="display:none; padding-top:10px; display:flex; flex-direction:column; gap:5px;"></div>
             </div>
 
-            <!-- World Info Section -->
+            <!-- World Info Section (Collapsible) -->
             <div class="pw-card-section">
-                <div class="pw-row" style="margin-bottom:5px;">
-                    <label style="font-weight:bold; color:#7aa2f7;">世界书 (选填)</label>
+                <div class="pw-context-header" id="pw-wi-header">
+                    <span><i class="fa-solid fa-book"></i> 世界书 <span style="opacity:0.5;font-size:0.8em;">(选填)</span></span>
+                    <i class="fa-solid fa-chevron-down arrow"></i>
                 </div>
-                <div class="pw-wi-controls">
-                    <select id="pw-wi-select" class="pw-input pw-wi-select"><option value="">-- 添加参考/目标世界书 --</option>${renderBookOptions()}</select>
-                    <button id="pw-wi-refresh" class="pw-btn primary pw-wi-refresh-btn"><i class="fa-solid fa-sync"></i></button>
-                    <button id="pw-wi-add" class="pw-btn primary pw-wi-add-btn"><i class="fa-solid fa-plus"></i></button>
+                
+                <div id="pw-wi-body" style="display:none; padding-top:10px;">
+                    <div class="pw-wi-controls" style="margin-bottom:8px;">
+                        <select id="pw-wi-select" class="pw-input pw-wi-select"><option value="">-- 添加参考/目标世界书 --</option>${renderBookOptions()}</select>
+                        <button id="pw-wi-refresh" class="pw-btn primary pw-wi-refresh-btn"><i class="fa-solid fa-sync"></i></button>
+                        <button id="pw-wi-add" class="pw-btn primary pw-wi-add-btn"><i class="fa-solid fa-plus"></i></button>
+                    </div>
+                    <div id="pw-wi-container"></div>
                 </div>
             </div>
-            <div id="pw-wi-container"></div>
         </div>
     </div>
     
@@ -814,28 +806,35 @@ async function openCreatorPopup() {
                 </div>
             </div>
 
-            <div class="pw-card-section pw-prompt-editor-block">
-                <div style="display:flex; justify-content:space-between;"><span class="pw-prompt-label">人设初始生成指令 (System Prompt)</span><button class="pw-mini-btn" id="pw-reset-initial" style="font-size:0.7em;">恢复默认</button></div>
-                <div class="pw-var-btns">
-                    <div class="pw-var-btn" data-ins="{{user}}"><span>User名</span><span class="code">{{user}}</span></div>
-                    <div class="pw-var-btn" data-ins="{{char}}"><span>Char名</span><span class="code">{{char}}</span></div>
-                    <div class="pw-var-btn" data-ins="{{charInfo}}"><span>角色设定</span><span class="code">{{charInfo}}</span></div>
-                    <div class="pw-var-btn" data-ins="{{greetings}}"><span>开场白</span><span class="code">{{greetings}}</span></div>
-                    <div class="pw-var-btn" data-ins="{{tags}}"><span>模版内容</span><span class="code">{{tags}}</span></div>
-                    <div class="pw-var-btn" data-ins="{{input}}"><span>用户要求</span><span class="code">{{input}}</span></div>
-                    <div class="pw-var-btn" data-ins="{{wi}}"><span>世界书内容</span><span class="code">{{wi}}</span></div>
+            <!-- [Updated] Prompt Editor Collapsible -->
+            <div class="pw-card-section">
+                <div class="pw-context-header" id="pw-prompt-header">
+                    <span><i class="fa-solid fa-terminal"></i> Prompt 查看与编辑</span>
+                    <i class="fa-solid fa-chevron-down arrow"></i>
                 </div>
-                <textarea id="pw-prompt-initial" class="pw-textarea pw-auto-height" style="min-height:150px; font-size:0.85em;">${promptsCache.initial}</textarea>
-                
-                <div style="display:flex; justify-content:space-between; margin-top:15px;"><span class="pw-prompt-label">人设润色指令 (System Prompt)</span><button class="pw-mini-btn" id="pw-reset-refine" style="font-size:0.7em;">恢复默认</button></div>
-                <div class="pw-var-btns">
-                    <div class="pw-var-btn" data-ins="{{tags}}"><span>模版(必要)</span><span class="code">{{tags}}</span></div>
-                    <div class="pw-var-btn" data-ins="{{current}}"><span>当前文本</span><span class="code">{{current}}</span></div>
-                    <div class="pw-var-btn" data-ins="{{input}}"><span>润色意见</span><span class="code">{{input}}</span></div>
+                <div id="pw-prompt-container" style="display:none; padding-top:10px;">
+                    <div style="display:flex; justify-content:space-between;"><span class="pw-prompt-label">人设初始生成指令 (System Prompt)</span><button class="pw-mini-btn" id="pw-reset-initial" style="font-size:0.7em;">恢复默认</button></div>
+                    <div class="pw-var-btns">
+                        <div class="pw-var-btn" data-ins="{{user}}"><span>User名</span><span class="code">{{user}}</span></div>
+                        <div class="pw-var-btn" data-ins="{{char}}"><span>Char名</span><span class="code">{{char}}</span></div>
+                        <div class="pw-var-btn" data-ins="{{charInfo}}"><span>角色设定</span><span class="code">{{charInfo}}</span></div>
+                        <div class="pw-var-btn" data-ins="{{greetings}}"><span>开场白</span><span class="code">{{greetings}}</span></div>
+                        <div class="pw-var-btn" data-ins="{{tags}}"><span>模版内容</span><span class="code">{{tags}}</span></div>
+                        <div class="pw-var-btn" data-ins="{{input}}"><span>用户要求</span><span class="code">{{input}}</span></div>
+                        <div class="pw-var-btn" data-ins="{{wi}}"><span>世界书内容</span><span class="code">{{wi}}</span></div>
+                    </div>
+                    <textarea id="pw-prompt-initial" class="pw-textarea pw-auto-height" style="min-height:150px; font-size:0.85em;">${promptsCache.initial}</textarea>
+                    
+                    <div style="display:flex; justify-content:space-between; margin-top:15px;"><span class="pw-prompt-label">人设润色指令 (System Prompt)</span><button class="pw-mini-btn" id="pw-reset-refine" style="font-size:0.7em;">恢复默认</button></div>
+                    <div class="pw-var-btns">
+                        <div class="pw-var-btn" data-ins="{{tags}}"><span>模版(必要)</span><span class="code">{{tags}}</span></div>
+                        <div class="pw-var-btn" data-ins="{{current}}"><span>当前文本</span><span class="code">{{current}}</span></div>
+                        <div class="pw-var-btn" data-ins="{{input}}"><span>润色意见</span><span class="code">{{input}}</span></div>
+                    </div>
+                    <textarea id="pw-prompt-refine" class="pw-textarea pw-auto-height" style="min-height:150px; font-size:0.85em;">${promptsCache.refine}</textarea>
+                    <div style="text-align:right; margin-top:5px;"><button id="pw-api-save" class="pw-btn primary" style="width:100%;">保存 Prompts</button></div>
                 </div>
-                <textarea id="pw-prompt-refine" class="pw-textarea pw-auto-height" style="min-height:150px; font-size:0.85em;">${promptsCache.refine}</textarea>
             </div>
-            <div style="text-align:right; margin-top:5px;"><button id="pw-api-save" class="pw-btn primary" style="width:100%;">保存 Prompts</button></div>
         </div>
     </div>
 
@@ -849,8 +848,7 @@ async function openCreatorPopup() {
     renderWiBooks();
     renderGreetingsList(); 
     
-    // Fill Char Info
-    $('#pw-char-info-text').val(getCharacterInfoText());
+    // Auto-fill result (removed the char-info fill logic)
 
     $('.pw-auto-height').each(function() {
         this.style.height = 'auto';
@@ -883,16 +881,23 @@ function bindEvents() {
     }
     window.openPersonaWeaver = openCreatorPopup;
 
-    // --- Header Toggles (Char Info & Greetings) ---
-    $(document).on('click.pw', '#pw-char-header', function() {
-        const $body = $('#pw-char-info-container');
+    // --- Header Toggles (Greetings, WI, Prompt) ---
+    $(document).on('click.pw', '#pw-greet-header', function() {
+        const $body = $('#pw-greetings-container');
         const $arrow = $(this).find('.arrow');
         if ($body.is(':visible')) { $body.slideUp(); $arrow.removeClass('fa-flip-vertical'); }
         else { $body.slideDown(); $arrow.addClass('fa-flip-vertical'); }
     });
 
-    $(document).on('click.pw', '#pw-greet-header', function() {
-        const $body = $('#pw-greetings-container');
+    $(document).on('click.pw', '#pw-wi-header', function() {
+        const $body = $('#pw-wi-body');
+        const $arrow = $(this).find('.arrow');
+        if ($body.is(':visible')) { $body.slideUp(); $arrow.removeClass('fa-flip-vertical'); }
+        else { $body.slideDown(); $arrow.addClass('fa-flip-vertical'); }
+    });
+
+    $(document).on('click.pw', '#pw-prompt-header', function() {
+        const $body = $('#pw-prompt-container');
         const $arrow = $(this).find('.arrow');
         if ($body.is(':visible')) { $body.slideUp(); $arrow.removeClass('fa-flip-vertical'); }
         else { $body.slideDown(); $arrow.addClass('fa-flip-vertical'); }
@@ -1563,5 +1568,5 @@ jQuery(async () => {
     injectStyles();
     addPersonaButton(); // Try once immediately
     bindEvents(); // Standard event binding
-    console.log("[PW] Persona Weaver Loaded (v2.2 Context & UI)");
+    console.log("[PW] Persona Weaver Loaded (v2.3 UI Optimized)");
 });
