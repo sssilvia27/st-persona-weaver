@@ -44,7 +44,7 @@
 }
 .pw-info-item { display: flex; align-items: center; gap: 6px; font-weight: bold; color: #e0af68; font-size: 1.05em; }
 
-/* [修改] 载入按钮：无背景，金边 */
+/* 载入按钮：无背景，金边 */
 .pw-load-btn {
     font-size: 0.85em;
     background: transparent;
@@ -300,15 +300,15 @@
 .pw-context-header { padding: 10px; background: rgba(0,0,0,0.2); cursor: pointer; display: flex; justify-content: space-between; align-items: center; border-radius: 6px; user-select: none; }
 .pw-context-header:hover { background: rgba(0,0,0,0.3); }
 
-/* [修改] 标签样式：纯色文字，无背景 */
+/* 标签样式：纯色文字，无背景 */
 .pw-section-label { font-weight: bold; font-size: 1em; padding: 2px 4px; }
 .pw-label-gold { color: #e0af68; }
 .pw-label-blue { color: #7aa2f7; }
 
-/* [修改] 预览展开按钮/条：背景深一点，文字亮色 */
+/* 预览展开按钮/条：背景深一点，文字亮色 */
 .pw-preview-toggle-bar {
-    background: rgba(0,0,0,0.4); /* 加深背景 */
-    color: #e0e0e0; /* 亮色文字 */
+    background: rgba(0,0,0,0.4);
+    color: #e0e0e0;
     font-size: 0.85em;
     text-align: center;
     padding: 6px;
@@ -322,12 +322,11 @@
 }
 .pw-preview-toggle-bar:hover { background: rgba(0,0,0,0.5); color: #fff; }
 
-/* [修改] 统一的深色内容背景 (适用于开场白预览 & 世界书条目) */
-/* 重点：高对比度深色背景，亮色文字 */
+/* [修改] 中灰背景 (适用于开场白预览 & 世界书条目) */
 .pw-wi-desc, #pw-greetings-preview {
     display: none;
-    background: rgba(20, 20, 20, 0.85) !important; /* 统一深色 */
-    color: #eee !important; /* 统一亮字 */
+    background: rgba(65, 65, 65, 0.9) !important; /* 中灰色，高不透明度 */
+    color: #eee !important; /* 亮色文字 */
     border: 1px solid rgba(255, 255, 255, 0.15);
     border-radius: 4px;
     padding: 8px;
@@ -345,3 +344,14 @@
     margin-top: -1px;
     min-height: 60px;
 }
+
+/* 预览框关闭按钮 (顶部/底部) */
+.pw-preview-close { 
+    font-size:0.8em; text-align:center; padding:4px; cursor:pointer; opacity:0.8; 
+    background: rgba(65, 65, 65, 0.9); /* 与内容一致的中灰 */
+    color: #ccc; 
+    display:flex; align-items:center; justify-content:center; gap:5px; transition:all 0.2s; 
+}
+.pw-preview-close.top { border-bottom: 1px solid rgba(255,255,255,0.1); border-radius: 4px 4px 0 0; margin-top: 8px; border: 1px solid var(--SmartThemeBorderColor); border-bottom:none; }
+.pw-preview-close.bottom { border-top: 1px solid rgba(255,255,255,0.1); border-radius: 0 0 4px 4px; border: 1px solid var(--SmartThemeBorderColor); border-top:none; }
+.pw-preview-close:hover { opacity:1; color: #fff; background: rgba(75, 75, 75, 0.95); }
