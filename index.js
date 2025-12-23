@@ -106,6 +106,9 @@ Optimizing User Persona for {{char}}.
 [Target Character Info]:
 {{charInfo}}
 
+[Opening Context / Greetings]:
+{{greetings}}
+
 [Target Schema / Template]:
 {{tags}}
 
@@ -175,7 +178,7 @@ function getCharacterInfoText() {
     return parts.join('\n\n');
 }
 
-// [Updated] Rename logic: 开场白 #0, #1...
+// [Modified] Renamed greetings to #0, #1...
 function getCharacterGreetingsList() {
     const context = getContext();
     const charId = context.characterId;
@@ -185,9 +188,11 @@ function getCharacterGreetingsList() {
     const data = char.data || char;
 
     const list = [];
+    // 开场白 #0 (原 First Message)
     if (data.first_mes) {
         list.push({ label: "开场白 #0", content: data.first_mes });
     }
+    // 开场白 #1, #2... (原 Alternate Greetings)
     if (Array.isArray(data.alternate_greetings)) {
         data.alternate_greetings.forEach((greeting, index) => {
             list.push({ label: `开场白 #${index + 1}`, content: greeting });
@@ -284,6 +289,7 @@ async function collectContextData() {
     let wiContent = [];
     let greetingsContent = "";
 
+    // 1. 收集世界书
     try {
         const boundBooks = await getContextWorldBooks();
         const manualBooks = window.pwExtraBooks || [];
@@ -301,9 +307,11 @@ async function collectContextData() {
         }
     } catch (e) { console.warn(e); }
 
-    const previewVal = $('#pw-greetings-preview').val();
-    if (previewVal && $('#pw-greetings-preview').is(':visible')) {
-        greetingsContent = previewVal;
+    // 2. 收集开场白
+    // 逻辑变更：如果有选中的 value，去 currentGreetingsList 里找
+    const selectedIdx = $('#pw-greetings-select').val();
+    if (selectedIdx !== "" && selectedIdx !== null && currentGreetingsList[selectedIdx]) {
+        greetingsContent = currentGreetingsList[selectedIdx].content;
     }
 
     return {
@@ -376,13 +384,15 @@ function injectStyles() {
     const styleId = 'persona-weaver-css-v46-lite'; 
     if ($(`#${styleId}`).length) return;
     
+    // [Updated] Improved colors for light/dark mode compatibility
     const css = `
     #pw-api-model-select { flex: 1; width: 0; min-width: 0; text-overflow: ellipsis; overflow: hidden; white-space: nowrap; }
     
     .pw-load-btn { font-size: 0.85em; background: linear-gradient(135deg, rgba(224, 175, 104, 0.2), rgba(224, 175, 104, 0.1)); border: 1px solid #e0af68; padding: 4px 12px; border-radius: 4px; cursor: pointer; color: #e0af68; font-weight: bold; margin-left: auto; display: inline-flex; align-items: center; transition: all 0.2s; box-shadow: 0 2px 5px rgba(0,0,0,0.2); }
     .pw-load-btn:hover { background: rgba(224, 175, 104, 0.3); transform: translateY(-1px); box-shadow: 0 4px 8px rgba(0,0,0,0.3); color: #fff; }
 
-    .pw-template-textarea { background: rgba(0, 0, 0, 0.5) !important; color: #eee !important; font-family: 'Consolas', 'Monaco', monospace; line-height: 1.4; height: 350px !important; border-radius: 0 0 6px 6px !important; border-top: none !important; }
+    /* Fix: Use ST variables for better theme support */
+    .pw-template-textarea { background: var(--smart-theme-input-bg, rgba(0, 0, 0, 0.5)) !important; color: var(--smart-theme-body-color, #eee) !important; font-family: 'Consolas', 'Monaco', monospace; line-height: 1.4; height: 350px !important; border-radius: 0 0 6px 6px !important; border-top: none !important; }
     
     .pw-shortcut-btn { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 4px 10px; height: auto; gap: 2px; min-width: 40px; }
     .pw-shortcut-btn span:first-child { font-size: 0.8em; opacity: 0.8; }
@@ -393,7 +403,8 @@ function injectStyles() {
     .pw-var-btn span:first-child { font-weight: bold; font-size: 0.8em; }
     .pw-var-btn span.code { font-size: 0.75em; opacity: 0.7; font-family: monospace; }
 
-    #pw-api-url { background-color: rgba(0, 0, 0, 0.2) !important; border: 1px solid var(--SmartThemeBorderColor) !important; color: var(--smart-theme-body-color) !important; }
+    /* Fix: Use ST variables */
+    #pw-api-url { background-color: var(--smart-theme-input-bg, rgba(0, 0, 0, 0.2)) !important; border: 1px solid var(--SmartThemeBorderColor) !important; color: var(--smart-theme-body-color) !important; }
     .pw-auto-height { min-height: 80px; max-height: 500px; overflow-y: auto; }
     
     #pw-request { transition: none !important; } 
@@ -401,19 +412,19 @@ function injectStyles() {
     #pw-history-clear-all { background: transparent; border: none; color: #ff6b6b; font-size: 0.85em; opacity: 0.6; padding: 5px; width: auto; margin: 10px auto; text-decoration: underline; }
     #pw-history-clear-all:hover { opacity: 1; background: transparent; transform: none; }
 
-    .pw-diff-row { background: #1a1a1a; border: 1px solid #333; border-radius: 8px; padding: 10px; display: flex; flex-direction: column; gap: 8px; margin-bottom: 10px; }
-    .pw-diff-attr-name { font-weight: bold; color: #9ece6a; font-size: 1em; padding-bottom: 5px; border-bottom: 1px solid #333; margin-bottom: 5px; }
+    .pw-diff-row { background: var(--smart-theme-bg, #1a1a1a); border: 1px solid var(--SmartThemeBorderColor, #333); border-radius: 8px; padding: 10px; display: flex; flex-direction: column; gap: 8px; margin-bottom: 10px; }
+    .pw-diff-attr-name { font-weight: bold; color: #9ece6a; font-size: 1em; padding-bottom: 5px; border-bottom: 1px solid var(--SmartThemeBorderColor, #333); margin-bottom: 5px; }
     
     .pw-diff-cards { display: flex; gap: 10px; }
-    .pw-diff-card { flex: 1; display: flex; flex-direction: column; border: 2px solid transparent; border-radius: 6px; background: #222; overflow: hidden; transition: all 0.2s; cursor: pointer; opacity: 0.6; position: relative; }
-    .pw-diff-card.selected { border-color: #9ece6a; opacity: 1; background: #252525; box-shadow: 0 0 10px rgba(158, 206, 106, 0.1); }
+    .pw-diff-card { flex: 1; display: flex; flex-direction: column; border: 2px solid transparent; border-radius: 6px; background: rgba(0,0,0,0.2); overflow: hidden; transition: all 0.2s; cursor: pointer; opacity: 0.6; position: relative; }
+    .pw-diff-card.selected { border-color: #9ece6a; opacity: 1; background: rgba(0,0,0,0.3); box-shadow: 0 0 10px rgba(158, 206, 106, 0.1); }
     .pw-diff-card:not(.selected):hover { opacity: 0.8; }
     .pw-diff-card.single-view { flex: 1; opacity: 1; background: rgba(158, 206, 106, 0.05); border-color: #9ece6a; cursor: text; }
     
     .pw-diff-label { font-size: 0.75em; padding: 4px 8px; background: rgba(0,0,0,0.3); color: #aaa; text-transform: uppercase; font-weight: bold; }
     .pw-diff-card.selected .pw-diff-label { color: #9ece6a; background: rgba(158, 206, 106, 0.1); }
     
-    .pw-diff-textarea { flex: 1; width: 100%; background: transparent; border: none; color: #eee; padding: 8px; font-family: inherit; font-size: 0.95em; resize: none; outline: none; line-height: 1.5; min-height: 80px; box-sizing: border-box; }
+    .pw-diff-textarea { flex: 1; width: 100%; background: transparent; border: none; color: var(--smart-theme-body-color, #eee); padding: 8px; font-family: inherit; font-size: 0.95em; resize: none; outline: none; line-height: 1.5; min-height: 80px; box-sizing: border-box; }
     .pw-diff-card:not(.selected) .pw-diff-textarea { color: #888; pointer-events: none; }
     
     @media screen and (max-width: 600px) { .pw-diff-cards { flex-direction: column; } }
@@ -423,7 +434,7 @@ function injectStyles() {
     .pw-tab-sub { display: block; font-size: 0.75em; opacity: 0.6; font-weight: normal; margin-top: 2px; text-align: center; }
     .pw-diff-tab { display: flex; flex-direction: column; align-items: center; justify-content: center; line-height: 1.1; }
 
-    .pw-header-subtitle { font-size: 0.65em; opacity: 0.6; font-weight: normal; margin-left: 10px; color: #ccc; }
+    .pw-header-subtitle { font-size: 0.65em; opacity: 0.6; font-weight: normal; margin-left: 10px; color: var(--smart-theme-body-color); }
     
     .pw-diff-raw-textarea { min-height: 350px !important; }
 
@@ -431,27 +442,17 @@ function injectStyles() {
     .pw-float-quote-btn:hover { padding-right: 18px; transform: translateX(-2px); }
     
     /* Z-Index for diff overlay */
-    .pw-diff-container { z-index: 2000 !important; }
+    .pw-diff-container { z-index: 2000 !important; background: var(--smart-theme-bg, #151515); }
 
     /* Collapsible headers */
     .pw-context-header { padding: 10px; background: rgba(0,0,0,0.2); cursor: pointer; display: flex; justify-content: space-between; align-items: center; border-radius: 6px; user-select: none; }
     .pw-context-header:hover { background: rgba(0,0,0,0.3); }
     
-    /* Greeting Preview - Improved Style */
-    #pw-greetings-preview { 
-        display:none; 
-        background: rgba(0,0,0,0.5); /* Darker background */
-        border: 1px solid var(--SmartThemeBorderColor); 
-        border-radius: 4px; 
-        padding: 10px; 
-        margin-top: 8px; 
-        color: var(--smart-theme-body-color); /* Theme Text Color */
-        font-size: 0.9em; 
-        width: 100%; 
-        box-sizing: border-box; 
-        resize: vertical; 
-        line-height: 1.5;
-    }
+    /* Greeting Preview - Fix visibility in light mode */
+    .pw-greetings-preview-box { display:none; border:1px solid var(--SmartThemeBorderColor); border-radius:4px; margin-top:8px; overflow:hidden; }
+    #pw-greetings-preview { display:block; background:var(--smart-theme-input-bg, rgba(0,0,0,0.05)); border:none; padding:8px; color:var(--smart-theme-body-color, #ccc); font-size:0.9em; width:100%; box-sizing:border-box; resize:vertical; min-height:60px; }
+    .pw-preview-close { font-size:0.8em; text-align:center; padding:4px; cursor:pointer; opacity:0.7; border-top:1px solid var(--SmartThemeBorderColor); background:rgba(0,0,0,0.1); display:flex; align-items:center; justify-content:center; gap:5px; transition:all 0.2s; }
+    .pw-preview-close:hover { opacity:1; background:rgba(0,0,0,0.2); }
     `;
     $('<style>').attr('id', styleId).text(css).appendTo('head');
 }
@@ -772,33 +773,30 @@ async function openCreatorPopup() {
 
     <div id="pw-float-quote-btn" class="pw-float-quote-btn"><i class="fa-solid fa-pen-to-square"></i> 修改此段</div>
 
-    <!-- [Updated] Context View -->
+    <!-- [Updated] Context View Structure -->
     <div id="pw-view-context" class="pw-view">
         <div class="pw-scroll-area">
             
-            <!-- Greetings Section (Select Box) -->
+            <!-- Greetings Section -->
             <div class="pw-card-section">
-                <!-- Collapsible Header for Greetings -->
-                <div class="pw-context-header" id="pw-greet-header">
-                    <label style="font-weight:bold; color:#e0af68; cursor:pointer;">角色开场白</label>
-                    <i class="fa-solid fa-chevron-down arrow"></i>
+                <div class="pw-row">
+                    <label style="font-weight:bold; color:#e0af68;">角色开场白</label>
+                    <select id="pw-greetings-select" class="pw-input" style="flex:1; max-width:60%;">
+                        <option value="">(不使用开场白)</option>
+                    </select>
                 </div>
-                
-                <div id="pw-greet-body" style="display:block; padding-top:5px;">
-                    <div class="pw-row">
-                        <select id="pw-greetings-select" class="pw-input" style="flex:1; width:100%;">
-                            <option value="">(不使用开场白)</option>
-                        </select>
-                    </div>
+                <div class="pw-greetings-preview-box">
                     <textarea id="pw-greetings-preview" readonly></textarea>
+                    <div class="pw-preview-close" id="pw-greetings-close">
+                        <i class="fa-solid fa-angle-up"></i> 收起预览
+                    </div>
                 </div>
             </div>
 
-            <!-- World Info Section (Expanded by default, body visible) -->
+            <!-- World Info Section -->
             <div class="pw-card-section">
-                <div class="pw-context-header" id="pw-wi-header">
-                    <span><i class="fa-solid fa-book"></i> 世界书</span>
-                    <i class="fa-solid fa-chevron-down arrow"></i>
+                <div class="pw-row" style="margin-bottom:5px;">
+                    <label style="font-weight:bold; color:#7aa2f7;">世界书</label>
                 </div>
                 
                 <div id="pw-wi-body" style="display:block; padding-top:5px;">
@@ -908,21 +906,7 @@ function bindEvents() {
     }
     window.openPersonaWeaver = openCreatorPopup;
 
-    // --- Header Toggles ---
-    $(document).on('click.pw', '#pw-greet-header', function() {
-        const $body = $('#pw-greet-body');
-        const $arrow = $(this).find('.arrow');
-        if ($body.is(':visible')) { $body.slideUp(); $arrow.removeClass('fa-flip-vertical'); }
-        else { $body.slideDown(); $arrow.addClass('fa-flip-vertical'); }
-    });
-
-    $(document).on('click.pw', '#pw-wi-header', function() {
-        const $body = $('#pw-wi-body');
-        const $arrow = $(this).find('.arrow');
-        if ($body.is(':visible')) { $body.slideUp(); $arrow.removeClass('fa-flip-vertical'); }
-        else { $body.slideDown(); $arrow.addClass('fa-flip-vertical'); }
-    });
-
+    // --- Header Toggles (Prompt) ---
     $(document).on('click.pw', '#pw-prompt-header', function() {
         const $body = $('#pw-prompt-container');
         const $arrow = $(this).find('.arrow');
@@ -933,16 +917,25 @@ function bindEvents() {
     // --- Greetings Select Handling ---
     $(document).on('change.pw', '#pw-greetings-select', function() {
         const idx = $(this).val();
+        const $box = $('.pw-greetings-preview-box');
         const $preview = $('#pw-greetings-preview');
         
         if (idx === "") {
-            $preview.val("").hide();
+            $box.slideUp();
         } else if (currentGreetingsList[idx]) {
-            $preview.val(currentGreetingsList[idx].content).show();
+            $preview.val(currentGreetingsList[idx].content);
+            $box.slideDown();
             // Adjust height
-            $preview.height('auto');
-            $preview.height($preview[0].scrollHeight + 'px');
+            requestAnimationFrame(() => {
+                $preview.height('auto');
+                $preview.height($preview[0].scrollHeight + 'px');
+            });
         }
+    });
+
+    // --- Greetings Close Button ---
+    $(document).on('click.pw', '#pw-greetings-close', function() {
+        $('.pw-greetings-preview-box').slideUp();
     });
 
     // --- 复制功能 ---
@@ -1584,5 +1577,5 @@ jQuery(async () => {
     injectStyles();
     addPersonaButton(); // Try once immediately
     bindEvents(); // Standard event binding
-    console.log("[PW] Persona Weaver Loaded (v2.5 Final UI Fixes)");
+    console.log("[PW] Persona Weaver Loaded (v2.5 UI Refined)");
 });
