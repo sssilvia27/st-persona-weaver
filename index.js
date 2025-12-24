@@ -134,7 +134,6 @@ const defaultSettings = {
 };
 
 const TEXT = {
-    // [修改] 移除了内联 style，改用 class="pw-title-icon"
     PANEL_TITLE: `<span class="pw-title-icon"><i class="fa-solid fa-wand-magic-sparkles"></i></span>User人设生成器`,
     BTN_TITLE: "打开设定生成器",
     TOAST_SAVE_SUCCESS: (name) => `Persona "${name}" 已保存并覆盖！`,
@@ -163,6 +162,7 @@ let currentGreetingsList = [];
 const yieldToBrowser = () => new Promise(resolve => requestAnimationFrame(resolve));
 const forcePaint = () => new Promise(resolve => setTimeout(resolve, 50));
 
+// [修复版] 获取角色信息，强制截断以防止 API 报错
 function getCharacterInfoText() {
     const context = getContext();
     const charId = context.characterId;
@@ -172,9 +172,37 @@ function getCharacterInfoText() {
     const data = char.data || char; 
 
     const parts = [];
-    if (data.description) parts.push(`Description:\n${data.description}`);
-    if (data.personality) parts.push(`Personality:\n${data.personality}`);
-    if (data.scenario) parts.push(`Scenario:\n${data.scenario}`);
+    
+    // --- [核心修复] 强制长度限制 ---
+    // 每个字段最多读取 1500 字，防止撑爆上下文
+    const MAX_FIELD_LENGTH = 1500; 
+
+    if (data.description) {
+        let desc = data.description;
+        if (desc.length > MAX_FIELD_LENGTH) {
+            console.warn(`[PW] 警告: 角色描述过长 (${desc.length}字), 已截断。`);
+            desc = desc.substring(0, MAX_FIELD_LENGTH) + "\n...(内容过长已截断)...";
+        }
+        parts.push(`Description:\n${desc}`);
+    }
+    
+    if (data.personality) {
+        let pers = data.personality;
+        if (pers.length > MAX_FIELD_LENGTH) {
+            console.warn(`[PW] 警告: 角色性格过长 (${pers.length}字), 已截断。`);
+            pers = pers.substring(0, MAX_FIELD_LENGTH) + "\n...(内容过长已截断)...";
+        }
+        parts.push(`Personality:\n${pers}`);
+    }
+    
+    if (data.scenario) {
+        let scen = data.scenario;
+        if (scen.length > MAX_FIELD_LENGTH) {
+            console.warn(`[PW] 警告: 角色场景过长 (${scen.length}字), 已截断。`);
+            scen = scen.substring(0, MAX_FIELD_LENGTH) + "\n...(内容过长已截断)...";
+        }
+        parts.push(`Scenario:\n${scen}`);
+    }
     
     return parts.join('\n\n');
 }
@@ -479,7 +507,7 @@ async function getWorldBookEntries(bookName) {
     return [];
 }
 
-// [Updated] Generation Logic - 修复了模型不回复 System Role 的问题
+// [Updated] Generation Logic - 终极健壮版 (截断+User角色+破限+详细报错)
 async function runGeneration(data, apiConfig) {
     const context = getContext();
     const charId = context.characterId;
@@ -488,12 +516,25 @@ async function runGeneration(data, apiConfig) {
 
     if (!promptsCache || !promptsCache.initial) loadData(); 
 
+    // 使用截断版的 getCharacterInfoText
     const charInfoText = getCharacterInfoText();
 
     let systemTemplate = promptsCache.initial;
     if (data.mode === 'refine') systemTemplate = promptsCache.refine;
 
-    let finalPrompt = systemTemplate
+    // 获取酒馆破限预设 (Main API)
+    let activeJailbreak = "";
+    try {
+        if (apiConfig.apiSource === 'main') {
+            const settings = context.chatCompletionSettings;
+            if (settings && settings.jailbreak_toggle && settings.jailbreak_prompt) {
+                activeJailbreak = settings.jailbreak_prompt;
+                console.log("[PW] 已注入酒馆当前破限预设");
+            }
+        }
+    } catch (e) { console.warn("[PW] 获取破限失败:", e); }
+
+    let corePrompt = systemTemplate
         .replace(/{{user}}/g, currentName)
         .replace(/{{char}}/g, charName)
         .replace(/{{charInfo}}/g, charInfoText)
@@ -503,17 +544,24 @@ async function runGeneration(data, apiConfig) {
         .replace(/{{input}}/g, data.request)
         .replace(/{{current}}/g, data.currentText || "");
 
+    // 拼接破限
+    let finalPrompt = activeJailbreak ? `[System Note: ${activeJailbreak}]\n\n${corePrompt}` : corePrompt;
+
     let responseContent = "";
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 120000); 
+
+    console.log("=========== [PW] 发送 Prompt 长度:", finalPrompt.length, "===========");
 
     try {
         if (apiConfig.apiSource === 'independent') {
             let baseUrl = apiConfig.indepApiUrl.replace(/\/$/, '');
             if (baseUrl.endsWith('/chat/completions')) baseUrl = baseUrl.replace(/\/chat\/completions$/, '');
             const url = `${baseUrl}/chat/completions`;
-            // [FIX] role changed from 'system' to 'user'
+            
+            // 使用 User Role
             const messages = [{ role: 'user', content: finalPrompt }];
+            
             const res = await fetch(url, {
                 method: 'POST', 
                 headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiConfig.indepApiKey}` },
@@ -521,20 +569,39 @@ async function runGeneration(data, apiConfig) {
                 signal: controller.signal
             });
             const text = await res.text();
+            
             let json;
             try { json = JSON.parse(text); } catch (e) { throw new Error(`API 返回非 JSON: ${text.slice(0, 100)}...`); }
-            if (!res.ok) {
-                const errorMsg = json.error?.message || json.message || JSON.stringify(json);
-                throw new Error(`API 请求失败 [${res.status}]: ${errorMsg}`);
+            
+            // 优先检查 API 自身返回的错误信息
+            if (json.error) {
+                const errMsg = json.error.message || JSON.stringify(json.error);
+                throw new Error(`API 拒绝生成: ${errMsg}`);
             }
-            if (!json.choices || !json.choices.length) throw new Error("API 返回格式错误: 找不到 choices");
-            responseContent = json.choices[0].message.content;
+
+            if (!json.choices || !Array.isArray(json.choices) || json.choices.length === 0) {
+                console.error("[PW] 异常响应:", json);
+                throw new Error("API 返回格式异常: choices 缺失。");
+            }
+
+            const firstChoice = json.choices[0];
+            if (firstChoice.message && firstChoice.message.content) {
+                responseContent = firstChoice.message.content;
+            } else if (firstChoice.text) { 
+                responseContent = firstChoice.text;
+            } else {
+                if (firstChoice.finish_reason === 'content_filter') {
+                    throw new Error("生成失败: 内容触发了 API 的安全过滤器 (NSFW)");
+                }
+                throw new Error("API 返回了无法识别的消息结构 (找不到 content)");
+            }
+
         } else {
+            // Main API 逻辑
             if (window.TavernHelper && typeof window.TavernHelper.generateRaw === 'function') {
-                console.log("[PW] Using TavernHelper.generateRaw (Role: User)");
+                console.log("[PW] Using TavernHelper.generateRaw");
                 responseContent = await window.TavernHelper.generateRaw({
                     user_input: '',
-                    // [FIX] role changed from 'system' to 'user'
                     ordered_prompts: [{ role: 'user', content: finalPrompt }],
                     overrides: {
                         chat_history: { prompts: [] },
@@ -549,14 +616,22 @@ async function runGeneration(data, apiConfig) {
                 });
             } else if (typeof context.generateQuietPrompt === 'function') {
                 console.log("[PW] Using context.generateQuietPrompt (Legacy)");
-                // [FIX] sender name changed from "System" to currentName
                 responseContent = await context.generateQuietPrompt(finalPrompt, false, false, null, currentName);
             } else {
                 throw new Error("ST版本过旧或未安装 TavernHelper，不支持主API生成");
             }
         }
-    } finally { clearTimeout(timeoutId); }
+    } catch (e) {
+        console.error("[PW] 生成过程中捕获错误:", e);
+        throw e; // 抛出错误以便 UI 显示 Toast
+    } finally { 
+        clearTimeout(timeoutId); 
+    }
     
+    if (!responseContent) {
+        throw new Error("生成结果为空");
+    }
+
     lastRawResponse = responseContent;
     return responseContent.replace(/```[a-z]*\n?/g, '').replace(/```/g, '').trim();
 }
@@ -1224,7 +1299,7 @@ function bindEvents() {
             $('#pw-result-text').trigger('input');
         } catch (e) { 
             console.error(e);
-            toastr.error("生成失败: " + e.message); 
+            toastr.error(e.message); 
         } finally { 
             $btn.prop('disabled', false).html('生成设定'); 
             isProcessing = false;
@@ -1456,7 +1531,6 @@ const renderWiBooks = async () => {
     if (allBooks.length === 0) { container.html('<div style="opacity:0.6; padding:10px; text-align:center;">此角色未绑定世界书，请在“世界书”标签页手动添加或在酒馆主界面绑定。</div>'); return; }
     for (const book of allBooks) {
         const isBound = baseBooks.includes(book);
-        // [修改] 移除了内联样式，改用 class="pw-bound-status" 和 class="pw-remove-book-icon"
         const $el = $(`<div class="pw-wi-book"><div class="pw-wi-header"><span><i class="fa-solid fa-book"></i> ${book} ${isBound ? '<span class="pw-bound-status">(已绑定)</span>' : ''}</span><div>${!isBound ? '<i class="fa-solid fa-times remove-book pw-remove-book-icon" title="移除"></i>' : ''}<i class="fa-solid fa-chevron-down arrow"></i></div></div><div class="pw-wi-list" data-book="${book}"></div></div>`);
         $el.find('.remove-book').on('click', (e) => { e.stopPropagation(); window.pwExtraBooks = window.pwExtraBooks.filter(b => b !== book); renderWiBooks(); });
         $el.find('.pw-wi-header').on('click', async function () {
@@ -1473,7 +1547,6 @@ const renderWiBooks = async () => {
                     entries.forEach(entry => {
                         const isChecked = entry.enabled ? 'checked' : '';
                         const $item = $(`<div class="pw-wi-item"><div class="pw-wi-item-row"><input type="checkbox" class="pw-wi-check" ${isChecked} data-content="${encodeURIComponent(entry.content)}"><div style="font-weight:bold; font-size:0.9em; flex:1;">${entry.displayName}</div><i class="fa-solid fa-eye pw-wi-toggle-icon"></i></div><div class="pw-wi-desc">${entry.content}<div class="pw-wi-close-bar"><i class="fa-solid fa-angle-up"></i> 收起</div></div></div>`);
-                        // [修改] 移除了 .css('color', ...) 改用 .addClass('active') 和 .removeClass('active')
                         $item.find('.pw-wi-toggle-icon').on('click', function (e) {
                             e.stopPropagation();
                             const $desc = $(this).closest('.pw-wi-item').find('.pw-wi-desc');
@@ -1490,14 +1563,11 @@ const renderWiBooks = async () => {
     }
 };
 
-// [New] Render Greetings List as Options
 const renderGreetingsList = () => {
     const list = getCharacterGreetingsList();
     currentGreetingsList = list;
     const $select = $('#pw-greetings-select').empty();
-    
     $select.append('<option value="">(不使用开场白)</option>');
-    
     list.forEach((item, idx) => {
         $select.append(`<option value="${idx}">${item.label}</option>`);
     });
@@ -1512,8 +1582,7 @@ function addPersonaButton() {
 }
 
 jQuery(async () => {
-    // injectStyles(); // Removed: Style injection handled by style.css file
-    addPersonaButton(); // Try once immediately
-    bindEvents(); // Standard event binding
-    console.log("[PW] Persona Weaver Loaded (v2.8 Split Files - CSS Controlled Colors)");
+    addPersonaButton(); 
+    bindEvents(); 
+    console.log("[PW] Persona Weaver Loaded (Ultimate Robust Version)");
 });
