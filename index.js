@@ -5,7 +5,7 @@ const extensionName = "st-persona-weaver";
 const STORAGE_KEY_HISTORY = 'pw_history_v20';
 const STORAGE_KEY_STATE = 'pw_state_v20';
 const STORAGE_KEY_TEMPLATE = 'pw_template_v2';
-const STORAGE_KEY_PROMPTS = 'pw_prompts_v9'; // 更新版本号
+const STORAGE_KEY_PROMPTS = 'pw_prompts_v10'; // 版本号升级，确保重置 Prompt
 const BUTTON_ID = 'pw_persona_tool_btn';
 
 const defaultYamlTemplate =
@@ -73,10 +73,9 @@ NSFW:
   禁忌底线:`;
 
 // --- Prompt 定义 ---
-// 只需要这一个通用 Prompt。
-// 润色时，代码会自动在 [Instruction] 之前插入 [Current Data]。
+// [完全还原]：使用你最开始提供的 Initial Prompt，不做任何修改。
 const defaultSystemPromptInitial =
-`Creating/Refining User Persona for {{user}} (Target: {{char}}).
+`Creating User Persona for {{user}} (Target: {{char}}).
 
 [Target Character Info]:
 {{charInfo}}
@@ -94,8 +93,8 @@ const defaultSystemPromptInitial =
 {{input}}
 
 [Task]:
-Generate or Update character details strictly in structured YAML format based on the [Traits / Template].
-1. Design/Refine a User persona that fits the [Target Character Info].
+Generate character details strictly in structured YAML format based on the [Traits / Template].
+1. Design a User persona that fits the [Target Character Info] and [Opening Context].
 2. Do NOT wrap the output in a root key like "{{user}}:". Start directly with the first key from the template.
 3. Maintain indentation strictly.
 4. Do NOT output status bars, progress bars, or Chain of Thought.
@@ -331,8 +330,7 @@ function loadData() {
     } catch { currentTemplate = defaultYamlTemplate; }
     try {
         const p = JSON.parse(localStorage.getItem(STORAGE_KEY_PROMPTS));
-        // 合并逻辑：如果本地存了旧版数据（含 refine），会被这里的新结构覆盖或忽略
-        // 核心只取 initial
+        // 合并逻辑：确保 initial 存在，忽略旧的 refine
         let savedInitial = p ? (p.initial || p.main) : null;
         promptsCache = { 
             initial: savedInitial || defaultSystemPromptInitial
@@ -468,11 +466,11 @@ async function getWorldBookEntries(bookName) {
     return [];
 }
 
-// [Updated] Generation Logic - v4.3 智能插入模式
-// 逻辑：
-// 1. 使用单一 Prompt (Initial)。
-// 2. 如果是润色模式，代码会自动将旧人设数据格式化后，插入到 [Instruction] 之前。
-// 3. 这样既共用了 Prompt，又保证了结构（数据在指令前），避免模型拒绝。
+// [Updated] Generation Logic - v5.0 Final UI Unified
+// 核心原则：
+// 1. Prompt 文本保证完全不变（使用 defaultSystemPromptInitial）。
+// 2. 润色模式下，将“旧数据”拼接在用户的指令中，作为 {{input}} 传入。
+//    这样模型接收到的结构依然是 Initial 的结构，但内容包含了旧数据和新指令。
 async function runGeneration(data, apiConfig) {
     const context = getContext();
     const charId = context.characterId;
@@ -497,27 +495,24 @@ async function runGeneration(data, apiConfig) {
         }
     } catch (e) { console.warn(e); }
 
-    // 3. 准备 System Prompt
+    // 3. 准备 System Prompt (只使用 Initial，不做修改)
     let finalPromptTemplate = promptsCache.initial;
 
-    // 4. 处理润色模式的“引用部分” (The "Refer" part in code)
+    // 4. 构建 {{input}} 的内容
+    // 这是“代码处理 Refer”的核心部分
+    let finalInputContent = "";
+
     if (data.mode === 'refine') {
-        const referBlock = `
-[Current Data (For Reference & Update)]:
-"""
-${currentText}
-"""
-`;
-        // 智能插入：找到 [Instruction] 或 {{input}} 并在其上方插入引用数据
-        // 这样可以保持 “背景 -> 数据 -> 指令” 的顺畅逻辑，模型更听话
-        if (finalPromptTemplate.includes('[Instruction]:')) {
-            finalPromptTemplate = finalPromptTemplate.replace('[Instruction]:', `${referBlock}\n[Instruction]:`);
-        } else if (finalPromptTemplate.includes('{{input}}')) {
-            finalPromptTemplate = finalPromptTemplate.replace('{{input}}', `${referBlock}\n[Instruction]:\n{{input}}`);
-        } else {
-            // 兜底：直接加在最后面
-            finalPromptTemplate += `\n${referBlock}`;
-        }
+        // 润色模式：将用户指令和旧数据拼接，一起塞进 {{input}}
+        // 格式：
+        // User Instructions: ...
+        //
+        // Existing Data (For Reference):
+        // ...
+        finalInputContent = `User Instructions:\n${requestText}\n\nExisting Data (For Reference):\n${currentText}`;
+    } else {
+        // 生成模式：直接放入用户指令
+        finalInputContent = requestText;
     }
 
     // 5. 替换变量
@@ -528,13 +523,13 @@ ${currentText}
         .replace(/{{greetings}}/g, greetingsText)
         .replace(/{{wi}}/g, wiText)
         .replace(/{{tags}}/g, currentTemplate)
-        .replace(/{{input}}/g, requestText) // 这里直接填入用户指令，不再包裹旧数据
-        .replace(/{{current}}/g, "");       // 清理掉可能残留的旧变量
+        .replace(/{{input}}/g, finalInputContent) // 注入拼接好的内容
+        .replace(/{{current}}/g, "");             // 安全清理（尽管Initial模板里本就没有这个变量）
 
     // 拼接头部破限
     const finalPrompt = headJailbreak ? `${headJailbreak}\n\n${corePrompt}` : corePrompt;
 
-    console.log(`[PW] Mode: ${data.mode}, Auto-Injected Refer Block: ${data.mode === 'refine'}`);
+    console.log(`[PW] Mode: ${data.mode}. Input Constructed via Code.`);
     
     let responseContent = "";
     const controller = new AbortController();
