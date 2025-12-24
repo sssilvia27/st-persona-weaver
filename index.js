@@ -162,6 +162,7 @@ let currentGreetingsList = [];
 const yieldToBrowser = () => new Promise(resolve => requestAnimationFrame(resolve));
 const forcePaint = () => new Promise(resolve => setTimeout(resolve, 50));
 
+// [核心修改] 移除了强制截断，适配 Gemini/Claude 大上下文
 function getCharacterInfoText() {
     const context = getContext();
     const charId = context.characterId;
@@ -172,14 +173,13 @@ function getCharacterInfoText() {
 
     const parts = [];
     
-    // 强制截断长度，防止 API 报错
-    const MAX_FIELD_LENGTH = 1500; 
+    // 设置为 100万 字符，相当于无限制
+    const MAX_FIELD_LENGTH = 1000000; 
 
     if (data.description) {
         let desc = data.description;
         if (desc.length > MAX_FIELD_LENGTH) {
-            console.warn(`[PW] 警告: 角色描述过长 (${desc.length}字), 已截断。`);
-            desc = desc.substring(0, MAX_FIELD_LENGTH) + "\n...(内容过长已截断)...";
+            desc = desc.substring(0, MAX_FIELD_LENGTH) + "\n...(truncated)...";
         }
         parts.push(`Description:\n${desc}`);
     }
@@ -187,8 +187,7 @@ function getCharacterInfoText() {
     if (data.personality) {
         let pers = data.personality;
         if (pers.length > MAX_FIELD_LENGTH) {
-            console.warn(`[PW] 警告: 角色性格过长 (${pers.length}字), 已截断。`);
-            pers = pers.substring(0, MAX_FIELD_LENGTH) + "\n...(内容过长已截断)...";
+            pers = pers.substring(0, MAX_FIELD_LENGTH) + "\n...(truncated)...";
         }
         parts.push(`Personality:\n${pers}`);
     }
@@ -196,8 +195,7 @@ function getCharacterInfoText() {
     if (data.scenario) {
         let scen = data.scenario;
         if (scen.length > MAX_FIELD_LENGTH) {
-            console.warn(`[PW] 警告: 角色场景过长 (${scen.length}字), 已截断。`);
-            scen = scen.substring(0, MAX_FIELD_LENGTH) + "\n...(内容过长已截断)...";
+            scen = scen.substring(0, MAX_FIELD_LENGTH) + "\n...(truncated)...";
         }
         parts.push(`Scenario:\n${scen}`);
     }
@@ -517,8 +515,7 @@ async function runGeneration(data, apiConfig) {
     let systemTemplate = promptsCache.initial;
     if (data.mode === 'refine') systemTemplate = promptsCache.refine;
 
-    // --- [Request 1 Fix] 全局获取酒馆破限预设 (Jailbreak) ---
-    // 不再判断 if (apiSource === 'main')，无论什么源都尝试读取
+    // 全局获取酒馆破限预设
     let activeJailbreak = "";
     try {
         const settings = context.chatCompletionSettings;
@@ -630,7 +627,7 @@ async function runGeneration(data, apiConfig) {
 }
 
 // ============================================================================
-// 3. UI 渲染 logic (包含 Request 2: CSS 修复 和 Request 3: 新 Tab)
+// 3. UI 渲染 logic (包含 CSS 修复 和 新 Tab)
 // ============================================================================
 
 async function openCreatorPopup() {
@@ -664,9 +661,7 @@ async function openCreatorPopup() {
     const charName = getContext().characters[getContext().characterId]?.name || "None";
     const headerTitle = `${TEXT.PANEL_TITLE}<span class="pw-header-subtitle">User: ${currentName} & Char: ${charName}</span>`;
 
-    // [Request 2 Fix] 注入 CSS 强制修复润色对比界面的可见性
-    // 使用 var(--SmartThemeBodyColor) 保证文字颜色正确
-    // 给 .pw-diff-card 加上强制的背景色和边框颜色，确保在深色/浅色模式下都能看到
+    // 注入 CSS 强制修复润色对比界面的可见性
     const forcedStyles = `
     <style>
         .pw-diff-card {
@@ -773,7 +768,7 @@ ${forcedStyles}
         </div>
     </div>
 
-    <!-- [Request 3 Fix] 增加 "原版原文" Tab -->
+    <!-- 增加 "原版原文" Tab -->
     <div id="pw-diff-overlay" class="pw-diff-container" style="display:none;">
         <div class="pw-diff-tabs-bar">
             <div class="pw-diff-tab active" data-view="diff">
@@ -1254,7 +1249,6 @@ function bindEvents() {
         if (activeTab === 'raw') {
             finalContent = $('#pw-diff-raw-textarea').val();
         } else if (activeTab === 'old-raw') {
-            // 如果用户在看旧版原文，但点击了确认，通常我们不建议应用旧版，除非用户确实想还原
             if(!confirm("您当前在查看【旧版原文】，确认要恢复为旧版吗？（通常应使用新版或对比结果）")) return;
             finalContent = $('#pw-diff-old-raw-textarea').val();
         } else {
@@ -1368,6 +1362,7 @@ function bindEvents() {
         }
     });
 
+    // Save Draft (Persona)
     $(document).on('click.pw', '#pw-snapshot', function () {
         const text = $('#pw-result-text').val();
         const req = $('#pw-request').val();
@@ -1605,5 +1600,5 @@ function addPersonaButton() {
 jQuery(async () => {
     addPersonaButton(); 
     bindEvents(); 
-    console.log("[PW] Persona Weaver Loaded (v3.0 - Global Jailbreak, CSS Fixes, 3-Tab Diff)");
+    console.log("[PW] Persona Weaver Loaded (v3.1 - Unlimited Context for Gemini/Claude)");
 });
