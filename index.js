@@ -5,7 +5,7 @@ const extensionName = "st-persona-weaver";
 const STORAGE_KEY_HISTORY = 'pw_history_v20';
 const STORAGE_KEY_STATE = 'pw_state_v20';
 const STORAGE_KEY_TEMPLATE = 'pw_template_v2';
-const STORAGE_KEY_PROMPTS = 'pw_prompts_v10'; // 版本号升级，确保重置 Prompt
+const STORAGE_KEY_PROMPTS = 'pw_prompts_v7';
 const BUTTON_ID = 'pw_persona_tool_btn';
 
 const defaultYamlTemplate =
@@ -73,7 +73,6 @@ NSFW:
   禁忌底线:`;
 
 // --- Prompt 定义 ---
-// [完全还原]：使用你最开始提供的 Initial Prompt，不做任何修改。
 const defaultSystemPromptInitial =
 `Creating User Persona for {{user}} (Target: {{char}}).
 
@@ -100,6 +99,35 @@ Generate character details strictly in structured YAML format based on the [Trai
 4. Do NOT output status bars, progress bars, or Chain of Thought.
 5. Response: ONLY the YAML content.`;
 
+// 虽然代码逻辑中我们弃用了 Refine 模版，但为了保留用户设置数据结构完整性，保留此定义
+const defaultSystemPromptRefine =
+`You are an expert Data Converter and Persona Editor.
+Optimizing User Persona for {{char}}.
+
+[Target Character Info]:
+{{charInfo}}
+
+[Opening Context / Greetings]:
+{{greetings}}
+
+[Target Schema / Template]:
+{{tags}}
+
+[Current Data]:
+"""
+{{current}}
+"""
+
+[Instruction]:
+"{{input}}"
+
+[Task]:
+1. Parse [Current Data]. MIGRATE it to fit the [Target Schema].
+2. Apply the [Instruction] to modify or refine the content.
+3. Ensure the persona fits the [Target Character Info].
+4. STRICTLY output in valid YAML format.
+5. Response: ONLY the final YAML content.`;
+
 const defaultSettings = {
     autoSwitchPersona: true, syncToWorldInfo: false,
     historyLimit: 50, apiSource: 'main',
@@ -119,9 +147,9 @@ const TEXT = {
 
 let historyCache = [];
 let currentTemplate = defaultYamlTemplate;
-// Cache 只存一个 initial
 let promptsCache = { 
-    initial: defaultSystemPromptInitial 
+    initial: defaultSystemPromptInitial, 
+    refine: defaultSystemPromptRefine 
 };
 let availableWorldBooks = [];
 let isEditingTemplate = false;
@@ -330,13 +358,12 @@ function loadData() {
     } catch { currentTemplate = defaultYamlTemplate; }
     try {
         const p = JSON.parse(localStorage.getItem(STORAGE_KEY_PROMPTS));
-        // 合并逻辑：确保 initial 存在，忽略旧的 refine
-        let savedInitial = p ? (p.initial || p.main) : null;
         promptsCache = { 
-            initial: savedInitial || defaultSystemPromptInitial
+            ...{ initial: defaultSystemPromptInitial, refine: defaultSystemPromptRefine }, 
+            ...p 
         };
     } catch { 
-        promptsCache = { initial: defaultSystemPromptInitial }; 
+        promptsCache = { initial: defaultSystemPromptInitial, refine: defaultSystemPromptRefine }; 
     }
 }
 
@@ -466,11 +493,9 @@ async function getWorldBookEntries(bookName) {
     return [];
 }
 
-// [Updated] Generation Logic - v5.0 Final UI Unified
-// 核心原则：
-// 1. Prompt 文本保证完全不变（使用 defaultSystemPromptInitial）。
-// 2. 润色模式下，将“旧数据”拼接在用户的指令中，作为 {{input}} 传入。
-//    这样模型接收到的结构依然是 Initial 的结构，但内容包含了旧数据和新指令。
+// [Updated] Generation Logic - v4.1 纯净伪装版
+// 完全信赖头部破限，移除所有本地降敏，移除所有额外破限。
+// 润色时将旧文本直接伪装成 User Instruction，使用 Initial 模版绕过审核。
 async function runGeneration(data, apiConfig) {
     const context = getContext();
     const charId = context.characterId;
@@ -480,13 +505,13 @@ async function runGeneration(data, apiConfig) {
     if (!promptsCache || !promptsCache.initial) loadData(); 
 
     // 1. 获取基础数据
-    let charInfoText = getCharacterInfoText(); 
-    let currentText = data.currentText || "";  
-    let requestText = data.request || "";      
+    let charInfoText = getCharacterInfoText(); // 角色卡原文
+    let currentText = data.currentText || "";  // 旧的人设内容 (不做任何处理)
+    let requestText = data.request || "";      // 用户的润色要求
     let wiText = data.wiText || "";
     let greetingsText = data.greetingsText || "";
     
-    // 2. 获取头部破限
+    // 2. 获取头部破限 (完全依赖这个)
     let headJailbreak = "";
     try {
         const settings = context.chatCompletionSettings;
@@ -495,41 +520,45 @@ async function runGeneration(data, apiConfig) {
         }
     } catch (e) { console.warn(e); }
 
-    // 3. 准备 System Prompt (只使用 Initial，不做修改)
-    let finalPromptTemplate = promptsCache.initial;
+    // 3. 核心策略：无论生成还是润色，都使用 Initial 模版
+    // 我们认为 Initial 模版（Creation Task）比 Refine 模版（Processing Task）更不容易触发审核
+    let systemTemplate = promptsCache.initial;
 
-    // 4. 构建 {{input}} 的内容
-    // 这是“代码处理 Refer”的核心部分
-    let finalInputContent = "";
+    let finalInput = "";
 
-    if (data.mode === 'refine') {
-        // 润色模式：将用户指令和旧数据拼接，一起塞进 {{input}}
-        // 格式：
-        // User Instructions: ...
-        //
-        // Existing Data (For Reference):
-        // ...
-        finalInputContent = `User Instructions:\n${requestText}\n\nExisting Data (For Reference):\n${currentText}`;
+    if (data.mode === 'initial') {
+        // [生成模式]：直接使用用户要求
+        finalInput = requestText;
     } else {
-        // 生成模式：直接放入用户指令
-        finalInputContent = requestText;
+        // [润色模式 - 伪装策略]
+        // 将旧内容作为“草稿/参考”直接塞入 {{input}}。
+        // 不做任何降敏处理 (User requested raw input)。
+        finalInput = `
+[Context Note: The following is a rough draft/reference for the persona. Use it as a base.]
+"""
+${currentText}
+"""
+
+[User Instruction]:
+${requestText}
+(Update the persona based on the draft above and this instruction. Keep the YAML format.)`;
     }
 
-    // 5. 替换变量
-    const corePrompt = finalPromptTemplate
+    // 4. 构建最终 Prompt
+    const corePrompt = systemTemplate
         .replace(/{{user}}/g, currentName)
         .replace(/{{char}}/g, charName)
         .replace(/{{charInfo}}/g, charInfoText)
         .replace(/{{greetings}}/g, greetingsText)
         .replace(/{{wi}}/g, wiText)
         .replace(/{{tags}}/g, currentTemplate)
-        .replace(/{{input}}/g, finalInputContent) // 注入拼接好的内容
-        .replace(/{{current}}/g, "");             // 安全清理（尽管Initial模板里本就没有这个变量）
+        .replace(/{{input}}/g, finalInput)     // 伪装后的 Input
+        .replace(/{{current}}/g, "");          // 清空原有的 current 插槽
 
-    // 拼接头部破限
+    // 只拼接头部破限，不添加任何额外的三明治结构
     const finalPrompt = headJailbreak ? `${headJailbreak}\n\n${corePrompt}` : corePrompt;
 
-    console.log(`[PW] Mode: ${data.mode}. Input Constructed via Code.`);
+    console.log(`[PW] Mode: ${data.mode} (Disguised as Initial, No Sanitization)`);
     
     let responseContent = "";
     const controller = new AbortController();
@@ -841,7 +870,7 @@ ${forcedStyles}
                     <i class="fa-solid fa-chevron-down arrow"></i>
                 </div>
                 <div id="pw-prompt-container" style="display:none; padding-top:10px;">
-                    <div style="display:flex; justify-content:space-between;"><span class="pw-prompt-label">人设生成指令 (System Prompt)</span><button class="pw-mini-btn" id="pw-reset-initial" style="font-size:0.7em;">恢复默认</button></div>
+                    <div style="display:flex; justify-content:space-between;"><span class="pw-prompt-label">人设初始生成指令 (System Prompt)</span><button class="pw-mini-btn" id="pw-reset-initial" style="font-size:0.7em;">恢复默认</button></div>
                     <div class="pw-var-btns">
                         <div class="pw-var-btn" data-ins="{{user}}"><span>User名</span><span class="code">{{user}}</span></div>
                         <div class="pw-var-btn" data-ins="{{char}}"><span>Char名</span><span class="code">{{char}}</span></div>
@@ -853,7 +882,18 @@ ${forcedStyles}
                     </div>
                     <textarea id="pw-prompt-initial" class="pw-textarea pw-auto-height" style="min-height:150px; font-size:0.85em;">${promptsCache.initial}</textarea>
                     
-                    <div style="text-align:right; margin-top:5px;"><button id="pw-api-save" class="pw-btn primary" style="width:100%;">保存 Prompt</button></div>
+                    <div style="display:flex; justify-content:space-between; margin-top:15px;"><span class="pw-prompt-label">人设润色指令 (System Prompt)</span><button class="pw-mini-btn" id="pw-reset-refine" style="font-size:0.7em;">恢复默认</button></div>
+                    <div class="pw-var-btns">
+                        <div class="pw-var-btn" data-ins="{{char}}"><span>Char名</span><span class="code">{{char}}</span></div>
+                        <div class="pw-var-btn" data-ins="{{charInfo}}"><span>角色设定</span><span class="code">{{charInfo}}</span></div>
+                        <div class="pw-var-btn" data-ins="{{greetings}}"><span>开场白</span><span class="code">{{greetings}}</span></div>
+                        <div class="pw-var-btn" data-ins="{{wi}}"><span>世界书内容</span><span class="code">{{wi}}</span></div>
+                        <div class="pw-var-btn" data-ins="{{tags}}"><span>模版(必要)</span><span class="code">{{tags}}</span></div>
+                        <div class="pw-var-btn" data-ins="{{current}}"><span>当前文本</span><span class="code">{{current}}</span></div>
+                        <div class="pw-var-btn" data-ins="{{input}}"><span>润色意见</span><span class="code">{{input}}</span></div>
+                    </div>
+                    <textarea id="pw-prompt-refine" class="pw-textarea pw-auto-height" style="min-height:150px; font-size:0.85em;">${promptsCache.refine}</textarea>
+                    <div style="text-align:right; margin-top:5px;"><button id="pw-api-save" class="pw-btn primary" style="width:100%;">保存 Prompts</button></div>
                 </div>
             </div>
         </div>
@@ -1411,7 +1451,7 @@ function bindEvents() {
 
     $(document).on('click.pw', '#pw-api-save', () => {
         promptsCache.initial = $('#pw-prompt-initial').val();
-        // 润色Prompt的保存逻辑移除，只保存 initial
+        promptsCache.refine = $('#pw-prompt-refine').val();
         saveData();
         toastr.success("设置与Prompt已保存");
     });
@@ -1419,7 +1459,9 @@ function bindEvents() {
     $(document).on('click.pw', '#pw-reset-initial', () => {
         if (confirm("恢复初始生成Prompt？")) $('#pw-prompt-initial').val(defaultSystemPromptInitial);
     });
-    // 移除了 #pw-reset-refine 事件
+    $(document).on('click.pw', '#pw-reset-refine', () => {
+        if (confirm("恢复润色Prompt？")) $('#pw-prompt-refine').val(defaultSystemPromptRefine);
+    });
 
     $(document).on('click.pw', '#pw-wi-refresh', async function() {
         const btn = $(this); btn.find('i').addClass('fa-spin');
@@ -1571,5 +1613,6 @@ function addPersonaButton() {
 jQuery(async () => {
     addPersonaButton(); 
     bindEvents(); 
-    console.log("[PW] Persona Weaver Loaded (v4.2 - Unified Prompt Mode)");
+    console.log("[PW] Persona Weaver Loaded (v4.1 - Raw Initial Mode)");
 });
+
