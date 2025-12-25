@@ -5,8 +5,7 @@ const extensionName = "st-persona-weaver";
 const STORAGE_KEY_HISTORY = 'pw_history_v20';
 const STORAGE_KEY_STATE = 'pw_state_v20';
 const STORAGE_KEY_TEMPLATE = 'pw_template_v2';
-// [重要] 升级版本号，强制重置本地缓存，解决因旧Prompt残留导致的生成失败
-const STORAGE_KEY_PROMPTS = 'pw_prompts_v11'; 
+const STORAGE_KEY_PROMPTS = 'pw_prompts_v11'; // 保持 v11 确保 Prompt 缓存重置
 const BUTTON_ID = 'pw_persona_tool_btn';
 
 const defaultYamlTemplate =
@@ -73,9 +72,7 @@ NSFW:
   性癖好:
   禁忌底线:`;
 
-// --- Prompt 定义 ---
-// [完全保持不变] 
-// 这是一个通用的系统指令，适用于“从零生成”和“基于旧数据修改”。
+// --- Prompt 定义 (保持 v5.1 的逻辑不变) ---
 const defaultSystemPromptInitial =
 `Creating User Persona for {{user}} (Target: {{char}}).
 
@@ -109,7 +106,7 @@ const defaultSettings = {
 };
 
 const TEXT = {
-    PANEL_TITLE: `<span class="pw-title-icon"><i class="fa-solid fa-wand-magic-sparkles"></i></span>User人设生成器`,
+    PANEL_TITLE: `<span style="color:#e0af68; margin-right:5px;"><i class="fa-solid fa-wand-magic-sparkles"></i></span>User人设生成器`,
     BTN_TITLE: "打开设定生成器",
     TOAST_SAVE_SUCCESS: (name) => `Persona "${name}" 已保存并覆盖！`,
     TOAST_WI_SUCCESS: (book) => `已写入世界书: ${book}`,
@@ -153,19 +150,16 @@ function getCharacterInfoText() {
         if (desc.length > MAX_FIELD_LENGTH) desc = desc.substring(0, MAX_FIELD_LENGTH) + "\n...(truncated)...";
         parts.push(`Description:\n${desc}`);
     }
-    
     if (data.personality) {
         let pers = data.personality;
         if (pers.length > MAX_FIELD_LENGTH) pers = pers.substring(0, MAX_FIELD_LENGTH) + "\n...(truncated)...";
         parts.push(`Personality:\n${pers}`);
     }
-    
     if (data.scenario) {
         let scen = data.scenario;
         if (scen.length > MAX_FIELD_LENGTH) scen = scen.substring(0, MAX_FIELD_LENGTH) + "\n...(truncated)...";
         parts.push(`Scenario:\n${scen}`);
     }
-    
     return parts.join('\n\n');
 }
 
@@ -196,11 +190,9 @@ function getCharacterGreetingsList() {
 function parseYamlToBlocks(text) {
     const map = new Map();
     if (!text || typeof text !== 'string') return map;
-
     try {
         const cleanText = text.replace(/^```[a-z]*\n?/im, '').replace(/```$/im, '').trim();
         let lines = cleanText.split('\n');
-
         const topLevelKeyRegex = /^\s*([^:\s\-]+?)\s*[:：]/;
         let topKeysIndices = [];
         for (let i = 0; i < lines.length; i++) {
@@ -209,7 +201,6 @@ function parseYamlToBlocks(text) {
                 topKeysIndices.push(i);
             }
         }
-
         if (topKeysIndices.length === 1 && lines.length > 2) {
             const firstLineIndex = topKeysIndices[0];
             const remainingLines = lines.slice(firstLineIndex + 1);
@@ -226,10 +217,8 @@ function parseYamlToBlocks(text) {
                 lines = remainingLines.map(l => l.length >= minIndent ? l.substring(minIndent) : l);
             }
         }
-
         let currentKey = null;
         let currentBuffer = [];
-
         const flushBuffer = () => {
             if (currentKey && currentBuffer.length > 0) {
                 let valuePart = "";
@@ -247,7 +236,6 @@ function parseYamlToBlocks(text) {
                 map.set(currentKey, valuePart);
             }
         };
-
         lines.forEach((line) => {
             const isTopLevel = (line.length < 200) && topLevelKeyRegex.test(line) && !line.trim().startsWith('-');
             const indentLevel = line.search(/\S|$/);
@@ -276,13 +264,11 @@ function findMatchingKey(targetKey, map) {
 async function collectContextData() {
     let wiContent = [];
     let greetingsContent = "";
-
     try {
         const boundBooks = await getContextWorldBooks();
         const manualBooks = window.pwExtraBooks || [];
         const allBooks = [...new Set([...boundBooks, ...manualBooks])];
         if (allBooks.length > 20) allBooks.length = 20;
-
         for (const bookName of allBooks) {
             await yieldToBrowser();
             try {
@@ -293,16 +279,11 @@ async function collectContextData() {
             } catch (err) { }
         }
     } catch (e) { console.warn(e); }
-
     const selectedIdx = $('#pw-greetings-select').val();
     if (selectedIdx !== "" && selectedIdx !== null && currentGreetingsList[selectedIdx]) {
         greetingsContent = currentGreetingsList[selectedIdx].content;
     }
-
-    return {
-        wi: wiContent.join('\n\n'),
-        greetings: greetingsContent
-    };
+    return { wi: wiContent.join('\n\n'), greetings: greetingsContent };
 }
 
 function getActivePersonaDescription() {
@@ -332,11 +313,8 @@ function loadData() {
     } catch { currentTemplate = defaultYamlTemplate; }
     try {
         const p = JSON.parse(localStorage.getItem(STORAGE_KEY_PROMPTS));
-        // 合并逻辑：只读取 initial，忽略旧的 refine
         let savedInitial = p ? (p.initial || p.main) : null;
-        promptsCache = { 
-            initial: savedInitial || defaultSystemPromptInitial
-        };
+        promptsCache = { initial: savedInitial || defaultSystemPromptInitial };
     } catch { 
         promptsCache = { initial: defaultSystemPromptInitial }; 
     }
@@ -350,14 +328,12 @@ function saveData() {
 
 function saveHistory(item) {
     const limit = extension_settings[extensionName]?.historyLimit || 50;
-    
     if (!item.title || item.title === "未命名") {
         const context = getContext();
         const userName = $('.persona_name').first().text().trim() || "User";
         const charName = context.characters[context.characterId]?.name || "Char";
         item.title = `${userName} & ${charName}`;
     }
-
     historyCache.unshift(item);
     if (historyCache.length > limit) historyCache = historyCache.slice(0, limit);
     saveData();
@@ -365,6 +341,147 @@ function saveHistory(item) {
 
 function saveState(data) { localStorage.setItem(STORAGE_KEY_STATE, JSON.stringify(data)); }
 function loadState() { try { return JSON.parse(localStorage.getItem(STORAGE_KEY_STATE)) || {}; } catch { return {}; } }
+
+// [CSS FIX] 注入样式，解决对比卡片看不清的问题
+function injectStyles() {
+    const styleId = 'persona-weaver-css-v6-unified'; 
+    if ($(`#${styleId}`).length) return;
+    
+    // 使用 var(--SmartTheme...) 变量并强制覆盖颜色以保证对比度
+    const css = `
+    /* --- 布局通用 --- */
+    #pw-api-model-select { flex: 1; width: 0; min-width: 0; text-overflow: ellipsis; overflow: hidden; white-space: nowrap; }
+    
+    .pw-load-btn { font-size: 0.85em; background: linear-gradient(135deg, rgba(224, 175, 104, 0.2), rgba(224, 175, 104, 0.1)); border: 1px solid #e0af68; padding: 4px 12px; border-radius: 4px; cursor: pointer; color: #e0af68; font-weight: bold; margin-left: auto; display: inline-flex; align-items: center; transition: all 0.2s; box-shadow: 0 2px 5px rgba(0,0,0,0.2); }
+    .pw-load-btn:hover { background: rgba(224, 175, 104, 0.3); transform: translateY(-1px); box-shadow: 0 4px 8px rgba(0,0,0,0.3); color: #fff; }
+
+    .pw-template-textarea { background: rgba(0, 0, 0, 0.5) !important; color: #eee !important; font-family: 'Consolas', 'Monaco', monospace; line-height: 1.4; height: 350px !important; border-radius: 0 0 6px 6px !important; border-top: none !important; }
+    
+    .pw-shortcut-btn { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 4px 10px; height: auto; gap: 2px; min-width: 40px; }
+    .pw-shortcut-btn span:first-child { font-size: 0.8em; opacity: 0.8; }
+    .pw-shortcut-btn span.code { font-weight: bold; font-family: monospace; color: #e0af68; font-size: 1.1em; }
+
+    .pw-var-btns { gap: 6px; }
+    .pw-var-btn { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 4px 10px; height: auto; gap: 0; border-color: rgba(128,128,128,0.4); }
+    .pw-var-btn span:first-child { font-weight: bold; font-size: 0.8em; }
+    .pw-var-btn span.code { font-size: 0.75em; opacity: 0.7; font-family: monospace; }
+
+    #pw-api-url { background-color: rgba(0, 0, 0, 0.2) !important; border: 1px solid var(--SmartThemeBorderColor) !important; color: var(--smart-theme-body-color) !important; }
+    .pw-auto-height { min-height: 80px; max-height: 500px; overflow-y: auto; }
+    
+    #pw-request { transition: none !important; } 
+
+    #pw-history-clear-all { background: transparent; border: none; color: #ff6b6b; font-size: 0.85em; opacity: 0.6; padding: 5px; width: auto; margin: 10px auto; text-decoration: underline; }
+    #pw-history-clear-all:hover { opacity: 1; background: transparent; transform: none; }
+
+    /* --- [关键修复] 对比界面样式 --- */
+    .pw-diff-row { 
+        background: rgba(20, 20, 20, 0.6); 
+        border: 1px solid var(--SmartThemeBorderColor); 
+        border-radius: 8px; 
+        padding: 10px; 
+        display: flex; 
+        flex-direction: column; 
+        gap: 8px; 
+        margin-bottom: 10px; 
+    }
+    .pw-diff-attr-name { 
+        font-weight: bold; 
+        color: #e0af68; /* 金色高亮 */
+        font-size: 1em; 
+        padding-bottom: 5px; 
+        border-bottom: 1px solid rgba(255,255,255,0.1); 
+        margin-bottom: 5px; 
+    }
+    
+    .pw-diff-cards { display: flex; gap: 10px; }
+    
+    .pw-diff-card { 
+        flex: 1; 
+        display: flex; 
+        flex-direction: column; 
+        border: 1px solid var(--SmartThemeBorderColor); 
+        border-radius: 6px; 
+        background: var(--SmartThemeBlurTintColor); /* 使用主题背景色 */
+        overflow: hidden; 
+        transition: all 0.2s; 
+        cursor: pointer; 
+        opacity: 0.7; 
+        position: relative; 
+    }
+    
+    /* 选中状态 */
+    .pw-diff-card.selected { 
+        border-color: #9ece6a; 
+        opacity: 1; 
+        box-shadow: 0 0 8px rgba(158, 206, 106, 0.2); 
+    }
+    .pw-diff-card:not(.selected):hover { opacity: 0.9; }
+
+    /* 旧版 (红) */
+    .pw-diff-card.old {
+        background-color: rgba(80, 30, 30, 0.4) !important;
+        border-left: 4px solid #ff6b6b !important;
+    }
+    /* 新版 (绿) */
+    .pw-diff-card.new {
+        background-color: rgba(30, 80, 30, 0.4) !important;
+        border-left: 4px solid #9ece6a !important;
+    }
+    /* 无变更/单视图 */
+    .pw-diff-card.single-view { 
+        flex: 1; 
+        opacity: 1; 
+        background: rgba(255, 255, 255, 0.05); 
+        border-color: #7aa2f7; 
+        cursor: text; 
+    }
+    
+    .pw-diff-label { 
+        font-size: 0.75em; 
+        padding: 4px 8px; 
+        background: rgba(0,0,0,0.4); 
+        color: #ccc; 
+        text-transform: uppercase; 
+        font-weight: bold; 
+    }
+    .pw-diff-card.selected .pw-diff-label { color: #fff; background: rgba(0,0,0,0.6); }
+    
+    /* [修复核心] 强制 Textarea 透明并使用主题文字颜色 */
+    .pw-diff-textarea { 
+        flex: 1; 
+        width: 100%; 
+        background: transparent !important; 
+        border: none !important; 
+        color: var(--SmartThemeBodyColor) !important; 
+        padding: 8px; 
+        font-family: inherit; 
+        font-size: 0.95em; 
+        resize: none; 
+        outline: none; 
+        line-height: 1.5; 
+        min-height: 80px; 
+        box-sizing: border-box; 
+    }
+    /* 非选中的卡片稍微变暗一点 */
+    .pw-diff-card:not(.selected) .pw-diff-textarea { color: rgba(255,255,255,0.7) !important; pointer-events: none; }
+    
+    @media screen and (max-width: 600px) { .pw-diff-cards { flex-direction: column; } }
+    
+    .pw-btn.wi { background: linear-gradient(135deg, rgba(122, 162, 247, 0.2), rgba(0, 0, 0, 0)); border-color: #7aa2f7; color: #7aa2f7; }
+
+    .pw-tab-sub { display: block; font-size: 0.75em; opacity: 0.6; font-weight: normal; margin-top: 2px; text-align: center; }
+    .pw-diff-tab { display: flex; flex-direction: column; align-items: center; justify-content: center; line-height: 1.1; }
+
+    .pw-header-subtitle { font-size: 0.65em; opacity: 0.6; font-weight: normal; margin-left: 10px; color: #ccc; }
+    
+    .pw-diff-raw-textarea { min-height: 350px !important; }
+
+    .pw-float-quote-btn { position: fixed; top: calc(20% + 60px); right: 0; background: linear-gradient(135deg, #e0af68, #d08f40); color: #1a1a1a; padding: 8px 12px; border-radius: 20px 0 0 20px; font-weight: bold; font-size: 0.85em; box-shadow: -2px 2px 8px rgba(0,0,0,0.4); cursor: pointer; z-index: 9999; display: none; align-items: center; gap: 4px; border: 1px solid rgba(255,255,255,0.3); border-right: none; backdrop-filter: blur(5px); }
+    .pw-float-quote-btn:hover { padding-right: 18px; transform: translateX(-2px); }
+    `;
+    $('<style>').attr('id', styleId).text(css).appendTo('head');
+}
 
 async function forceSavePersona(name, description) {
     const context = getContext();
@@ -468,11 +585,7 @@ async function getWorldBookEntries(bookName) {
     return [];
 }
 
-// [Updated] Generation Logic - v5.1 Anti-Refusal Logic
-// 核心逻辑：
-// 1. Prompt 模板保持 100% 不变。
-// 2. 润色时，把 "旧数据" 和 "新指令" 组装成 "技术性格式" (JSON/Code block)。
-//    这种格式通常能绕过“这是不当内容”的文本审查，因为模型会认为这是在处理数据结构。
+// [Updated] Generation Logic - v5.1 Anti-Refusal Logic (Preserved)
 async function runGeneration(data, apiConfig) {
     const context = getContext();
     const charId = context.characterId;
@@ -488,7 +601,6 @@ async function runGeneration(data, apiConfig) {
     let wiText = data.wiText || "";
     let greetingsText = data.greetingsText || "";
     
-    // 2. 获取头部破限
     let headJailbreak = "";
     try {
         const settings = context.chatCompletionSettings;
@@ -497,17 +609,10 @@ async function runGeneration(data, apiConfig) {
         }
     } catch (e) { console.warn(e); }
 
-    // 3. 准备 System Prompt
-    // 强制使用缓存中的 initial，如果为空则使用默认值
     let finalPromptTemplate = promptsCache.initial || defaultSystemPromptInitial;
-
-    // 4. 关键步骤：构建 {{input}} 的内容
     let finalInputContent = "";
 
     if (data.mode === 'refine') {
-        // [防拒绝策略] 
-        // 使用技术性词汇包裹旧内容，假装是数据库更新任务。
-        // 这不会改变Prompt本身，只会改变填入的内容。
         finalInputContent = `
 /* TASK: UPDATE_DATA */
 CURRENT_STATE_YAML:
@@ -519,11 +624,9 @@ MODIFICATION_REQUEST:
 "${requestText}"
 `;
     } else {
-        // 生成模式：直接放入用户指令
         finalInputContent = requestText;
     }
 
-    // 5. 替换变量
     const corePrompt = finalPromptTemplate
         .replace(/{{user}}/g, currentName)
         .replace(/{{char}}/g, charName)
@@ -531,13 +634,11 @@ MODIFICATION_REQUEST:
         .replace(/{{greetings}}/g, greetingsText)
         .replace(/{{wi}}/g, wiText)
         .replace(/{{tags}}/g, currentTemplate)
-        .replace(/{{input}}/g, finalInputContent) // 注入构造好的内容
-        .replace(/{{current}}/g, "");             // 清理掉可能残留的旧变量
+        .replace(/{{input}}/g, finalInputContent)
+        .replace(/{{current}}/g, "");
 
-    // 拼接头部破限
     const finalPrompt = headJailbreak ? `${headJailbreak}\n\n${corePrompt}` : corePrompt;
 
-    // 调试日志：如果还生成失败，请在控制台查看这个 Prompt
     console.log(`[PW] Sending Prompt:\n`, finalPrompt);
     
     let responseContent = "";
@@ -550,7 +651,6 @@ MODIFICATION_REQUEST:
             if (baseUrl.endsWith('/chat/completions')) baseUrl = baseUrl.replace(/\/chat\/completions$/, '');
             const url = `${baseUrl}/chat/completions`;
             
-            // 独立 API: 为了稳妥，我们作为 User 发送，但为了防止拒绝，我们在前面加一个 System 声明
             const messages = [
                 { role: 'system', content: 'You are a data processing engine. You output YAML only.' },
                 { role: 'user', content: finalPrompt }
@@ -564,7 +664,6 @@ MODIFICATION_REQUEST:
             });
             
             if (!res.ok) {
-                // 捕获 API 错误
                 const errText = await res.text();
                 throw new Error(`API 请求失败 [${res.status}]: ${errText}`);
             }
@@ -579,7 +678,6 @@ MODIFICATION_REQUEST:
             }
 
             if (!json.choices || !Array.isArray(json.choices) || json.choices.length === 0) {
-                console.error("[PW] 异常响应:", json);
                 throw new Error("API 返回格式异常: choices 缺失。");
             }
 
@@ -598,7 +696,6 @@ MODIFICATION_REQUEST:
             }
 
         } else {
-            // Main API 逻辑
             if (window.TavernHelper && typeof window.TavernHelper.generateRaw === 'function') {
                 responseContent = await window.TavernHelper.generateRaw({
                     user_input: '',
@@ -618,7 +715,6 @@ MODIFICATION_REQUEST:
         clearTimeout(timeoutId); 
     }
     
-    // 检查模型是否口头拒绝
     if (responseContent.length < 150 && (responseContent.includes("I cannot") || responseContent.includes("I can't") || responseContent.includes("unable to"))) {
         throw new Error(`模型拒绝生成: ${responseContent}`);
     }
@@ -632,7 +728,7 @@ MODIFICATION_REQUEST:
 }
 
 // ============================================================================
-// 3. UI 渲染 logic (包含 CSS 修复 和 新 Tab)
+// 3. UI 渲染 logic
 // ============================================================================
 
 async function openCreatorPopup() {
@@ -666,41 +762,8 @@ async function openCreatorPopup() {
     const charName = getContext().characters[getContext().characterId]?.name || "None";
     const headerTitle = `${TEXT.PANEL_TITLE}<span class="pw-header-subtitle">User: ${currentName} & Char: ${charName}</span>`;
 
-    // 注入 CSS 强制修复润色对比界面的可见性
-    const forcedStyles = `
-    <style>
-        .pw-diff-card {
-            color: var(--SmartThemeBodyColor) !important;
-            border: 1px solid var(--SmartThemeBorderColor) !important;
-        }
-        .pw-diff-card.old {
-            background-color: rgba(180, 50, 50, 0.15) !important;
-            border-left: 3px solid rgba(180, 50, 50, 0.6) !important;
-        }
-        .pw-diff-card.new {
-            background-color: rgba(50, 180, 50, 0.15) !important;
-            border-left: 3px solid rgba(50, 180, 50, 0.6) !important;
-        }
-        .pw-diff-card.selected {
-            box-shadow: 0 0 5px var(--SmartThemeBodyColor) !important;
-            opacity: 1 !important;
-        }
-        .pw-diff-label {
-            color: var(--SmartThemeBodyColor) !important;
-            opacity: 0.7;
-            font-weight: bold;
-        }
-        /* 强制 Textarea 背景透明，文字跟随 */
-        .pw-diff-textarea {
-            background: transparent !important;
-            color: var(--SmartThemeBodyColor) !important;
-            border: none !important;
-        }
-    </style>
-    `;
-
+    // 移除了内联的 forcedStyles，改为由 injectStyles() 处理
     const html = `
-${forcedStyles}
 <div class="pw-wrapper">
     <div class="pw-header">
         <div class="pw-top-bar"><div class="pw-title">${headerTitle}</div></div>
@@ -773,7 +836,7 @@ ${forcedStyles}
         </div>
     </div>
 
-    <!-- 增加 "原版原文" Tab -->
+    <!-- Diff Overlay (HTML Structure Preserved) -->
     <div id="pw-diff-overlay" class="pw-diff-container" style="display:none;">
         <div class="pw-diff-tabs-bar">
             <div class="pw-diff-tab active" data-view="diff">
@@ -1590,7 +1653,8 @@ function addPersonaButton() {
 }
 
 jQuery(async () => {
+    injectStyles(); // [新增] 加载样式
     addPersonaButton(); 
     bindEvents(); 
-    console.log("[PW] Persona Weaver Loaded (v5.1 - Unified UI)");
+    console.log("[PW] Persona Weaver Loaded (v6.0 - Visual Fixed)");
 });
