@@ -289,68 +289,214 @@
 .pw-float-quote-btn:hover { padding-right: 18px; transform: translateX(-2px); }
 
 /* =========================================
-   6. Diff 对比视图
+   6. Diff 对比视图 (仿图二高对比风格)
 ========================================= */
+
+/* 1. 覆盖层背景：深色磨砂 */
 .pw-diff-container {
     display: flex; flex-direction: column; gap: 0;
-    background: var(--smart-theme-bg, #222); /* 跟随主题背景 */
+    background: #1a1a1a; /* 强制深灰背景，不随主题变 */
     padding: 0;
     position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 2000;
-    box-sizing: border-box; color: var(--pw-text-main);
+    box-sizing: border-box; 
+    color: #eeeeee; /* 强制白字 */
+    font-family: "Microsoft YaHei", sans-serif;
 }
 
+/* 2. 顶部 Tab 栏 */
 .pw-diff-tabs-bar {
-    display: flex; border-bottom: 1px solid var(--pw-border); 
-    background: rgba(0,0,0,0.1);
-    padding: 5px 5px 0 5px; gap: 5px; flex-shrink: 0;
+    display: flex; 
+    border-bottom: 2px solid #333; 
+    background: #111;
+    padding: 0; 
+    gap: 0; 
+    flex-shrink: 0;
 }
+
 .pw-diff-tab {
-    padding: 8px 15px; cursor: pointer; border-radius: 6px 6px 0 0;
-    background: rgba(128,128,128,0.1); border: 1px solid transparent; border-bottom: none;
-    opacity: 0.6; font-weight: bold; font-size: 0.95em; transition: all 0.2s;
-    color: var(--pw-text-main);
+    flex: 1; /* 均分宽度 */
+    padding: 12px 0; 
+    cursor: pointer; 
+    background: #222; 
+    border-right: 1px solid #333;
+    border-bottom: none;
+    opacity: 0.6; 
+    font-weight: bold; 
+    font-size: 1em; 
+    transition: all 0.2s;
+    color: #aaa;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    line-height: 1.2;
 }
+
+.pw-diff-tab:last-child { border-right: none; }
+
+.pw-diff-tab:hover { opacity: 0.9; background: #2a2a2a; }
+
 .pw-diff-tab.active { 
     opacity: 1; 
-    background: transparent;
-    color: var(--pw-text-main); 
-    border-color: var(--pw-border); 
-    border-bottom: 2px solid var(--pw-text-main); 
-    margin-bottom: -1px; 
+    background: #1a1a1a; /* 与下方内容融为一体 */
+    color: #69f0ae; /* 激活时文字变绿 */
+    border-bottom: 2px solid #69f0ae; /* 底部绿色高亮条 */
 }
 
-.pw-diff-content-area { flex: 1; overflow: hidden; position: relative; padding: 10px; display: flex; flex-direction: column; }
-.pw-diff-list-view { display: flex; flex-direction: column; gap: 10px; overflow-y: auto; padding-right: 5px; height: 100%; }
+.pw-diff-tab .pw-tab-sub {
+    font-size: 0.75em;
+    font-weight: normal;
+    opacity: 0.7;
+    margin-top: 2px;
+}
+
+/* 3. 内容区域 */
+.pw-diff-content-area { 
+    flex: 1; 
+    overflow: hidden; 
+    position: relative; 
+    padding: 15px; 
+    display: flex; flex-direction: column; 
+    background: #1a1a1a;
+}
+
+.pw-diff-list-view { 
+    display: flex; flex-direction: column; gap: 15px; 
+    overflow-y: auto; padding-right: 5px; height: 100%; 
+}
+
+/* 4. 对比行与标题 */
+.pw-diff-row { 
+    background: transparent; 
+    border: 1px solid #333; 
+    border-radius: 8px; 
+    padding: 15px; 
+    display: flex; flex-direction: column; gap: 10px; 
+    margin-bottom: 5px; 
+    box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+}
+
+.pw-diff-attr-name { 
+    font-weight: bold; 
+    color: #888; /* 属性名灰色 */
+    font-size: 1.1em; 
+    text-align: center;
+    margin-bottom: 5px;
+    letter-spacing: 1px;
+}
+
+/* 5. 卡片容器 */
+.pw-diff-cards { 
+    display: flex; flex-direction: column; gap: 10px; 
+}
+
+/* 通用卡片样式 */
+.pw-diff-card { 
+    display: flex; flex-direction: column; 
+    border-radius: 6px; 
+    overflow: hidden; 
+    transition: all 0.2s; 
+    cursor: pointer; 
+    position: relative;
+    min-height: 100px;
+}
+
+/* --- 新版本 / 无变更 (绿色风格) --- */
+.pw-diff-card.new, 
+.pw-diff-card.new.selected {
+    border: 2px solid #69f0ae; /* 亮绿色边框 */
+    background: rgba(46, 125, 50, 0.2); /* 深绿背景 */
+    opacity: 1;
+}
+
+.pw-diff-card.new .pw-diff-label {
+    background: rgba(46, 125, 50, 0.8);
+    color: #fff;
+    text-align: center;
+    padding: 4px;
+    font-size: 0.85em;
+    letter-spacing: 1px;
+}
+
+/* --- 原版本 (红色/暗色风格) --- */
+.pw-diff-card.old {
+    border: 1px solid #555;
+    background: rgba(60, 20, 20, 0.3); /* 暗红背景 */
+    opacity: 0.6; /* 让它看起来像背景 */
+    margin-bottom: 5px;
+}
+
+.pw-diff-card.old .pw-diff-label {
+    background: rgba(60, 60, 60, 0.5);
+    color: #aaa;
+    text-align: center;
+    padding: 2px;
+    font-size: 0.8em;
+}
+
+/* --- 选中状态微调 --- */
+.pw-diff-card.selected { 
+    box-shadow: 0 0 10px rgba(105, 240, 174, 0.2);
+}
+
+/* 文本区域 */
+.pw-diff-textarea { 
+    flex: 1; width: 100%; 
+    background: transparent; 
+    border: none; 
+    color: #e0e0e0; /* 亮灰白字 */
+    padding: 12px; 
+    font-family: inherit; font-size: 1em; line-height: 1.6; 
+    resize: none; outline: none; 
+    box-sizing: border-box; 
+    text-shadow: 1px 1px 2px rgba(0,0,0,0.8);
+}
+
+/* 原文 Tab 的文本框 */
 .pw-diff-raw-view { display: none; flex-direction: column; height: 100%; }
 .pw-diff-raw-textarea {
     flex: 1; width: 100%; 
-    background: rgba(0,0,0,0.1); 
-    color: var(--pw-text-main);
-    border: 1px solid var(--pw-border); border-radius: 6px; padding: 10px;
-    font-family: monospace; resize: none; outline: none; font-size: 0.9em; line-height: 1.5;
-    box-sizing: border-box; min-height: 350px;
+    background: #222; 
+    color: #ddd;
+    border: 1px solid #444; border-radius: 6px; padding: 15px;
+    font-family: monospace; resize: none; outline: none; font-size: 0.95em; line-height: 1.6;
+    box-sizing: border-box;
 }
 
-.pw-diff-row { 
-    background: rgba(128,128,128,0.05); 
-    border: 1px solid var(--pw-border); 
-    border-radius: 8px; padding: 10px; 
-    display: flex; flex-direction: column; gap: 8px; margin-bottom: 10px; 
+/* 6. 底部按钮栏 */
+.pw-diff-actions { 
+    display: flex; justify-content: flex-end; gap: 15px; 
+    padding: 15px; 
+    border-top: 1px solid #333; 
+    flex-shrink: 0; 
+    background: #111;
 }
-.pw-diff-attr-name { 
-    font-weight: bold; color: var(--pw-text-main); 
-    font-size: 1em; padding-bottom: 5px; 
-    border-bottom: 1px solid var(--pw-border); margin-bottom: 5px; 
+
+.pw-diff-actions .pw-btn {
+    border-radius: 4px;
+    padding: 8px 20px;
+    font-size: 1em;
+    text-transform: uppercase;
+    letter-spacing: 1px;
 }
-.pw-diff-cards { display: flex; gap: 10px; }
-.pw-diff-card { flex: 1; display: flex; flex-direction: column; border: 2px solid transparent; border-radius: 6px; background: rgba(128,128,128,0.1); overflow: hidden; transition: all 0.2s; cursor: pointer; opacity: 0.6; position: relative; }
-.pw-diff-card.selected { border-color: var(--pw-text-main); opacity: 1; background: rgba(128,128,128,0.2); }
-.pw-diff-card:not(.selected):hover { opacity: 0.8; }
-.pw-diff-label { font-size: 0.75em; padding: 4px 8px; background: rgba(0,0,0,0.2); color: inherit; text-transform: uppercase; font-weight: bold; }
-.pw-diff-card.selected .pw-diff-label { color: var(--pw-text-main); background: rgba(128,128,128,0.3); }
-.pw-diff-textarea { flex: 1; width: 100%; background: transparent; border: none; color: var(--pw-text-main); padding: 8px; font-family: inherit; font-size: 0.95em; resize: none; outline: none; line-height: 1.5; min-height: 80px; box-sizing: border-box; }
-.pw-diff-card:not(.selected) .pw-diff-textarea { opacity: 0.5; pointer-events: none; }
-.pw-diff-actions { display: flex; justify-content: flex-end; gap: 10px; padding: 10px; border-top: 1px solid var(--pw-border); flex-shrink: 0; background: var(--smart-theme-bg, #222); }
+
+/* 放弃按钮 */
+.pw-diff-actions .pw-btn.danger {
+    border: 1px solid #ff5252;
+    color: #ff5252;
+    background: transparent;
+}
+.pw-diff-actions .pw-btn.danger:hover {
+    background: rgba(255, 82, 82, 0.1);
+}
+
+/* 保存按钮 */
+.pw-diff-actions .pw-btn.save {
+    background: rgba(105, 240, 174, 0.2);
+    border: 1px solid #69f0ae;
+    color: #69f0ae;
+}
+.pw-diff-actions .pw-btn.save:hover {
+    background: #69f0ae;
+    color: #000;
+}
 
 @media screen and (max-width: 600px) {
     .pw-diff-cards { flex-direction: column; }
