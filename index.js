@@ -136,7 +136,7 @@ let lastRawResponse = "";
 let isProcessing = false;
 let currentGreetingsList = []; 
 let wiSelectionCache = {};
-let uiStateCache = { templateExpanded: true }; 
+let uiStateCache = { templateExpanded: true };
 
 // ============================================================================
 // 工具函数与映射表
@@ -145,7 +145,7 @@ const yieldToBrowser = () => new Promise(resolve => requestAnimationFrame(resolv
 const forcePaint = () => new Promise(resolve => setTimeout(resolve, 50));
 
 const getPosAbbr = (pos) => {
-    if (typeof pos === 'number') return `Pos:${pos}`;
+    if (typeof pos === 'number') return `Pos:${pos}`; 
     const map = {
         'before_character_definition': '↑Char',
         'after_character_definition': '↓Char',
@@ -390,7 +390,6 @@ function loadData() {
     try {
         wiSelectionCache = JSON.parse(localStorage.getItem(STORAGE_KEY_WI_STATE)) || {};
     } catch { wiSelectionCache = {}; }
-    
     try {
         uiStateCache = JSON.parse(localStorage.getItem(STORAGE_KEY_UI_STATE)) || { templateExpanded: true };
     } catch { uiStateCache = { templateExpanded: true }; }
@@ -540,14 +539,13 @@ async function getWorldBookEntries(bookName) {
                 enabled: e.enabled,
                 depth: (e.depth !== undefined && e.depth !== null) ? e.depth : (e.extensions?.depth || 0),
                 position: e.position !== undefined ? e.position : 0,
-                filterCode: getPosFilterCode(e.position)
+                filterCode: getPosFilterCode(e.position) 
             }));
         } catch (e) { }
     }
     return [];
 }
 
-// [Updated] 构造去敏化的输入块 v6.3
 function wrapInputForSafety(request, oldText, isRefine) {
     if (isRefine) {
         return `
@@ -785,38 +783,7 @@ async function openCreatorPopup() {
             background: rgba(255, 107, 107, 0.1) !important;
         }
 
-        /* === Diff View Layout (Fix for Height) === */
-        .pw-diff-content-area {
-            flex: 1;
-            display: flex;
-            flex-direction: column;
-            overflow: hidden;
-            min-height: 0; /* Critical for flex child scrolling */
-        }
-        .pw-diff-raw-view {
-            flex: 1;
-            display: flex;
-            flex-direction: column;
-            height: 100%;
-        }
-        .pw-diff-raw-textarea {
-            flex: 1;
-            height: 100%;
-            resize: none !important;
-            color: #ffffff !important;
-            background: rgba(0,0,0,0.2) !important;
-            border: 1px solid #555 !important;
-            padding: 10px;
-            font-family: inherit;
-            line-height: 1.5;
-        }
-
         /* === List View Styles === */
-        .pw-diff-list-view {
-            flex: 1;
-            overflow-y: auto;
-            padding-right: 5px;
-        }
         .pw-diff-card {
             background-color: transparent !important;
             border-radius: 8px;
@@ -870,6 +837,28 @@ async function openCreatorPopup() {
             padding: 10px;
         }
 
+        /* [需求 2] 润色对比弹窗自适应高度 */
+        .pw-diff-content-area {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            min-height: 0;
+        }
+        .pw-diff-raw-view {
+            display: flex;
+            flex-direction: column;
+            flex: 1;
+            height: 100%;
+        }
+        .pw-diff-raw-textarea {
+            flex: 1;
+            height: 100% !important; 
+            resize: none;
+            color: #ffffff !important;
+            background: rgba(0,0,0,0.2) !important;
+        }
+
         .pw-diff-attr-name {
             color: #ffffff !important;
             text-align: center;
@@ -886,25 +875,25 @@ async function openCreatorPopup() {
             transform: scale(1.2);
         }
 
-        /* [需求 1] 世界书筛选工具栏 */
+        /* [需求 1] 世界书筛选UI重构 */
         .pw-wi-depth-tools {
             display: none; 
             flex-direction: column;
             gap: 8px;
             padding: 10px;
-            background: rgba(0,0,0,0.15);
+            background: rgba(0,0,0,0.1);
             border-bottom: 1px solid var(--SmartThemeBorderColor);
             font-size: 0.85em;
         }
-        .pw-filter-row {
+        .pw-wi-filter-row {
             display: flex;
             align-items: center;
-            gap: 10px;
+            gap: 8px;
             flex-wrap: wrap;
         }
         .pw-depth-input {
-            width: 50px;
-            padding: 3px 5px;
+            width: 40px;
+            padding: 4px;
             background: var(--SmartThemeInputBg);
             border: 1px solid var(--SmartThemeBorderColor);
             color: var(--SmartThemeInputColor);
@@ -913,37 +902,36 @@ async function openCreatorPopup() {
         }
         .pw-keyword-input {
             flex: 1;
-            padding: 3px 5px;
+            padding: 4px 8px;
             background: var(--SmartThemeInputBg);
             border: 1px solid var(--SmartThemeBorderColor);
             color: var(--SmartThemeInputColor);
             border-radius: 4px;
         }
         .pw-pos-select {
-            padding: 3px 5px;
+            flex: 1;
+            padding: 4px;
             background: var(--SmartThemeInputBg);
             border: 1px solid var(--SmartThemeBorderColor);
             color: var(--SmartThemeInputColor);
             border-radius: 4px;
-            flex: 1;
             max-width: 200px;
         }
         .pw-depth-btn {
-            padding: 3px 10px;
+            padding: 4px 10px;
             background: var(--SmartThemeBtnBg);
             border: 1px solid var(--SmartThemeBorderColor);
             color: var(--SmartThemeBtnText);
             border-radius: 4px;
             cursor: pointer;
-            display: flex;
-            align-items: center;
-            gap: 5px;
+            white-space: nowrap;
         }
         .pw-depth-btn:hover { filter: brightness(1.1); }
+        
         .pw-depth-btn.active {
-            background: var(--SmartThemeQuoteColor, #83c168);
-            color: #fff;
-            border-color: var(--SmartThemeQuoteColor, #83c168);
+            border-color: #83c168;
+            color: #83c168;
+            background: rgba(131, 193, 104, 0.1);
         }
 
         .pw-wi-info-badge {
@@ -955,15 +943,22 @@ async function openCreatorPopup() {
             margin-right: 5px;
             white-space: nowrap;
         }
+        
+        /* 仅显示图标 */
         .pw-wi-filter-toggle {
-            font-size: 1.1em;
             cursor: pointer;
             margin-left: auto;
             margin-right: 10px;
             opacity: 0.7;
-            padding: 5px;
+            font-size: 1em;
+            width: 24px;
+            height: 24px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 4px;
         }
-        .pw-wi-filter-toggle:hover { opacity: 1; color: var(--SmartThemeQuoteColor); }
+        .pw-wi-filter-toggle:hover { opacity: 1; background: rgba(255,255,255,0.1); }
     </style>
     `;
 
@@ -1008,7 +1003,8 @@ ${forcedStyles}
                             <div class="pw-shortcut-btn" data-key="\n"><span>换行</span><span class="code">Enter</span></div>
                         </div>
                         <div style="display:flex; gap:5px;">
-                            <button class="pw-mini-btn" id="pw-restore-template" title="恢复为含家庭/社交的默认模版">恢复默认</button>
+                            <!-- [需求 3] 修改提示文字 -->
+                            <button class="pw-mini-btn" id="pw-restore-template" title="恢复默认模版">恢复默认</button>
                             <button class="pw-mini-btn" id="pw-save-template">保存模版</button>
                         </div>
                     </div>
@@ -1755,6 +1751,82 @@ function bindEvents() {
     $(document).on('click.pw', '#pw-history-clear-all', function () { if (confirm("清空?")) { historyCache = []; saveData(); renderHistoryList(); } });
 }
 
+// ... 辅助渲染函数 ...
+const renderTemplateChips = () => {
+    const $container = $('#pw-template-chips').empty();
+    const blocks = parseYamlToBlocks(currentTemplate);
+    blocks.forEach((content, key) => {
+        const $chip = $(`<div class="pw-tag-chip"><i class="fa-solid fa-cube" style="opacity:0.5; margin-right:4px;"></i><span>${key}</span></div>`);
+        $chip.on('click', () => {
+            const $text = $('#pw-request');
+            const cur = $text.val();
+            const prefix = (cur && !cur.endsWith('\n') && cur.length > 0) ? '\n\n' : '';
+            let insertText = key + ":";
+            if (content && content.trim()) {
+                if (content.includes('\n') || content.startsWith(' ')) insertText += "\n" + content;
+                else insertText += " " + content;
+            } else insertText += " ";
+            $text.val(cur + prefix + insertText).focus();
+            $text.scrollTop($text[0].scrollHeight);
+        });
+        $container.append($chip);
+    });
+};
+
+const renderHistoryList = () => {
+    loadData();
+    const $list = $('#pw-history-list').empty();
+    const search = $('#pw-history-search').val().toLowerCase();
+    
+    // [Lite Fix] Filter out opening types
+    const filtered = historyCache.filter(item => {
+        if (item.data && item.data.type === 'opening') return false; 
+        
+        if (!search) return true;
+        const content = (item.data.resultText || "").toLowerCase();
+        const title = (item.title || "").toLowerCase();
+        return title.includes(search) || content.includes(search);
+    });
+    
+    if (filtered.length === 0) { $list.html('<div style="text-align:center; opacity:0.6; padding:20px;">暂无草稿</div>'); return; }
+
+    filtered.forEach((item, index) => {
+        const previewText = item.data.resultText || '无内容';
+        const displayTitle = item.title || "User & Char";
+
+        const $el = $(`
+        <div class="pw-history-item">
+            <div class="pw-hist-main">
+                <div class="pw-hist-header">
+                    <span class="pw-hist-title-display">${displayTitle}</span>
+                    <input type="text" class="pw-hist-title-input" value="${displayTitle}" style="display:none;">
+                    <div style="display:flex; gap:5px;">
+                        <i class="fa-solid fa-pen pw-hist-action-btn edit" title="编辑标题"></i>
+                        <i class="fa-solid fa-trash pw-hist-action-btn del" data-index="${index}" title="删除"></i>
+                    </div>
+                </div>
+                <div class="pw-hist-meta"><span>${item.timestamp || ''}</span></div>
+                <div class="pw-hist-desc">${previewText}</div>
+            </div>
+        </div>
+    `);
+        $el.on('click', function (e) {
+            if ($(e.target).closest('.pw-hist-action-btn, .pw-hist-title-input').length) return;
+            $('#pw-request').val(item.request); $('#pw-result-text').val(previewText); $('#pw-result-area').show();
+            $('#pw-request').addClass('minimized');
+            $('.pw-tab[data-tab="editor"]').click();
+        });
+        $el.find('.pw-hist-action-btn.del').on('click', function (e) {
+            e.stopPropagation();
+            if (confirm("删除?")) {
+                historyCache.splice(historyCache.indexOf(item), 1);
+                saveData(); renderHistoryList();
+            }
+        });
+        $list.append($el);
+    });
+};
+
 window.pwExtraBooks = [];
 const renderWiBooks = async () => {
     const container = $('#pw-wi-container').empty();
@@ -1772,35 +1844,36 @@ const renderWiBooks = async () => {
         const $el = $(`
         <div class="pw-wi-book">
             <div class="pw-wi-header" style="display:flex; align-items:center;">
-                <input type="checkbox" class="pw-wi-header-checkbox pw-wi-select-all" title="全选/全不选">
+                <input type="checkbox" class="pw-wi-header-checkbox pw-wi-select-all" title="全选/全不选 (仅选中当前可见条目)">
                 <span style="flex:1; display:flex; align-items:center;">
                     <i class="fa-solid fa-book" style="margin-right:5px;"></i> ${book} ${isBound ? '<span class="pw-bound-status" style="margin-left:5px;">(已绑定)</span>' : ''}
                 </span>
-                <i class="fa-solid fa-filter pw-wi-filter-toggle" title="展开/收起筛选"></i>
+                <div class="pw-wi-filter-toggle" title="展开/收起筛选"><i class="fa-solid fa-filter"></i></div>
                 <div>${!isBound ? '<i class="fa-solid fa-times remove-book pw-remove-book-icon" title="移除"></i>' : ''}<i class="fa-solid fa-chevron-down arrow"></i></div>
             </div>
             <div class="pw-wi-list" data-book="${book}"></div>
         </div>`);
         
-        // 全选事件：仅作用于当前 visible 的 checkbox
+        // [需求 1] 全选事件：只选中当前可见的条目 (Visual Filtering)
         $el.find('.pw-wi-select-all').on('click', async function(e) {
             e.stopPropagation();
             const checked = $(this).prop('checked');
             const $list = $el.find('.pw-wi-list');
             
             const doCheck = () => {
-                // 关键修改：只选中可见的
-                const targets = $list.find('.pw-wi-item:visible .pw-wi-check');
-                targets.prop('checked', checked);
+                // 仅操作 :visible 的 checkbox
+                $list.find('.pw-wi-item:visible .pw-wi-check').prop('checked', checked);
                 
-                // 保存状态 (遍历所有checkbox来更新状态)
+                // 保存状态 (保存所有被勾选的，包括隐藏但之前已勾选的)
                 const checkedUids = [];
                 $list.find('.pw-wi-check:checked').each(function() { checkedUids.push($(this).val()); });
                 saveWiSelection(book, checkedUids);
             };
 
             if (!$list.is(':visible') && !$list.data('loaded')) {
+                // 如果未加载，先展开加载数据
                 $el.find('.pw-wi-header').click(); 
+                // 等待渲染
                 setTimeout(doCheck, 150);
             } else {
                 doCheck();
@@ -1809,20 +1882,26 @@ const renderWiBooks = async () => {
 
         $el.find('.remove-book').on('click', (e) => { e.stopPropagation(); window.pwExtraBooks = window.pwExtraBooks.filter(b => b !== book); renderWiBooks(); });
         
+        // 筛选折叠事件
         $el.find('.pw-wi-filter-toggle').on('click', function(e) {
             e.stopPropagation();
             const $list = $el.find('.pw-wi-list');
+            
             if (!$list.is(':visible')) {
                 $el.find('.pw-wi-header').click();
             }
+            
             setTimeout(() => {
                 const $tools = $list.find('.pw-wi-depth-tools');
-                if($tools.length) $tools.slideToggle();
+                if($tools.length) {
+                    $tools.slideToggle();
+                }
             }, 50);
         });
 
+        // 展开/折叠逻辑
         $el.find('.pw-wi-header').on('click', async function (e) {
-            if ($(e.target).hasClass('pw-wi-header-checkbox') || $(e.target).hasClass('pw-wi-filter-toggle')) return; 
+            if ($(e.target).hasClass('pw-wi-header-checkbox') || $(e.target).closest('.pw-wi-filter-toggle').length) return; 
 
             const $list = $el.find('.pw-wi-list');
             const $arrow = $(this).find('.arrow');
@@ -1843,76 +1922,84 @@ const renderWiBooks = async () => {
                     if (entries.length === 0) {
                         $list.html('<div style="padding:10px;opacity:0.5;">无条目</div>');
                     } else {
-                        // [UI 重构] 筛选工具栏
+                        // [需求 1] 筛选面板重构
                         const $tools = $(`
                         <div class="pw-wi-depth-tools">
-                            <div class="pw-filter-row">
-                                <input type="text" class="pw-keyword-input" id="kw-input" placeholder="搜索关键词 (标题/内容)...">
-                                <button class="pw-depth-btn" id="d-apply" title="应用筛选"><i class="fa-solid fa-filter"></i></button>
+                            <div class="pw-wi-filter-row">
+                                <input type="text" class="pw-keyword-input" id="keyword" placeholder="关键词查找...">
+                                <button class="pw-depth-btn" id="d-filter-toggle" title="启用/取消筛选">筛选</button>
                             </div>
-                            <div class="pw-filter-row">
+                            <div class="pw-wi-filter-row">
                                 <select id="p-select" class="pw-pos-select">
                                     <option value="unknown">全部位置</option>
-                                    <option value="before_character_definition">角色定义前</option>
-                                    <option value="after_character_definition">角色定义后</option>
-                                    <option value="before_author_note">作者注释前</option>
-                                    <option value="after_author_note">作者注释后</option>
-                                    <option value="before_example_messages">样例消息前</option>
-                                    <option value="after_example_messages">样例消息后</option>
-                                    <option value="at_depth_as_system">@深度 (System)</option>
-                                    <option value="at_depth_as_assistant">@深度 (Assistant)</option>
-                                    <option value="at_depth_as_user">@深度 (User)</option>
+                                    <option value="before_character_definition">角色前</option>
+                                    <option value="after_character_definition">角色后</option>
+                                    <option value="before_author_note">AN前</option>
+                                    <option value="after_author_note">AN后</option>
+                                    <option value="before_example_messages">样例前</option>
+                                    <option value="after_example_messages">样例后</option>
+                                    <option value="at_depth_as_system">@深度(系统)</option>
+                                    <option value="at_depth_as_assistant">@深度(助手)</option>
+                                    <option value="at_depth_as_user">@深度(用户)</option>
                                 </select>
-                                <div style="display:flex; align-items:center; gap:5px;">
-                                    <span style="font-size:0.8em; opacity:0.6;">深度</span>
-                                    <input type="number" class="pw-depth-input" id="d-min" placeholder="0">
-                                    <span>-</span>
-                                    <input type="number" class="pw-depth-input" id="d-max" placeholder="Max">
-                                </div>
-                                <button class="pw-depth-btn" id="d-reset" title="恢复为世界书原始状态" style="margin-left:auto;"><i class="fa-solid fa-rotate-left"></i></button>
+                                <input type="number" class="pw-depth-input" id="d-min" placeholder="0" title="最小深度">
+                                <span>-</span>
+                                <input type="number" class="pw-depth-input" id="d-max" placeholder="Max" title="最大深度">
+                                <button class="pw-depth-btn" id="d-reset" title="恢复为世界书原始状态" style="margin-left:auto;">重置状态</button>
                             </div>
                         </div>`);
                         
-                        // 筛选逻辑：不勾选，只隐藏
-                        $tools.find('#d-apply').on('click', function() {
-                            const btn = $(this);
-                            const isActive = btn.hasClass('active');
-                            
-                            if (isActive) {
-                                // 取消筛选，显示全部
-                                btn.removeClass('active');
+                        let isFiltering = false;
+
+                        const applyFilter = () => {
+                            if (!isFiltering) {
+                                // 取消筛选：显示所有
                                 $list.find('.pw-wi-item').show();
+                                $tools.find('#d-filter-toggle').removeClass('active').text('筛选');
                                 return;
                             }
 
-                            // 应用筛选
-                            btn.addClass('active');
-                            const keyword = $tools.find('#kw-input').val().toLowerCase();
+                            $tools.find('#d-filter-toggle').addClass('active').text('取消筛选');
+
+                            const keyword = $tools.find('#keyword').val().toLowerCase();
+                            const pVal = $tools.find('#p-select').val();
                             const dMin = parseInt($tools.find('#d-min').val()) || 0;
                             const dMaxStr = $tools.find('#d-max').val();
                             const dMax = dMaxStr === "" ? 99999 : parseInt(dMaxStr);
-                            const pVal = $tools.find('#p-select').val();
 
                             $list.find('.pw-wi-item').each(function() {
                                 const $row = $(this);
                                 const d = $row.data('depth');
                                 const code = $row.data('code'); 
-                                const contentText = decodeURIComponent($row.find('.pw-wi-check').data('content')).toLowerCase();
-                                const titleText = $row.find('.pw-item-title').text().toLowerCase();
+                                const content = decodeURIComponent($row.find('.pw-wi-check').data('content')).toLowerCase();
+                                const title = $row.find('.pw-wi-title-text').text().toLowerCase();
 
-                                let match = true;
-                                
+                                let matches = true;
+
+                                // 关键词筛选 (标题 or 内容)
+                                if (keyword && !title.includes(keyword) && !content.includes(keyword)) matches = false;
+
                                 // 位置筛选
-                                if (pVal !== 'unknown' && code !== pVal) match = false;
-                                
+                                if (matches && pVal !== 'unknown' && code !== pVal) matches = false;
+
                                 // 深度筛选
-                                if (d < dMin || d > dMax) match = false;
+                                if (matches && (d < dMin || d > dMax)) matches = false;
 
-                                // 关键词筛选
-                                if (keyword && !titleText.includes(keyword) && !contentText.includes(keyword)) match = false;
-
-                                if (match) $row.show(); else $row.hide();
+                                if (matches) $row.show(); else $row.hide();
                             });
+                        };
+
+                        $tools.find('#d-filter-toggle').on('click', function() {
+                            isFiltering = !isFiltering;
+                            applyFilter();
+                        });
+
+                        // 也可以支持输入回车触发搜索
+                        $tools.find('#keyword').on('keyup', function(e) {
+                            if (e.key === 'Enter') {
+                                isFiltering = true;
+                                applyFilter();
+                            }
                         });
 
                         $tools.find('#d-reset').on('click', function() {
@@ -1925,6 +2012,7 @@ const renderWiBooks = async () => {
 
                         $list.append($tools);
 
+                        // 读取记忆的选中状态
                         const savedSelection = loadWiSelection(book);
 
                         entries.forEach(entry => {
@@ -1943,7 +2031,7 @@ const renderWiBooks = async () => {
                             <div class="pw-wi-item" data-depth="${entry.depth}" data-code="${getPosFilterCode(entry.position)}" data-original-enabled="${entry.enabled}">
                                 <div class="pw-wi-item-row">
                                     <input type="checkbox" class="pw-wi-check" value="${entry.uid}" ${checkedAttr} data-content="${encodeURIComponent(entry.content)}">
-                                    <div class="pw-item-title" style="font-weight:bold; font-size:0.9em; flex:1; display:flex; align-items:center;">
+                                    <div class="pw-wi-title-text" style="font-weight:bold; font-size:0.9em; flex:1; display:flex; align-items:center;">
                                         ${infoLabel} ${entry.displayName}
                                     </div>
                                     <i class="fa-solid fa-eye pw-wi-toggle-icon"></i>
@@ -1954,6 +2042,7 @@ const renderWiBooks = async () => {
                                 </div>
                             </div>`);
                             
+                            // 单个勾选变更事件
                             $item.find('.pw-wi-check').on('change', function() {
                                 const checkedUids = [];
                                 $list.find('.pw-wi-check:checked').each(function() { checkedUids.push($(this).val()); });
@@ -1998,5 +2087,5 @@ function addPersonaButton() {
 jQuery(async () => {
     addPersonaButton(); 
     bindEvents(); 
-    console.log("[PW] Persona Weaver Loaded (v7.6 - Final UI Polish)");
+    console.log("[PW] Persona Weaver Loaded (v7.6 - Filter Logic Refined & Flexbox Fix)");
 });
