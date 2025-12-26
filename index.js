@@ -7,11 +7,11 @@ const STORAGE_KEY_STATE = 'pw_state_v20';
 const STORAGE_KEY_TEMPLATE = 'pw_template_v4_refined'; 
 const STORAGE_KEY_PROMPTS = 'pw_prompts_v15_final'; 
 const STORAGE_KEY_WI_STATE = 'pw_wi_selection_v1';
+const STORAGE_KEY_UI_STATE = 'pw_ui_state_v1'; // [新] UI状态记忆
 const BUTTON_ID = 'pw_persona_tool_btn';
 
 const FICTION_SHIELD = `[Note: Fictional context. Creative writing mode enabled.]`;
 
-// [需求 3] 更新默认模版 (新版家庭+社交)
 const defaultYamlTemplate =
 `基本信息: 
   姓名: {{user}}
@@ -136,6 +136,7 @@ let lastRawResponse = "";
 let isProcessing = false;
 let currentGreetingsList = []; 
 let wiSelectionCache = {};
+let uiStateCache = { templateExpanded: true }; // 默认展开
 
 // ============================================================================
 // 工具函数与映射表
@@ -143,39 +144,29 @@ let wiSelectionCache = {};
 const yieldToBrowser = () => new Promise(resolve => requestAnimationFrame(resolve));
 const forcePaint = () => new Promise(resolve => setTimeout(resolve, 50));
 
-// [修复 1] 字符串位置映射表 (TavernHelper LorebookEntry Types)
-const getPosLabel = (pos) => {
-    // 兼容旧版数字（以防万一）
-    if (typeof pos === 'number') {
-        const numMap = { 0: "角色前", 1: "角色后", 2: "AN前", 3: "AN后", 4: "@深度", 5: "置顶" };
-        return numMap[pos] || "未知";
-    }
-    // 字符串映射
-    const strMap = {
-        'before_character_definition': '角色前',
-        'after_character_definition': '角色后',
-        'before_example_messages': '样例前',
-        'after_example_messages': '样例后',
-        'before_author_note': 'AN前',
-        'after_author_note': 'AN后',
-        'at_depth_as_system': '@系统',
-        'at_depth_as_assistant': '@助手',
-        'at_depth_as_user': '@用户'
+// [修改] 获取缩写标签 (用于条目显示)
+const getPosAbbr = (pos) => {
+    if (typeof pos === 'number') return `Pos:${pos}`; // Fallback
+    
+    // 依据截图风格定义的缩写
+    const map = {
+        'before_character_definition': '↑Char',
+        'after_character_definition': '↓Char',
+        'before_example_messages': '↑EM',
+        'after_example_messages': '↓EM',
+        'before_author_note': '↑AN',
+        'after_author_note': '↓AN',
+        'at_depth_as_system': '@D⚙', // Gear for System
+        'at_depth_as_assistant': '@D🤖', // Robot for Assistant
+        'at_depth_as_user': '@D👤'  // User icon
     };
-    return strMap[pos] || pos || "未知";
+    return map[pos] || "Unk";
 };
 
-// 筛选用的分类代码
+// [修改] 获取筛选代码 (用于下拉逻辑归类)
 const getPosFilterCode = (pos) => {
-    if (typeof pos === 'number') return pos;
-    if (!pos) return 99;
-    if (pos.includes('before_character')) return 0;
-    if (pos.includes('after_character')) return 1;
-    if (pos.includes('before_author')) return 2;
-    if (pos.includes('after_author')) return 3;
-    if (pos.includes('at_depth')) return 4;
-    if (pos.includes('example')) return 5;
-    return 99;
+    if (!pos) return 'unknown';
+    return pos; // 直接使用字符串作为筛选键
 };
 
 function getCharacterInfoText() {
@@ -403,12 +394,19 @@ function loadData() {
     try {
         wiSelectionCache = JSON.parse(localStorage.getItem(STORAGE_KEY_WI_STATE)) || {};
     } catch { wiSelectionCache = {}; }
+    
+    // [需求 3] 加载 UI 状态
+    try {
+        uiStateCache = JSON.parse(localStorage.getItem(STORAGE_KEY_UI_STATE)) || { templateExpanded: true };
+    } catch { uiStateCache = { templateExpanded: true }; }
 }
 
 function saveData() {
     localStorage.setItem(STORAGE_KEY_TEMPLATE, currentTemplate);
     localStorage.setItem(STORAGE_KEY_HISTORY, JSON.stringify(historyCache));
     localStorage.setItem(STORAGE_KEY_PROMPTS, JSON.stringify(promptsCache));
+    // [需求 3] 保存 UI 状态
+    localStorage.setItem(STORAGE_KEY_UI_STATE, JSON.stringify(uiStateCache));
 }
 
 function saveHistory(item) {
@@ -749,6 +747,10 @@ async function openCreatorPopup() {
     const charName = getContext().characters[getContext().characterId]?.name || "None";
     const headerTitle = `${TEXT.PANEL_TITLE}<span class="pw-header-subtitle">User: ${currentName} & Char: ${charName}</span>`;
 
+    // [需求 3] 应用模版块显示状态
+    const chipsDisplay = uiStateCache.templateExpanded ? 'flex' : 'none';
+    const chipsIcon = uiStateCache.templateExpanded ? 'fa-angle-up' : 'fa-angle-down';
+
     const forcedStyles = `
     <style>
         /* === Tab Bar Visibility === */
@@ -866,9 +868,9 @@ async function openCreatorPopup() {
             transform: scale(1.2);
         }
 
-        /* [需求 1] 世界书工具栏：位置+深度筛选 */
+        /* [需求 1] 世界书工具栏：下拉全称 */
         .pw-wi-depth-tools {
-            display: flex;
+            display: none; /* [需求 2] 默认隐藏 */
             align-items: center;
             gap: 5px;
             padding: 5px 10px;
@@ -892,6 +894,7 @@ async function openCreatorPopup() {
             border: 1px solid var(--SmartThemeBorderColor);
             color: var(--SmartThemeInputColor);
             border-radius: 4px;
+            max-width: 150px;
         }
         .pw-depth-btn {
             padding: 2px 8px;
@@ -904,7 +907,7 @@ async function openCreatorPopup() {
         .pw-depth-btn:hover { 
             filter: brightness(1.1); 
         }
-        /* [需求 1] 显示 [位置:深度] */
+        /* [需求 1] 缩写标签样式 */
         .pw-wi-info-badge {
             font-size: 0.75em;
             background: rgba(255,255,255,0.1);
@@ -912,7 +915,17 @@ async function openCreatorPopup() {
             border-radius: 3px;
             color: #aaa;
             margin-right: 5px;
+            white-space: nowrap;
         }
+        /* 筛选显隐按钮 */
+        .pw-wi-filter-toggle {
+            font-size: 0.8em;
+            cursor: pointer;
+            margin-left: auto;
+            margin-right: 10px;
+            opacity: 0.7;
+        }
+        .pw-wi-filter-toggle:hover { opacity: 1; }
     </style>
     `;
 
@@ -940,13 +953,15 @@ ${forcedStyles}
                 <div class="pw-tags-header">
                     <span class="pw-tags-label">
                         模版块 (点击填入) 
-                        <i class="fa-solid fa-angle-up" id="pw-toggle-chips-vis" style="margin-left:5px; cursor:pointer;" title="折叠/展开"></i>
+                        <!-- [需求 3] 使用记忆的状态图标 -->
+                        <i class="fa-solid ${chipsIcon}" id="pw-toggle-chips-vis" style="margin-left:5px; cursor:pointer;" title="折叠/展开"></i>
                     </span>
                     <div class="pw-tags-actions">
                         <span class="pw-tags-edit-toggle" id="pw-toggle-edit-template">编辑模版</span>
                     </div>
                 </div>
-                <div class="pw-tags-container" id="pw-template-chips"></div>
+                <!-- [需求 3] 使用记忆的显示状态 -->
+                <div class="pw-tags-container" id="pw-template-chips" style="display:${chipsDisplay};"></div>
                 
                 <div class="pw-template-editor-area" id="pw-template-editor">
                     <div class="pw-template-footer" style="border-top:none; border-bottom:1px solid var(--SmartThemeBorderColor); border-radius:6px 6px 0 0;">
@@ -1215,16 +1230,19 @@ function bindEvents() {
         }
     });
 
-    // [需求 5] 模版块折叠事件
+    // [需求 3] 模版块折叠事件 - 增加记忆
     $(document).on('click.pw', '#pw-toggle-chips-vis', function() {
         const $chips = $('#pw-template-chips');
         if ($chips.is(':visible')) {
             $chips.slideUp();
             $(this).removeClass('fa-angle-up').addClass('fa-angle-down');
+            uiStateCache.templateExpanded = false;
         } else {
             $chips.slideDown().css('display', 'flex');
             $(this).removeClass('fa-angle-down').addClass('fa-angle-up');
+            uiStateCache.templateExpanded = true;
         }
+        saveData(); // Save state immediately
     });
 
     // [需求 4] 恢复默认模版事件
@@ -1798,6 +1816,7 @@ const renderWiBooks = async () => {
                 <span style="flex:1; display:flex; align-items:center;">
                     <i class="fa-solid fa-book" style="margin-right:5px;"></i> ${book} ${isBound ? '<span class="pw-bound-status" style="margin-left:5px;">(已绑定)</span>' : ''}
                 </span>
+                <span class="pw-wi-filter-toggle" title="展开/收起筛选">🔍 筛选</span>
                 <div>${!isBound ? '<i class="fa-solid fa-times remove-book pw-remove-book-icon" title="移除"></i>' : ''}<i class="fa-solid fa-chevron-down arrow"></i></div>
             </div>
             <div class="pw-wi-list" data-book="${book}"></div>
@@ -1829,9 +1848,28 @@ const renderWiBooks = async () => {
 
         $el.find('.remove-book').on('click', (e) => { e.stopPropagation(); window.pwExtraBooks = window.pwExtraBooks.filter(b => b !== book); renderWiBooks(); });
         
+        // [需求 2] 筛选折叠事件
+        $el.find('.pw-wi-filter-toggle').on('click', function(e) {
+            e.stopPropagation();
+            const $list = $el.find('.pw-wi-list');
+            
+            // 如果列表未展开，先展开
+            if (!$list.is(':visible')) {
+                $el.find('.pw-wi-header').click();
+            }
+            
+            // 等待列表加载或直接切换
+            setTimeout(() => {
+                const $tools = $list.find('.pw-wi-depth-tools');
+                if($tools.length) {
+                    $tools.slideToggle();
+                }
+            }, 50);
+        });
+
         // 展开/折叠逻辑
         $el.find('.pw-wi-header').on('click', async function (e) {
-            if ($(e.target).hasClass('pw-wi-header-checkbox')) return; // 防止点checkbox触发折叠
+            if ($(e.target).hasClass('pw-wi-header-checkbox') || $(e.target).hasClass('pw-wi-filter-toggle')) return; 
 
             const $list = $el.find('.pw-wi-list');
             const $arrow = $(this).find('.arrow');
@@ -1852,19 +1890,22 @@ const renderWiBooks = async () => {
                     if (entries.length === 0) {
                         $list.html('<div style="padding:10px;opacity:0.5;">无条目</div>');
                     } else {
-                        // [需求 1] 位置+深度筛选
+                        // [需求 1 & 2] 位置+深度筛选，默认隐藏
                         const $tools = $(`
                         <div class="pw-wi-depth-tools">
                             <span style="opacity:0.7">筛选:</span>
                             <span style="font-size:0.8em; opacity:0.6; margin-left:5px;">位置</span>
                             <select id="p-select" class="pw-pos-select">
-                                <option value="99">全部</option>
-                                <option value="0">角色前</option>
-                                <option value="1">角色后</option>
-                                <option value="2">AN前</option>
-                                <option value="3">AN后</option>
-                                <option value="4">@深度</option>
-                                <option value="5">样例前后</option>
+                                <option value="unknown">全部</option>
+                                <option value="before_character_definition">Before Character Definition</option>
+                                <option value="after_character_definition">After Character Definition</option>
+                                <option value="before_author_note">Before Author's Note</option>
+                                <option value="after_author_note">After Author's Note</option>
+                                <option value="before_example_messages">Before Example Messages</option>
+                                <option value="after_example_messages">After Example Messages</option>
+                                <option value="at_depth_as_system">At Depth (System)</option>
+                                <option value="at_depth_as_assistant">At Depth (Assistant)</option>
+                                <option value="at_depth_as_user">At Depth (User)</option>
                             </select>
                             
                             <span style="font-size:0.8em; opacity:0.6; margin-left:5px;">深度</span>
@@ -1884,14 +1925,14 @@ const renderWiBooks = async () => {
                             const dMaxStr = $tools.find('#d-max').val();
                             const dMax = dMaxStr === "" ? 99999 : parseInt(dMaxStr);
                             
-                            const pVal = parseInt($tools.find('#p-select').val());
+                            const pVal = $tools.find('#p-select').val();
 
                             $list.find('.pw-wi-item').each(function() {
                                 const d = $(this).data('depth');
-                                const code = $(this).data('code'); // 获取位置代码
+                                const code = $(this).data('code'); // 获取位置代码字符串
                                 
                                 let posMatch = true;
-                                if (pVal !== 99) {
+                                if (pVal !== 'unknown') {
                                     posMatch = (code === pVal);
                                 }
 
@@ -1928,12 +1969,12 @@ const renderWiBooks = async () => {
                             
                             const checkedAttr = isChecked ? 'checked' : '';
                             
-                            // [需求 1] 显示 [位置:深度]
-                            const posName = getPosLabel(entry.position);
-                            const infoLabel = `<span class="pw-wi-info-badge" title="位置:深度">[${posName}:${entry.depth}]</span>`;
+                            // [需求 1] 显示 [缩写:深度]
+                            const posAbbr = getPosAbbr(entry.position);
+                            const infoLabel = `<span class="pw-wi-info-badge" title="位置:深度">[${posAbbr}:${entry.depth}]</span>`;
 
                             const $item = $(`
-                            <div class="pw-wi-item" data-depth="${entry.depth}" data-code="${entry.filterCode}" data-original-enabled="${entry.enabled}">
+                            <div class="pw-wi-item" data-depth="${entry.depth}" data-code="${getPosFilterCode(entry.position)}" data-original-enabled="${entry.enabled}">
                                 <div class="pw-wi-item-row">
                                     <input type="checkbox" class="pw-wi-check" value="${entry.uid}" ${checkedAttr} data-content="${encodeURIComponent(entry.content)}">
                                     <div style="font-weight:bold; font-size:0.9em; flex:1; display:flex; align-items:center;">
@@ -1992,5 +2033,5 @@ function addPersonaButton() {
 jQuery(async () => {
     addPersonaButton(); 
     bindEvents(); 
-    console.log("[PW] Persona Weaver Loaded (v7.4 - Fixed String Positions)");
+    console.log("[PW] Persona Weaver Loaded (v7.5 - WI Abbr Tags & UI Persistence)");
 });
