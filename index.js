@@ -109,7 +109,7 @@ Generate character details strictly in structured YAML format based on the [Trai
 4. Do NOT output status bars, progress bars, or Chain of Thought.
 5. Response: ONLY the YAML content.`;
 
-// [修改 4 & 5] 增强的模版生成 Prompt (中文 + 破限 + 空白结构)
+// [修改] 增强指令，中文输出，禁止废话，空白结构
 const defaultTemplateGenPrompt = 
 `You are an expert narrative designer for uncensored adult roleplay.
 Task: Create a blank User Persona Template (YAML format) tailored for a roleplay with the character "{{char}}".
@@ -130,7 +130,10 @@ Task: Create a blank User Persona Template (YAML format) tailored for a roleplay
 4. **CRITICAL: Leave all values BLANK**. Do NOT fill in specific character details. Use placeholders like "" or "(待填)".
    - BAD: "Age: 25"
    - GOOD: "年龄: "
-5. Do NOT include narrative headers like "# User Persona Template". Start directly with the YAML keys.
+5. **STRICTLY NO CONVERSATIONAL FILLER**.
+   - Do NOT say "Here is the template" or "Since you didn't provide info...".
+   - Do NOT include markdown title headers like "# Persona Template".
+   - **START OUTPUT DIRECTLY with the first YAML key.**
 6. Output ONLY valid YAML.
 
 [System Note]:
@@ -150,7 +153,7 @@ const TEXT = {
     TOAST_WI_SUCCESS: (book) => `已写入世界书: ${book}`,
     TOAST_WI_FAIL: "当前角色未绑定世界书，无法写入",
     TOAST_WI_ERROR: "TavernHelper API 未加载，无法操作世界书",
-    TOAST_SNAPSHOT: "已保存至记录", // [修改 2] 草稿 -> 记录
+    TOAST_SNAPSHOT: "已保存至记录", 
     TOAST_LOAD_CURRENT: "已读取当前酒馆人设内容"
 };
 
@@ -435,7 +438,7 @@ function saveHistory(item) {
         const userName = $('.persona_name').first().text().trim() || "User";
         const charName = context.characters[context.characterId]?.name || "Char";
         
-        // [修改 2] 根据类型生成默认标题
+        // [修改] 根据类型生成默认标题
         if (item.data && item.data.type === 'template') {
             item.title = `模版备份 (${charName})`;
         } else {
@@ -602,7 +605,7 @@ ${request}
     }
 }
 
-// [Updated] 支持 overridePrompt 用于模版生成
+// [修改] 确保模版生成也调用酒馆预设的破限，并过滤废话
 async function runGeneration(data, apiConfig, overridePrompt = null) {
     const context = getContext();
     const charId = context.characterId;
@@ -619,29 +622,34 @@ async function runGeneration(data, apiConfig, overridePrompt = null) {
         wiText = FICTION_SHIELD;
     }
 
+    // [新增] 统一获取酒馆预设的 Jailbreak
+    let headJailbreak = "";
+    try {
+        const settings = context.chatCompletionSettings;
+        if (settings && settings.jailbreak_toggle && settings.jailbreak_prompt) {
+            headJailbreak = settings.jailbreak_prompt;
+        }
+    } catch (e) { console.warn(e); }
+
     // 构建 Prompt
     let finalPrompt = "";
 
     if (overridePrompt) {
-        // [修改 4] 模版生成模式：确保包含必要的上下文
-        finalPrompt = overridePrompt
+        // [修改] 模版生成模式：包含破限
+        let corePrompt = overridePrompt
             .replace(/{{user}}/g, currentName)
             .replace(/{{char}}/g, charName)
             .replace(/{{charInfo}}/g, charInfoText)
             .replace(/{{wi}}/g, wiText);
+        
+        // 拼接破限
+        finalPrompt = headJailbreak ? `${headJailbreak}\n\n${corePrompt}` : corePrompt;
+
     } else {
         // [原有] 人设生成模式
         let greetingsText = data.greetingsText || "";
         let currentText = data.currentText || "";  
         let requestText = data.request || "";
-        
-        let headJailbreak = "";
-        try {
-            const settings = context.chatCompletionSettings;
-            if (settings && settings.jailbreak_toggle && settings.jailbreak_prompt) {
-                headJailbreak = settings.jailbreak_prompt;
-            }
-        } catch (e) { console.warn(e); }
 
         let finalPromptTemplate = promptsCache.initial || defaultSystemPromptInitial;
         let finalInputContent = wrapInputForSafety(requestText, currentText, data.mode === 'refine');
@@ -656,10 +664,11 @@ async function runGeneration(data, apiConfig, overridePrompt = null) {
             .replace(/{{input}}/g, finalInputContent)
             .replace(/{{current}}/g, "");
 
+        // 拼接破限
         finalPrompt = headJailbreak ? `${headJailbreak}\n\n${corePrompt}` : corePrompt;
     }
 
-    console.log(`[PW] Sending Prompt:\n`, finalPrompt);
+    console.log(`[PW] Sending Prompt (Jailbreak: ${!!headJailbreak}):\n`, finalPrompt);
     
     let responseContent = "";
     const controller = new AbortController();
@@ -748,6 +757,21 @@ async function runGeneration(data, apiConfig, overridePrompt = null) {
     }
 
     lastRawResponse = responseContent;
+
+    // [新增] 过滤废话：找到第一个像 YAML Key 的地方
+    const lines = responseContent.split('\n');
+    let startIndex = 0;
+    for(let i=0; i<lines.length; i++) {
+        // 匹配 "Key:" 或 "Key: " 且不在代码块里的，且不是常见的 Filler
+        if(lines[i].match(/^\s*[^:\s]+:/) && !lines[i].trim().startsWith('Here') && !lines[i].trim().startsWith('Sure')) {
+            startIndex = i;
+            break;
+        }
+    }
+    if(startIndex > 0) {
+        responseContent = lines.slice(startIndex).join('\n');
+    }
+
     return responseContent.replace(/```[a-z]*\n?/g, '').replace(/```/g, '').trim();
 }
 
@@ -791,7 +815,7 @@ async function openCreatorPopup() {
 
     const forcedStyles = `
     <style>
-        /* [修改 2] 记录页的标签样式 */
+        /* [修改] 记录页的标签样式 */
         .pw-badge {
             display: inline-block;
             padding: 2px 5px;
@@ -993,14 +1017,6 @@ async function openCreatorPopup() {
             background: rgba(131, 193, 104, 0.1);
         }
 
-        .pw-mini-btn.magic {
-            color: #d8b4fe !important;
-            border-color: #d8b4fe !important;
-        }
-        .pw-mini-btn.magic:hover {
-            background: rgba(216, 180, 254, 0.1) !important;
-        }
-
         .pw-wi-info-badge {
             font-size: 0.75em;
             background: rgba(255,255,255,0.1);
@@ -1037,7 +1053,7 @@ ${forcedStyles}
             <div class="pw-tab active" data-tab="editor">人设</div>
             <div class="pw-tab" data-tab="context">参考</div> 
             <div class="pw-tab" data-tab="api">API & Prompt</div>
-            <!-- [修改 2] 标签名 草稿 -> 记录 -->
+            <!-- [修改] 标签名 草稿 -> 记录 -->
             <div class="pw-tab" data-tab="history">记录</div>
         </div>
     </div>
@@ -1070,8 +1086,8 @@ ${forcedStyles}
                             <div class="pw-shortcut-btn" data-key="\n"><span>换行</span><span class="code">Enter</span></div>
                         </div>
                         <div style="display:flex; gap:5px;">
-                            <!-- [修改 3] 移除恢复默认按钮，整合 生成 和 保存 -->
-                            <button class="pw-mini-btn magic" id="pw-gen-template-smart" title="根据当前世界书和设定，生成定制化模版"><i class="fa-solid fa-wand-sparkles"></i> 智能生成模版</button>
+                            <!-- [修改] 移除恢复默认按钮，整合 生成 和 保存 -->
+                            <button class="pw-mini-btn" id="pw-gen-template-smart" title="根据当前世界书和设定，生成定制化模版"><i class="fa-solid fa-wand-sparkles"></i> 生成模板</button>
                             <button class="pw-mini-btn" id="pw-save-template">保存模版</button>
                         </div>
                     </div>
@@ -1388,7 +1404,7 @@ function bindEvents() {
         }
     });
 
-    // [修改 1] 保存模版：保存到加载项 并 保存到记录（草稿）
+    // [修改] 保存模版：保存到加载项 并 保存到记录（草稿）
     $(document).on('click.pw', '#pw-save-template', () => {
         const val = $('#pw-template-text').val();
         currentTemplate = val;
@@ -1403,7 +1419,7 @@ function bindEvents() {
             title: "", // 由 saveHistory 自动生成
             data: { 
                 resultText: val, 
-                type: 'template' // [修改 2] 标记类型
+                type: 'template' // [修改] 标记类型
             } 
         });
 
@@ -1784,7 +1800,7 @@ function bindEvents() {
             data: { 
                 name: "Persona", 
                 resultText: text || "(无)", 
-                type: 'persona' // [修改 2] 标记类型
+                type: 'persona' // [修改] 标记类型
             } 
         });
         toastr.success(TEXT.TOAST_SNAPSHOT);
@@ -1916,7 +1932,7 @@ const renderHistoryList = () => {
         const previewText = item.data.resultText || '无内容';
         const displayTitle = item.title || "User & Char";
 
-        // [修改 2] 渲染标签
+        // [修改] 渲染标签
         let badgeHtml = '';
         if (item.data && item.data.type === 'template') {
             badgeHtml = '<span class="pw-badge template">模版</span>';
