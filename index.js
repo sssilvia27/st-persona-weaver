@@ -127,15 +127,18 @@ const TEXT = {
     TOAST_LOAD_CURRENT: "已读取当前酒馆人设内容"
 };
 
-// [需求 1] 修复映射逻辑，位置+深度合并
+// [需求 1] 修复世界书映射：包含整数和字符串 Key
 const WI_POS_MAP = {
-    0: "定前", // Before Char Def
-    1: "定后", // After Char Def
-    2: "例前", // Before Example
-    3: "例后", // After Example
-    4: "注前", // Before AN
-    5: "注后", // After AN
-    6: "D"     // At Depth
+    // 整数 ID (旧版/部分API)
+    0: "定前", 1: "定后", 2: "例前", 3: "例后", 4: "注前", 5: "注后", 6: "深度",
+    // 字符串 ID (TavernHelper/Raw Data 常见)
+    "before_char_defs": "定前", "character_start": "定前",
+    "after_char_defs": "定后",  "character_end": "定后",
+    "before_example_messages": "例前",
+    "after_example_messages": "例后",
+    "before_author_note": "注前",
+    "after_author_note": "注后",
+    "at_depth_as_system": "深度", "at_depth_as_role": "深度", "at_depth": "深度"
 };
 
 let historyCache = [];
@@ -530,15 +533,14 @@ async function getWorldBookEntries(bookName) {
     return [];
 }
 
-// [需求 2] 构造去敏化的输入块 + 温和控制修改范围
+// [需求 2] 温和的修改限制指令
 function wrapInputForSafety(request, oldText, isRefine) {
     if (isRefine) {
         return `
 ### Revision Goals (Priority)
 ${request}
 
-### STRICT CONSTRAINT (Minimal Edit Policy)
-Only modify sections/sentences relevant to the goals. **Retain all other content, phrasing, and formatting exactly as in the Reference.** Do not rewrite unchanged parts.
+(Instruction: Only modify the specific fields mentioned above. Preserve all other fields, values, and phrasing from the Reference exactly as they are. Do not rephrase unrelated sections.)
 
 ---
 
@@ -842,6 +844,7 @@ async function openCreatorPopup() {
             transform: scale(1.2);
         }
 
+        /* [需求 1] 深度+位置工具栏 */
         .pw-wi-depth-tools {
             display: flex;
             align-items: center;
@@ -880,12 +883,20 @@ async function openCreatorPopup() {
         .pw-depth-btn:hover { 
             filter: brightness(1.1); 
         }
-        .pw-wi-info-badge {
+        .pw-wi-depth-badge {
             font-size: 0.75em;
             background: rgba(255,255,255,0.1);
             padding: 1px 4px;
             border-radius: 3px;
             color: #aaa;
+            margin-right: 5px;
+        }
+        .pw-wi-pos-badge {
+            font-size: 0.75em;
+            background: rgba(100,200,255,0.1);
+            padding: 1px 4px;
+            border-radius: 3px;
+            color: #8cc;
             margin-right: 5px;
         }
     </style>
@@ -1863,7 +1874,7 @@ const renderWiBooks = async () => {
 
                             $list.find('.pw-wi-item').each(function() {
                                 const d = $(this).data('depth');
-                                const p = $(this).data('position');
+                                const p = $(this).data('position-raw');
                                 
                                 const depthMatch = d >= dMin && d <= dMax;
                                 const posMatch = (pVal === -1) || (p === pVal);
@@ -1900,22 +1911,29 @@ const renderWiBooks = async () => {
                             }
                             
                             const checkedAttr = isChecked ? 'checked' : '';
+                            const depthLabel = `<span class="pw-wi-depth-badge" title="深度">[D:${entry.depth}]</span>`;
                             
-                            // [需求 1] 合并位置和深度显示
+                            // [需求 1] 位置简写徽章
                             const posShort = WI_POS_MAP[entry.position] || "未知";
-                            let infoLabel = "";
-                            if (entry.position === 6) { // At Depth
-                                infoLabel = `<span class="pw-wi-info-badge" title="位置: 指定深度">[D:${entry.depth}]</span>`;
-                            } else {
-                                infoLabel = `<span class="pw-wi-info-badge" title="位置: ${posShort}, 深度: ${entry.depth}">[${posShort}:${entry.depth}]</span>`;
-                            }
+                            const posLabel = `<span class="pw-wi-pos-badge" title="位置: ${entry.position}">[${posShort}]</span>`;
+
+                            // Map raw position back to 0-6 integer for filter logic if possible, else default
+                            let posInt = 0; 
+                            if (Number.isInteger(entry.position)) posInt = entry.position;
+                            else if (entry.position === 'before_char_defs') posInt = 0;
+                            else if (entry.position === 'after_char_defs') posInt = 1;
+                            else if (entry.position === 'before_example_messages') posInt = 2;
+                            else if (entry.position === 'after_example_messages') posInt = 3;
+                            else if (entry.position === 'before_author_note') posInt = 4;
+                            else if (entry.position === 'after_author_note') posInt = 5;
+                            else if (entry.position.toString().startsWith('at_depth')) posInt = 6;
 
                             const $item = $(`
-                            <div class="pw-wi-item" data-depth="${entry.depth}" data-position="${entry.position}" data-original-enabled="${entry.enabled}">
+                            <div class="pw-wi-item" data-depth="${entry.depth}" data-position-raw="${posInt}" data-original-enabled="${entry.enabled}">
                                 <div class="pw-wi-item-row">
                                     <input type="checkbox" class="pw-wi-check" value="${entry.uid}" ${checkedAttr} data-content="${encodeURIComponent(entry.content)}">
                                     <div style="font-weight:bold; font-size:0.9em; flex:1; display:flex; align-items:center;">
-                                        ${infoLabel} ${entry.displayName}
+                                        ${depthLabel} ${posLabel} ${entry.displayName}
                                     </div>
                                     <i class="fa-solid fa-eye pw-wi-toggle-icon"></i>
                                 </div>
@@ -1970,5 +1988,5 @@ function addPersonaButton() {
 jQuery(async () => {
     addPersonaButton(); 
     bindEvents(); 
-    console.log("[PW] Persona Weaver Loaded (v7.3 - Final Refinement & WI Fixes)");
+    console.log("[PW] Persona Weaver Loaded (v7.3 - WI Map Fix & Gentle Refine)");
 });
