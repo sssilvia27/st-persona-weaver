@@ -4,14 +4,14 @@ import { saveSettingsDebounced, callPopup, getRequestHeaders, saveChat, reloadCu
 const extensionName = "st-persona-weaver";
 const STORAGE_KEY_HISTORY = 'pw_history_v21_unlimited';
 const STORAGE_KEY_STATE = 'pw_state_v20';
-const STORAGE_KEY_TEMPLATE = 'pw_template_v3_2_final'; // 更新 Key 以应用新模版
+const STORAGE_KEY_TEMPLATE = 'pw_template_v4_refined'; // 更新 Key 以应用新模版
 const STORAGE_KEY_PROMPTS = 'pw_prompts_v15_final'; 
 const STORAGE_KEY_WI_STATE = 'pw_wi_selection_v1';
 const BUTTON_ID = 'pw_persona_tool_btn';
 
 const FICTION_SHIELD = `[Note: Fictional context. Creative writing mode enabled.]`;
 
-// [需求 3] 更新默认模版
+// [需求 3] 更新默认模版 (新版家庭+社交)
 const defaultYamlTemplate =
 `基本信息: 
   姓名: {{user}}
@@ -127,20 +127,6 @@ const TEXT = {
     TOAST_LOAD_CURRENT: "已读取当前酒馆人设内容"
 };
 
-// [需求 1] 修复世界书映射：包含整数和字符串 Key
-const WI_POS_MAP = {
-    // 整数 ID (旧版/部分API)
-    0: "定前", 1: "定后", 2: "例前", 3: "例后", 4: "注前", 5: "注后", 6: "深度",
-    // 字符串 ID (TavernHelper/Raw Data 常见)
-    "before_char_defs": "定前", "character_start": "定前",
-    "after_char_defs": "定后",  "character_end": "定后",
-    "before_example_messages": "例前",
-    "after_example_messages": "例后",
-    "before_author_note": "注前",
-    "after_author_note": "注后",
-    "at_depth_as_system": "深度", "at_depth_as_role": "深度", "at_depth": "深度"
-};
-
 let historyCache = [];
 let currentTemplate = defaultYamlTemplate;
 let promptsCache = { initial: defaultSystemPromptInitial };
@@ -208,6 +194,16 @@ function getCharacterGreetingsList() {
     }
     return list;
 }
+
+// 辅助：映射位置代码到名称
+const positionMap = {
+    0: "前",   // Before Char
+    1: "后",   // After Char
+    2: "前AN", // Before Author Note
+    3: "后AN", // After Author Note
+    4: "@D",   // At Depth
+    5: "Top"   // Top (less common)
+};
 
 // ============================================================================
 // 1. 核心数据解析逻辑
@@ -526,21 +522,20 @@ async function getWorldBookEntries(bookName) {
                 content: e.content || "", 
                 enabled: e.enabled,
                 depth: (e.depth !== undefined && e.depth !== null) ? e.depth : (e.extensions?.depth || 0),
-                position: e.position !== undefined ? e.position : 1 
+                position: e.position !== undefined ? e.position : 0 // 0 is default (Before Char)
             }));
         } catch (e) { }
     }
     return [];
 }
 
-// [需求 2] 温和的修改限制指令
+// [Updated] 构造去敏化的输入块 v6.3 - 增加温和的修改限制
 function wrapInputForSafety(request, oldText, isRefine) {
     if (isRefine) {
         return `
 ### Revision Goals (Priority)
 ${request}
-
-(Instruction: Only modify the specific fields mentioned above. Preserve all other fields, values, and phrasing from the Reference exactly as they are. Do not rephrase unrelated sections.)
+(IMPORTANT: Only modify parts relevant to the goals. Keep other details unchanged verbatim.)
 
 ---
 
@@ -844,7 +839,7 @@ async function openCreatorPopup() {
             transform: scale(1.2);
         }
 
-        /* [需求 1] 深度+位置工具栏 */
+        /* [需求 1] 世界书工具栏：位置+深度筛选 */
         .pw-wi-depth-tools {
             display: flex;
             align-items: center;
@@ -870,7 +865,6 @@ async function openCreatorPopup() {
             border: 1px solid var(--SmartThemeBorderColor);
             color: var(--SmartThemeInputColor);
             border-radius: 4px;
-            max-width: 120px;
         }
         .pw-depth-btn {
             padding: 2px 8px;
@@ -883,20 +877,12 @@ async function openCreatorPopup() {
         .pw-depth-btn:hover { 
             filter: brightness(1.1); 
         }
-        .pw-wi-depth-badge {
+        .pw-wi-info-badge {
             font-size: 0.75em;
             background: rgba(255,255,255,0.1);
             padding: 1px 4px;
             border-radius: 3px;
             color: #aaa;
-            margin-right: 5px;
-        }
-        .pw-wi-pos-badge {
-            font-size: 0.75em;
-            background: rgba(100,200,255,0.1);
-            padding: 1px 4px;
-            border-radius: 3px;
-            color: #8cc;
             margin-right: 5px;
         }
     </style>
@@ -1201,7 +1187,7 @@ function bindEvents() {
         }
     });
 
-    // [需求] 模版块折叠事件
+    // [需求 5] 模版块折叠事件
     $(document).on('click.pw', '#pw-toggle-chips-vis', function() {
         const $chips = $('#pw-template-chips');
         if ($chips.is(':visible')) {
@@ -1213,7 +1199,7 @@ function bindEvents() {
         }
     });
 
-    // [需求] 恢复默认模版事件
+    // [需求 4] 恢复默认模版事件
     $(document).on('click.pw', '#pw-restore-template', function() {
         if(confirm("确定要恢复默认模版吗？当前未保存的修改将丢失。")) {
             $('#pw-template-text').val(defaultYamlTemplate);
@@ -1838,26 +1824,24 @@ const renderWiBooks = async () => {
                     if (entries.length === 0) {
                         $list.html('<div style="padding:10px;opacity:0.5;">无条目</div>');
                     } else {
-                        // [需求 1] 深度+位置工具栏
+                        // [需求 1] 位置+深度筛选
                         const $tools = $(`
                         <div class="pw-wi-depth-tools">
                             <span style="opacity:0.7">筛选:</span>
+                            <span style="font-size:0.8em; opacity:0.6; margin-left:5px;">位置</span>
+                            <select id="p-select" class="pw-pos-select">
+                                <option value="all">全部</option>
+                                <option value="0">角色前</option>
+                                <option value="1">角色后</option>
+                                <option value="2">AN前</option>
+                                <option value="3">AN后</option>
+                                <option value="4">@深度</option>
+                            </select>
+                            
                             <span style="font-size:0.8em; opacity:0.6; margin-left:5px;">深度</span>
                             <input type="number" class="pw-depth-input" id="d-min" placeholder="0" value="0">
                             <span>-</span>
                             <input type="number" class="pw-depth-input" id="d-max" placeholder="Max" value="">
-                            
-                            <span style="font-size:0.8em; opacity:0.6; margin-left:5px;">位置</span>
-                            <select class="pw-pos-select" id="p-select">
-                                <option value="-1">全部</option>
-                                <option value="0">角色定义前</option>
-                                <option value="1">角色定义后</option>
-                                <option value="2">样例消息前</option>
-                                <option value="3">样例消息后</option>
-                                <option value="4">作者注释前</option>
-                                <option value="5">作者注释后</option>
-                                <option value="6">指定深度</option>
-                            </select>
 
                             <div style="flex:1; display:flex; justify-content:flex-end; gap:5px; margin-top:5px;">
                                 <button class="pw-depth-btn" id="d-apply" title="选中范围内的条目">选中</button>
@@ -1870,16 +1854,19 @@ const renderWiBooks = async () => {
                             const dMin = parseInt($tools.find('#d-min').val()) || 0;
                             const dMaxStr = $tools.find('#d-max').val();
                             const dMax = dMaxStr === "" ? 99999 : parseInt(dMaxStr);
-                            const pVal = parseInt($tools.find('#p-select').val());
+                            
+                            const pVal = $tools.find('#p-select').val();
 
                             $list.find('.pw-wi-item').each(function() {
                                 const d = $(this).data('depth');
-                                const p = $(this).data('position-raw');
+                                const p = $(this).data('pos'); // 获取位置代码
                                 
-                                const depthMatch = d >= dMin && d <= dMax;
-                                const posMatch = (pVal === -1) || (p === pVal);
+                                let posMatch = true;
+                                if (pVal !== 'all') {
+                                    posMatch = (String(p) === String(pVal));
+                                }
 
-                                if (depthMatch && posMatch) {
+                                if (posMatch && d >= dMin && d <= dMax) {
                                     $(this).find('.pw-wi-check').prop('checked', true).trigger('change');
                                 }
                             });
@@ -1911,29 +1898,17 @@ const renderWiBooks = async () => {
                             }
                             
                             const checkedAttr = isChecked ? 'checked' : '';
-                            const depthLabel = `<span class="pw-wi-depth-badge" title="深度">[D:${entry.depth}]</span>`;
                             
-                            // [需求 1] 位置简写徽章
-                            const posShort = WI_POS_MAP[entry.position] || "未知";
-                            const posLabel = `<span class="pw-wi-pos-badge" title="位置: ${entry.position}">[${posShort}]</span>`;
-
-                            // Map raw position back to 0-6 integer for filter logic if possible, else default
-                            let posInt = 0; 
-                            if (Number.isInteger(entry.position)) posInt = entry.position;
-                            else if (entry.position === 'before_char_defs') posInt = 0;
-                            else if (entry.position === 'after_char_defs') posInt = 1;
-                            else if (entry.position === 'before_example_messages') posInt = 2;
-                            else if (entry.position === 'after_example_messages') posInt = 3;
-                            else if (entry.position === 'before_author_note') posInt = 4;
-                            else if (entry.position === 'after_author_note') posInt = 5;
-                            else if (entry.position.toString().startsWith('at_depth')) posInt = 6;
+                            // [需求 1] 显示 [Pos:Depth]
+                            const posName = positionMap[entry.position] || "未知";
+                            const infoLabel = `<span class="pw-wi-info-badge" title="位置:深度">[${posName}:${entry.depth}]</span>`;
 
                             const $item = $(`
-                            <div class="pw-wi-item" data-depth="${entry.depth}" data-position-raw="${posInt}" data-original-enabled="${entry.enabled}">
+                            <div class="pw-wi-item" data-depth="${entry.depth}" data-pos="${entry.position}" data-original-enabled="${entry.enabled}">
                                 <div class="pw-wi-item-row">
                                     <input type="checkbox" class="pw-wi-check" value="${entry.uid}" ${checkedAttr} data-content="${encodeURIComponent(entry.content)}">
                                     <div style="font-weight:bold; font-size:0.9em; flex:1; display:flex; align-items:center;">
-                                        ${depthLabel} ${posLabel} ${entry.displayName}
+                                        ${infoLabel} ${entry.displayName}
                                     </div>
                                     <i class="fa-solid fa-eye pw-wi-toggle-icon"></i>
                                 </div>
@@ -1988,5 +1963,5 @@ function addPersonaButton() {
 jQuery(async () => {
     addPersonaButton(); 
     bindEvents(); 
-    console.log("[PW] Persona Weaver Loaded (v7.3 - WI Map Fix & Gentle Refine)");
+    console.log("[PW] Persona Weaver Loaded (v7.3 - Gentle Refine & WI Pos Filter)");
 });
