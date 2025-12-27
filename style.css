@@ -1,6 +1,6 @@
 /* =========================================
    File: style.css
-   Version: 1.5 (Fixes & Optimization)
+   Version: 1.6 (Restored Prompt Buttons)
 ========================================= */
 
 .pw-wrapper {
@@ -118,11 +118,58 @@
 }
 .pw-mini-btn:hover { opacity: 1; border-color: var(--pw-text-main); }
 
+/* =========================================
+   [NEW] Prompt Variable Buttons (System Tab)
+========================================= */
+.pw-var-btns {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 10px;
+}
+
+.pw-var-btn {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background: rgba(128, 128, 128, 0.1);
+    border: 1px solid var(--pw-border);
+    border-radius: 6px;
+    padding: 6px 12px;
+    cursor: pointer;
+    transition: all 0.2s;
+    flex: 1 0 auto;
+    min-width: 80px;
+    text-align: center;
+}
+
+.pw-var-btn:hover {
+    background: rgba(128, 128, 128, 0.2);
+    border-color: var(--pw-text-main);
+    transform: translateY(-1px);
+}
+
+.pw-var-btn span {
+    font-weight: bold;
+    font-size: 0.9em;
+    color: var(--pw-text-main);
+    line-height: 1.2;
+}
+
+.pw-var-btn .code {
+    font-family: monospace;
+    font-weight: normal;
+    opacity: 0.6;
+    font-size: 0.85em;
+    margin-top: 4px;
+}
+
 /* Template Editor */
 .pw-tags-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
 .pw-tags-label { 
     font-weight: bold; opacity: 0.8; font-size: 0.85em; color: var(--pw-text-main); 
-    cursor: pointer; user-select: none; /* Make clickable */
+    cursor: pointer; user-select: none;
 }
 .pw-tags-label:hover { opacity: 1; }
 
@@ -175,7 +222,7 @@
     overflow: visible; 
     text-overflow: clip; 
     white-space: normal; 
-    word-break: break-word; /* Ensure long words wrap */
+    word-break: break-word; 
     
     margin-right: 10px; 
     font-weight: bold;
