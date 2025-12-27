@@ -2367,4 +2367,3 @@ jQuery(async () => {
     loadThemeCSS('style.css'); // Default theme
     console.log("[PW] Persona Weaver Loaded (v11.4 - Restore Editor)");
 });
-```
