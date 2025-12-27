@@ -2,8 +2,10 @@ import { extension_settings, getContext } from "../../../extensions.js";
 import { saveSettingsDebounced, callPopup, getRequestHeaders, saveChat, reloadCurrentChat, saveCharacterDebounced } from "../../../../script.js";
 
 const extensionName = "st-persona-weaver";
-const CURRENT_VERSION = "1.0.0"; // 请确保这里的版本号与你 manifest.json 中的一致
-const UPDATE_CHECK_URL = "https://raw.githubusercontent.com/sisisisilviaxie-star/st-persona-weaver/sisisisilviaxie-star-main-dev/manifest.json"; // 检查更新的源文件
+const CURRENT_VERSION = "1.0.0"; // 【本地测试用】你可以保持这个为 1.0.0，然后在 GitHub 上把 version 改成 1.0.1 来触发更新提示
+
+// 【测试地址】指向你提供的 dev 分支
+const UPDATE_CHECK_URL = "https://raw.githubusercontent.com/sisisisilviaxie-star/st-persona-weaver/sisisisilviaxie-star-main-dev/manifest.json";
 
 const STORAGE_KEY_HISTORY = 'pw_history_v29_new_template'; 
 const STORAGE_KEY_STATE = 'pw_state_v20';
@@ -855,7 +857,7 @@ async function openCreatorPopup() {
     };
 
     const charName = getContext().characters[getContext().characterId]?.name || "None";
-    // [新功能] 标题增加 NEW 提醒
+    // 标题增加 NEW 提醒
     const newBadge = hasNewVersion ? `<span class="pw-badge-new" style="background:red; color:white; font-size:0.6em; vertical-align:super; padding:1px 3px; border-radius:4px; margin-left:2px; font-weight:bold;">NEW</span>` : '';
     const headerTitle = `${TEXT.PANEL_TITLE}${newBadge}<span class="pw-header-subtitle">User: ${currentName} & Char: ${charName}</span>`;
 
@@ -925,6 +927,27 @@ async function openCreatorPopup() {
         .pw-template-toolbar { display: flex; justify-content: flex-start; align-items: center; padding: 5px 10px; background: rgba(0,0,0,0.1); border-bottom: 1px solid var(--SmartThemeBorderColor); border-radius: 6px 6px 0 0; }
         .pw-template-footer { display: flex; justify-content: flex-end; align-items: center; padding: 5px 10px; background: rgba(0,0,0,0.1); border-top: 1px solid var(--SmartThemeBorderColor); border-radius: 0 0 6px 6px; gap: 8px; }
 
+        /* [新增] 适配酒馆主题的折叠栏样式 */
+        .pw-context-header {
+            background-color: var(--SmartThemeBtnBg);
+            color: var(--SmartThemeBtnText);
+            border: 1px solid var(--SmartThemeBorderColor);
+            padding: 8px 12px;
+            border-radius: 6px;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            transition: all 0.2s;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+        .pw-context-header:hover {
+            background-color: var(--SmartThemeBtnHoverBg);
+            filter: brightness(1.1);
+        }
+        .pw-context-header i { margin-right: 6px; }
+
         @media screen and (max-width: 600px) {
             .pw-row { flex-wrap: wrap; }
             .pw-row label { width: 100%; margin-bottom: 4px; }
@@ -934,7 +957,7 @@ async function openCreatorPopup() {
     </style>
     `;
 
-    // [新功能] 更新 UI 块
+    // 更新 UI 块
     const updateUiHtml = hasNewVersion 
     ? `
         <div id="pw-new-version-box" style="margin-top:10px; padding:15px; background:rgba(0,0,0,0.2); border: 1px solid var(--SmartThemeQuoteColor); border-radius: 6px;">
@@ -957,8 +980,8 @@ ${forcedStyles}
         <div class="pw-tabs">
             <div class="pw-tab active" data-tab="editor">人设</div>
             <div class="pw-tab" data-tab="context">参考</div> 
-            <div class="pw-tab" data-tab="api">API</div> <!-- 移除了 Prompt -->
-            <div class="pw-tab" data-tab="system">系统</div> <!-- 新增系统 Tab -->
+            <div class="pw-tab" data-tab="api">API</div>
+            <div class="pw-tab" data-tab="system">系统</div>
             <div class="pw-tab" data-tab="history">记录</div>
         </div>
     </div>
@@ -1117,7 +1140,7 @@ ${forcedStyles}
         </div>
     </div>
 
-    <!-- [新] System View -->
+    <!-- System View (新增) -->
     <div id="pw-view-system" class="pw-view">
         <div class="pw-scroll-area">
             
@@ -1130,7 +1153,7 @@ ${forcedStyles}
                 ${updateUiHtml}
             </div>
 
-            <!-- 2. Prompt 编辑区域 (Moved here) -->
+            <!-- 2. Prompt 编辑区域 (使用新样式) -->
             <div class="pw-card-section">
                 <div class="pw-context-header" id="pw-prompt-header">
                     <span><i class="fa-solid fa-terminal"></i> Prompt 查看与编辑 (User Prompt)</span>
@@ -1161,14 +1184,14 @@ ${forcedStyles}
                 </div>
             </div>
 
-            <!-- 3. Debug 预览区域 (Moved here & Updated) -->
-            <div class="pw-card-section" style="border-top: 1px solid var(--SmartThemeBorderColor); margin-top: 10px; padding-top: 10px;">
-                <div class="pw-context-header" id="pw-debug-header" style="cursor: pointer; display: flex; justify-content: space-between; align-items: center;">
+            <!-- 3. Debug 预览区域 (使用新样式) -->
+            <div class="pw-card-section" style="margin-top: 10px;">
+                <div class="pw-context-header" id="pw-debug-header">
                     <label style="color: var(--SmartThemeQuoteColor); cursor: pointer; margin: 0;"><i class="fa-solid fa-bug"></i> 实时发送内容预览 (Debug)</label>
                     <i class="fa-solid fa-chevron-down arrow"></i>
                 </div>
                 
-                <div id="pw-debug-container" style="display:none; margin-top:10px;">
+                <div id="pw-debug-container" style="display:none; margin-top:5px; padding: 10px; border: 1px solid var(--SmartThemeBorderColor); border-radius: 6px; background: rgba(0,0,0,0.1);">
                     <div style="font-size: 0.8em; opacity: 0.7; margin-bottom: 5px;">点击“生成设定”后，下方将显示实际发给 AI 的完整内容。</div>
                     <textarea id="pw-debug-preview" class="pw-textarea" readonly style="
                         min-height: 250px; 
@@ -1178,6 +1201,7 @@ ${forcedStyles}
                         background: var(--SmartThemeInputBg); 
                         color: var(--SmartThemeBodyColor); 
                         border: 1px solid var(--SmartThemeBorderColor);
+                        width: 100%;
                     " placeholder="等待生成..."></textarea>
                 </div>
             </div>
@@ -1189,7 +1213,7 @@ ${forcedStyles}
 </div>
 `;
 
-    // [变更1] 将 Close 按钮文本修改为 Close
+    // 确认关闭按钮为 "Close"
     callPopup(html, 'text', '', { wide: true, large: true, okButton: "Close" });
 
     // 初始化 Prompt 编辑器内容
