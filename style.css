@@ -1,6 +1,6 @@
 /* =========================================
    File: style.css
-   Version: 1.8 (Ultra Compact / Tag Style)
+   Version: 1.7 (Compact & Exquisite Buttons)
 ========================================= */
 
 .pw-wrapper {
@@ -119,14 +119,13 @@
 .pw-mini-btn:hover { opacity: 1; border-color: var(--pw-text-main); }
 
 /* =========================================
-   [FIXED v1.8] Prompt Buttons (Tag Style)
+   [FIXED] Prompt Variable Buttons (Small & Exquisite)
 ========================================= */
 .pw-var-btns {
     display: flex;
     flex-wrap: wrap;
-    gap: 4px; /* 间距非常紧凑 */
+    gap: 6px; /* 更紧凑的间距 */
     margin-bottom: 10px;
-    justify-content: flex-start;
 }
 
 .pw-var-btn {
@@ -134,17 +133,16 @@
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    background: rgba(128, 128, 128, 0.08);
+    background: rgba(128, 128, 128, 0.08); /* 更淡的背景 */
     border: 1px solid var(--pw-border);
-    border-radius: 3px; /* 边角稍微方一点 */
-    padding: 2px 6px; /* 极小的内边距 */
+    border-radius: 4px; /* 更小的圆角 */
+    padding: 4px 8px; /* 缩小内边距 */
     cursor: pointer;
     transition: all 0.2s;
-    flex: 0 0 auto;
-    width: auto;
-    min-width: 0;
+    /* 关键修改：取消拉伸，宽度自适应 */
+    flex: 0 0 auto; 
+    min-width: auto;
     user-select: none;
-    line-height: 1;
 }
 
 .pw-var-btn:hover {
@@ -155,7 +153,7 @@
 
 .pw-var-btn span {
     font-weight: bold;
-    font-size: 0.75em; /* 字体更小 */
+    font-size: 0.8em; /* 缩小字体 */
     color: var(--pw-text-main);
     line-height: 1.1;
     opacity: 0.9;
@@ -164,9 +162,9 @@
 .pw-var-btn .code {
     font-family: monospace;
     font-weight: normal;
-    opacity: 0.5;
-    font-size: 0.65em; /* 代码字体非常小 */
-    margin-top: 0px; /* 紧贴上方文字 */
+    opacity: 0.5; /* 降低代码透明度，突出标题 */
+    font-size: 0.75em; /* 代码字体更小 */
+    margin-top: 2px;
 }
 
 /* Template Editor */
