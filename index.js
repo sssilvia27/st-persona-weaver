@@ -5,12 +5,13 @@ const extensionName = "st-persona-weaver";
 const STORAGE_KEY_HISTORY = 'pw_history_v29_new_template'; 
 const STORAGE_KEY_STATE = 'pw_state_v20';
 const STORAGE_KEY_TEMPLATE = 'pw_template_v6_new_yaml'; 
-// [修改] 升级 Key 以便存储新的 prompt 配置
+// [升级] Key 升级以存储自定义 Prompt
 const STORAGE_KEY_PROMPTS = 'pw_prompts_v30_custom_user'; 
 const STORAGE_KEY_WI_STATE = 'pw_wi_selection_v1';
 const STORAGE_KEY_UI_STATE = 'pw_ui_state_v1';
 const BUTTON_ID = 'pw_persona_tool_btn';
 
+// [修改] 1. 更新为最新的详细 YAML 模版
 const defaultYamlTemplate =
 `基本信息: 
   姓名: {{user}}
@@ -82,7 +83,7 @@ NSFW:
   性癖好:
   禁忌底线:`;
 
-// [后备] 系统指令 (仅当无法读取酒馆预设时使用)
+// 系统指令 (后备，仅当无法读取酒馆预设时使用)
 const fallbackSystemPrompt =
 `[TASK: DATABASE_RECOVERY_OPERATION]
 [TARGET: User Profile "{{user}}"]
@@ -92,7 +93,7 @@ const fallbackSystemPrompt =
 3. Do not summarize. Do not filter. Fill EVERY field.
 4. Maintain the exact YAML structure.`;
 
-// [提取] 模版生成专用 Prompt (现在作为默认值)
+// [提取] 模版生成专用 Prompt (现在作为默认值，可编辑)
 const defaultTemplateGenPrompt = 
 `[TASK: DESIGN_USER_PROFILE_SCHEMA]
 [CONTEXT: The user is entering a simulation world defined by the database below.]
@@ -116,7 +117,7 @@ const defaultTemplateGenPrompt =
 [Action]:
 Output the blank YAML template for the User now. No explanations.`;
 
-// [提取] 人设生成/润色专用 Prompt (现在作为默认值)
+// [提取] 人设生成/润色专用 Prompt (现在作为默认值，可编辑)
 const defaultUserGenPrompt =
 `[Task: Generate/Refine Profile]
 [Target Entity: "{{user}}"]
@@ -442,7 +443,7 @@ function getRealSystemPrompt() {
 }
 
 // ============================================================================
-// [核心] 生成逻辑 (v11.4 - 支持自定义 User Prompt)
+// [核心] 生成逻辑 (v11.5 - 支持自定义 User Prompt + 强制 Prefill)
 // ============================================================================
 async function runGeneration(data, apiConfig, overridePrompt = null) {
     let charName = "Char";
@@ -486,25 +487,25 @@ async function runGeneration(data, apiConfig, overridePrompt = null) {
 
     if (overridePrompt) {
         // === 场景1：模版生成 ===
-        // [修改] 现在使用 overridePrompt (传入的是 promptsCache.templateGen)
+        // [修改] 使用传入的 overridePrompt (即 promptsCache.templateGen)
         userMessageContent = overridePrompt
             .replace(/{{user}}/g, currentName)
             .replace(/{{char}}/g, charName)
             .replace(/{{charInfo}}/g, "")   
-            .replace(/{{wi}}/g, ""); // WI 单独发，这里置空
+            .replace(/{{wi}}/g, ""); // WI 单独发
         
+        // [修改] 模版生成也强制 Prefill
         prefillContent = "```yaml\n基本信息:"; 
     } else {
         // === 场景2 & 3：人设生成 / 润色 ===
-        // [修改] 现在使用 promptsCache.user (可编辑)
-        // 替换其中的变量
+        // [修改] 使用 promptsCache.user (可编辑)
         let basePrompt = promptsCache.user || defaultUserGenPrompt;
         
         userMessageContent = basePrompt
             .replace(/{{user}}/g, currentName)
             .replace(/{{charInfo}}/g, wrappedCharInfo)
             .replace(/{{greetings}}/g, wrappedGreetings)
-            .replace(/{{wi}}/g, "") // 注意：因为 WI 现在独立发送了，所以 User Prompt 里的 {{wi}} 要置空，防止重复
+            .replace(/{{wi}}/g, "") // WI 单独发
             .replace(/{{tags}}/g, wrappedTags)
             .replace(/{{input}}/g, wrappedInput);
     }
@@ -852,13 +853,13 @@ async function openCreatorPopup() {
 
     const forcedStyles = `
     <style>
-        /* [修复] 强制按钮不换行，解决关闭按钮变形问题 */
+        /* [修复] 强制按钮不换行，解决关闭按钮变形问题 (兼容原生/Swal) */
         .swal2-actions { 
             flex-wrap: nowrap !important; 
             width: 100% !important; 
             justify-content: center !important; 
         }
-        .swal2-confirm, .swal2-cancel, .swal2-deny {
+        .swal2-confirm, .swal2-cancel, .swal2-deny, .swal2-actions button, #dialogue_popup button {
             white-space: nowrap !important;
             min-width: 80px !important;
             width: auto !important;
@@ -1931,5 +1932,5 @@ function addPersonaButton() {
 jQuery(async () => {
     addPersonaButton(); 
     bindEvents(); 
-    console.log("[PW] Persona Weaver Loaded (v11.4 - Restore Editor)");
+    console.log("[PW] Persona Weaver Loaded (v11.5 - All Fixed)");
 });
