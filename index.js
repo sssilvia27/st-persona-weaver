@@ -2,7 +2,7 @@ import { extension_settings, getContext } from "../../../extensions.js";
 import { saveSettingsDebounced, callPopup, getRequestHeaders, saveChat, reloadCurrentChat, saveCharacterDebounced } from "../../../../script.js";
 
 const extensionName = "st-persona-weaver";
-const CURRENT_VERSION = "1.0.0"; // 本地版本号
+const CURRENT_VERSION = "1.5.0"; 
 
 // 【测试地址】
 const UPDATE_CHECK_URL = "https://raw.githubusercontent.com/sisisisilviaxie-star/st-persona-weaver/sisisisilviaxie-star-main-dev/manifest.json";
@@ -16,7 +16,7 @@ const STORAGE_KEY_UI_STATE = 'pw_ui_state_v1';
 const STORAGE_KEY_THEMES = 'pw_custom_themes_v1'; 
 const BUTTON_ID = 'pw_persona_tool_btn';
 
-const HISTORY_PER_PAGE = 20;
+const HISTORY_PER_PAGE = 20; // 20 items per page
 
 // 1. 默认 User 模版
 const defaultYamlTemplate =
@@ -672,7 +672,7 @@ function saveData() {
 }
 
 function saveHistory(item) {
-    const limit = 1000; 
+    const limit = 1000; // Hardcoded safety limit to prevent 10-item cap issues
 
     if (!item.title || item.title === "未命名") {
         const context = getContext();
@@ -834,11 +834,10 @@ async function getWorldBookEntries(bookName) {
 async function openCreatorPopup() {
     const context = getContext();
     loadData();
-    // [Performance Fix] 移除 await，直接后台加载
-    // await loadAvailableWorldBooks(); 
 
-    // [Performance Fix] 检查更新也移到后面
-    // const updateInfo = await checkForUpdates();
+    // --- Async Update Check (Performance Fix) ---
+    hasNewVersion = false; 
+    let updatePromise = checkForUpdates(); // Start check but don't await
 
     const savedState = loadState();
     const config = { ...defaultSettings, ...extension_settings[extensionName], ...savedState.localConfig };
@@ -857,26 +856,18 @@ async function openCreatorPopup() {
         shouldShowResult = true;
     }
 
-    // 默认显示正在加载
-    const renderBookOptions = () => `<option disabled>正在加载...</option>`;
-
     const charName = getContext().characters[getContext().characterId]?.name || "None";
     
-    // NEW 标记初始隐藏
-    const newBadge = `<span id="pw-new-badge" title="点击查看更新" style="cursor:pointer; color:#ff4444; font-size:0.6em; font-weight:bold; vertical-align: super; margin-left: 2px; display:none;">NEW</span>`;
+    // NEW Badge hidden by default, shown via async update
+    const newBadge = `<span id="pw-new-badge" title="点击查看更新" style="display:none; cursor:pointer; color:#ff4444; font-size:0.6em; font-weight:bold; vertical-align: super; margin-left: 2px;">NEW</span>`;
     const headerTitle = `${TEXT.PANEL_TITLE}${newBadge}<span class="pw-header-subtitle">User: ${currentName} & Char: ${charName}</span>`;
 
     const chipsDisplay = uiStateCache.templateExpanded ? 'flex' : 'none';
     const chipsIcon = uiStateCache.templateExpanded ? 'fa-angle-up' : 'fa-angle-down';
 
-    // [修改] Update UI 初始状态
-    const updateUiHtml = `
-        <div id="pw-update-area">
-            <div style="margin-top:10px; opacity:0.6; font-size:0.9em;"><i class="fa-solid fa-spinner fa-spin"></i> 正在检查更新...</div>
-        </div>
-    `;
+    // Update UI Container Placeholder
+    const updateUiHtml = `<div id="pw-update-container"><div style="margin-top:10px; opacity:0.6; font-size:0.9em;"><i class="fas fa-spinner fa-spin"></i> 正在检查更新...</div></div>`;
 
-    // 移除内联 CSS，现在由外部文件控制
     const html = `
 <div class="pw-wrapper">
     <div class="pw-header">
@@ -900,9 +891,10 @@ async function openCreatorPopup() {
 
             <div>
                 <div class="pw-tags-header">
-                    <span class="pw-tags-label">
+                    <!-- [Fix] Clickable text block -->
+                    <span class="pw-tags-label" id="pw-template-block-header" style="cursor:pointer; user-select:none;">
                         模版块 (点击填入) 
-                        <i class="fa-solid ${chipsIcon}" id="pw-toggle-chips-vis" style="margin-left:5px; cursor:pointer;" title="折叠/展开"></i>
+                        <i class="fa-solid ${chipsIcon}" style="margin-left:5px;" title="折叠/展开"></i>
                     </span>
                     <div class="pw-tags-actions">
                         <span class="pw-tags-edit-toggle" id="pw-toggle-edit-template">编辑模版</span>
@@ -998,7 +990,8 @@ async function openCreatorPopup() {
             <div class="pw-card-section">
                 <div class="pw-row">
                     <label class="pw-section-label pw-label-gold">角色开场白</label>
-                    <select id="pw-greetings-select" class="pw-input" style="flex:1;">
+                    <!-- [Fix] Width removed max-width -->
+                    <select id="pw-greetings-select" class="pw-input" style="flex:1; width:100%;">
                         <option value="">(不使用开场白)</option>
                     </select>
                 </div>
@@ -1068,7 +1061,6 @@ async function openCreatorPopup() {
                         <input type="file" id="pw-theme-import" accept=".css" style="display:none;">
                         <button class="pw-btn primary" id="pw-btn-import-theme" title="导入本地 .css 文件" style="padding:6px 10px;"><i class="fa-solid fa-file-import"></i></button>
                         
-                        <!-- [NEW] Download Template Button -->
                         <button class="pw-btn primary" id="pw-btn-download-template" title="下载主题模版" style="padding:6px 10px;"><i class="fa-solid fa-download"></i></button>
                     </div>
                 </div>
@@ -1099,16 +1091,14 @@ async function openCreatorPopup() {
                     <textarea id="pw-prompt-editor" class="pw-textarea pw-auto-height" style="min-height:150px; font-size:0.85em;"></textarea>
                     
                     <div style="text-align:right; margin-top:10px; display:flex; gap:10px; justify-content:flex-end; border-top: 1px solid rgba(0,0,0,0.1); padding-top: 10px;">
-                        <!-- Debug 切换按钮 -->
                         <button class="pw-mini-btn" id="pw-toggle-debug-btn" style="margin-right:auto;"><i class="fa-solid fa-bug"></i> Debug</button>
-                        
                         <button class="pw-mini-btn" id="pw-reset-prompt" style="font-size:0.8em;">恢复默认</button>
                         <button id="pw-api-save" class="pw-btn primary" style="width:auto; padding: 5px 20px;">保存 Prompt</button>
                     </div>
                 </div>
             </div>
 
-            <!-- 3. Debug 预览区域 (默认隐藏，无折叠头，纯标签) -->
+            <!-- 3. Debug 预览区域 -->
             <div id="pw-debug-wrapper" class="pw-card-section" style="display:none; margin-top: 10px; border-top: 1px solid var(--SmartThemeBorderColor); padding-top: 10px;">
                 <div style="margin-bottom: 5px;">
                     <label style="color: var(--SmartThemeQuoteColor); font-weight:bold;"><i class="fa-solid fa-bug"></i> 实时发送内容预览 (Debug)</label>
@@ -1155,36 +1145,37 @@ async function openCreatorPopup() {
     // 确认关闭按钮为 "Close"
     callPopup(html, 'text', '', { wide: true, large: true, okButton: "Close" });
 
+    // Handle Async Update Result
+    updatePromise.then(updateInfo => {
+        hasNewVersion = !!updateInfo;
+        const $container = $('#pw-update-container');
+        const $badge = $('#pw-new-badge');
+
+        if (hasNewVersion) {
+            $badge.show(); // Show Header NEW
+            const html = `
+                <div id="pw-new-version-box" style="margin-top:10px; padding:15px; background:rgba(0,0,0,0.2); border: 1px solid var(--SmartThemeQuoteColor); border-radius: 6px;">
+                    <div style="font-weight:bold; color:var(--SmartThemeQuoteColor); margin-bottom:8px;">
+                        <i class="fa-solid fa-cloud-arrow-down"></i> 发现新版本: v${updateInfo.version}
+                    </div>
+                    <div id="pw-update-notes" style="font-size:0.9em; margin-bottom:10px; white-space: pre-wrap; color: var(--SmartThemeBodyColor); opacity: 0.9;">${updateInfo.notes || "无更新说明"}</div>
+                    <button id="pw-btn-update" class="pw-btn primary" style="width:100%;">立即更新</button>
+                </div>`;
+            $container.html(html);
+        } else {
+            $container.html(`<div style="margin-top:10px; opacity:0.6; font-size:0.9em;"><i class="fa-solid fa-check"></i> 当前已是最新版本</div>`);
+        }
+    });
+
     // 初始化
     $('#pw-prompt-editor').val(promptsCache.personaGen);
     renderTemplateChips();
-    
-    // [Performance Fix] 异步加载世界书
+    // [Performance Fix] Run this Async
     loadAvailableWorldBooks().then(() => {
         renderWiBooks();
         // Update WI Select placeholder
         const options = availableWorldBooks.length > 0 ? availableWorldBooks.map(b => `<option value="${b}">${b}</option>`).join('') : `<option disabled>未找到世界书</option>`;
         $('#pw-wi-select').html(`<option value="">-- 添加参考/目标世界书 --</option>${options}`);
-    });
-
-    // [Async Update Check]
-    checkForUpdates().then(info => {
-        if (info) {
-            hasNewVersion = true;
-            $('#pw-new-badge').show();
-            // 动态更新 System Tab 内容
-            const newHtml = `
-            <div id="pw-new-version-box" style="margin-top:10px; padding:15px; background:rgba(0,0,0,0.2); border: 1px solid var(--SmartThemeQuoteColor); border-radius: 6px;">
-                <div style="font-weight:bold; color:var(--SmartThemeQuoteColor); margin-bottom:8px;">
-                    <i class="fa-solid fa-cloud-arrow-down"></i> 发现新版本: v${info.version}
-                </div>
-                <div id="pw-update-notes" style="font-size:0.9em; margin-bottom:10px; white-space: pre-wrap; color: var(--SmartThemeBodyColor); opacity: 0.9;">${info.notes || "无更新说明"}</div>
-                <button id="pw-btn-update" class="pw-btn primary" style="width:100%;">立即更新</button>
-            </div>`;
-            $('#pw-update-area').html(newHtml);
-        } else {
-            $('#pw-update-area').html(`<div style="margin-top:10px; opacity:0.6; font-size:0.9em;"><i class="fa-solid fa-check"></i> 当前已是最新版本</div>`);
-        }
     });
     
     renderGreetingsList();
@@ -1298,29 +1289,28 @@ function bindEvents() {
 
     // --- [New] Download Theme Template ---
     $(document).on('click.pw', '#pw-btn-download-template', function() {
-        const path = `scripts/extensions/third-party/${extensionName}/style.css`;
-        
-        fetch(path)
-            .then(response => {
-                if (!response.ok) throw new Error("无法读取 style.css");
-                return response.text();
-            })
-            .then(text => {
-                const blob = new Blob([text], { type: "text/css" });
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement("a");
-                a.href = url;
-                a.download = "pw_theme_template.css";
-                document.body.appendChild(a);
-                a.click();
-                document.body.removeChild(a);
-                URL.revokeObjectURL(url);
-                toastr.success("模版已下载");
-            })
-            .catch(err => {
-                console.error(err);
-                toastr.error("下载失败，请检查文件路径");
-            });
+        const template = `/* Persona Weaver Theme Template */
+.pw-wrapper {
+    /* Main Text Color */
+    --pw-text-main: #e0e0e0;
+    /* Border Color */
+    --pw-border: #444;
+    /* Input/Paper Background */
+    --pw-paper-bg: rgba(0, 0, 0, 0.2);
+    /* Danger Color (Red) */
+    --pw-danger: #ff6b6b;
+}
+/* Add more overrides below... */
+`;
+        const blob = new Blob([template], { type: "text/css" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "pw_theme_template.css";
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
     });
 
     // --- Theme Selector Logic ---
@@ -1405,15 +1395,17 @@ function bindEvents() {
         }
     });
 
-    $(document).on('click.pw', '#pw-toggle-chips-vis', function() {
+    // [Fix] Click text block to toggle
+    $(document).on('click.pw', '#pw-template-block-header', function() {
         const $chips = $('#pw-template-chips');
+        const $icon = $(this).find('i');
         if ($chips.is(':visible')) {
             $chips.slideUp();
-            $(this).removeClass('fa-angle-up').addClass('fa-angle-down');
+            $icon.removeClass('fa-angle-up').addClass('fa-angle-down');
             uiStateCache.templateExpanded = false;
         } else {
             $chips.slideDown().css('display', 'flex');
-            $(this).removeClass('fa-angle-down').addClass('fa-angle-up');
+            $icon.removeClass('fa-angle-down').addClass('fa-angle-up');
             uiStateCache.templateExpanded = true;
         }
         saveData(); 
@@ -1972,13 +1964,17 @@ function bindEvents() {
 
 // 动态加载外部 CSS 文件
 function loadThemeCSS(fileName) {
+    // [Fix] Add version query to bust cache
+    const versionQuery = `?v=${CURRENT_VERSION}`; 
+    const href = `scripts/extensions/third-party/${extensionName}/${fileName}${versionQuery}`;
+
     if ($('#pw-style-link').length) {
-        $('#pw-style-link').attr('href', `scripts/extensions/third-party/${extensionName}/${fileName}`);
+        $('#pw-style-link').attr('href', href);
     } else {
         $('<link>')
             .attr('rel', 'stylesheet')
             .attr('type', 'text/css')
-            .attr('href', `scripts/extensions/third-party/${extensionName}/${fileName}`)
+            .attr('href', href)
             .attr('id', 'pw-style-link')
             .appendTo('head');
     }
@@ -2121,6 +2117,7 @@ const renderWiBooks = async () => {
         <div class="pw-wi-book">
             <div class="pw-wi-header" style="display:flex; align-items:center;">
                 <input type="checkbox" class="pw-wi-header-checkbox pw-wi-select-all" title="全选/全不选 (仅选中当前可见条目)">
+                <!-- [Fix] Added word-break logic via CSS -->
                 <span class="pw-wi-book-title">
                     ${book} ${isBound ? '<span class="pw-bound-status">(已绑定)</span>' : ''}
                 </span>
@@ -2189,6 +2186,8 @@ const renderWiBooks = async () => {
                     $list.empty();
                     
                     if (entries.length === 0) {
+                        $list.html('<div style="padding:10px;opacity:0.5;">无条目</div>');
+                    } else {
                         // [Layout Fix] 3 Rows Structure
                         const $tools = $(`
                         <div class="pw-wi-depth-tools">
@@ -2365,5 +2364,5 @@ jQuery(async () => {
     addPersonaButton(); 
     bindEvents(); 
     loadThemeCSS('style.css'); // Default theme
-    console.log("[PW] Persona Weaver Loaded (v11.4 - Restore Editor)");
+    console.log("[PW] Persona Weaver Loaded (v1.5 - Optimized)");
 });
