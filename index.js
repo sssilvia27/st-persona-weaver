@@ -2,7 +2,7 @@ import { extension_settings, getContext } from "../../../extensions.js";
 import { saveSettingsDebounced, callPopup, getRequestHeaders, saveChat, reloadCurrentChat, saveCharacterDebounced } from "../../../../script.js";
 
 const extensionName = "st-persona-weaver";
-const STORAGE_KEY_HISTORY = 'pw_history_v28_prefill_force'; // 升级版本号
+const STORAGE_KEY_HISTORY = 'pw_history_v28_prefill_force'; 
 const STORAGE_KEY_STATE = 'pw_state_v20';
 const STORAGE_KEY_TEMPLATE = 'pw_template_v5_data_schema'; 
 const STORAGE_KEY_PROMPTS = 'pw_prompts_v20_db_recovery'; 
@@ -60,7 +60,7 @@ const defaultYamlTemplate =
   兴奋阈值:
   禁忌边界:`;
 
-// 系统指令 (后备)
+// 系统指令 (后备，仅在读取不到酒馆预设时使用)
 const fallbackSystemPrompt =
 `[TASK: DATABASE_RECOVERY_OPERATION]
 [TARGET: User Profile "{{user}}"]
@@ -144,9 +144,26 @@ ${content}
 """`;
 }
 
+// [修改] 使用 TavernHelper 获取实时角色数据
 function getCharacterInfoText() {
+    // 优先使用 TavernHelper
+    if (window.TavernHelper && window.TavernHelper.getCharData) {
+        const charData = window.TavernHelper.getCharData('current');
+        if (!charData) return "";
+
+        let text = "";
+        const MAX_FIELD_LENGTH = 1000000; 
+        
+        if (charData.description) text += `Description:\n${charData.description.substring(0, MAX_FIELD_LENGTH)}\n`;
+        if (charData.personality) text += `Personality:\n${charData.personality.substring(0, MAX_FIELD_LENGTH)}\n`;
+        if (charData.scenario) text += `Scenario:\n${charData.scenario.substring(0, MAX_FIELD_LENGTH)}\n`;
+        
+        return text;
+    }
+
+    // 后备方案
     const context = getContext();
-    const charId = context.characterId;
+    const charId = SillyTavern.getCurrentChatId ? SillyTavern.characterId : context.characterId;
     if (charId === undefined || !context.characters[charId]) return "";
 
     const char = context.characters[charId];
@@ -154,7 +171,6 @@ function getCharacterInfoText() {
 
     let text = "";
     const MAX_FIELD_LENGTH = 1000000; 
-
     if (data.description) text += `Description:\n${data.description.substring(0, MAX_FIELD_LENGTH)}\n`;
     if (data.personality) text += `Personality:\n${data.personality.substring(0, MAX_FIELD_LENGTH)}\n`;
     if (data.scenario) text += `Scenario:\n${data.scenario.substring(0, MAX_FIELD_LENGTH)}\n`;
@@ -180,6 +196,46 @@ function getCharacterGreetingsList() {
         });
     }
     return list;
+}
+
+// ============================================================================
+// [新增] 获取真实 System Prompt (破限)
+// ============================================================================
+function getRealSystemPrompt() {
+    // 1. 尝试使用 TavernHelper 获取当前预设 (最准确，包含 Main, NSFW, Jailbreak)
+    if (window.TavernHelper && typeof window.TavernHelper.getPreset === 'function') {
+        try {
+            const preset = window.TavernHelper.getPreset('in_use');
+            if (preset && preset.prompts) {
+                const systemParts = preset.prompts
+                    .filter(p => p.enabled && (
+                        p.role === 'system' || 
+                        ['main', 'jailbreak', 'nsfw', 'jailbreak_prompt', 'main_prompt'].includes(p.id)
+                    ))
+                    .map(p => p.content)
+                    .join('\n\n');
+
+                if (systemParts && systemParts.trim().length > 0) {
+                    console.log("[PW] 成功从当前预设获取 System Prompt");
+                    return systemParts;
+                }
+            }
+        } catch (e) {
+            console.warn("[PW] 从预设获取 System Prompt 失败:", e);
+        }
+    }
+
+    // 2. 降级方案：尝试读取全局设置对象
+    if (SillyTavern.chatCompletionSettings) {
+        const settings = SillyTavern.chatCompletionSettings;
+        const main = settings.main_prompt || "";
+        const jb = (settings.jailbreak_toggle && settings.jailbreak_prompt) ? settings.jailbreak_prompt : "";
+        if (main || jb) {
+            return `${main}\n\n${jb}`;
+        }
+    }
+
+    return null;
 }
 
 // ============================================================================
@@ -554,15 +610,23 @@ ${oldText}
     }
 }
 
-// [v11.0 核心] 运行逻辑：强制 Prefill + GenerateRaw 组合拳
+// ============================================================================
+// [核心修改] 运行逻辑：独立世界书位置 + Debug + 真实破限
+// ============================================================================
 async function runGeneration(data, apiConfig, overridePrompt = null) {
-    const context = getContext();
-    const charId = context.characterId;
-    const charName = (charId !== undefined) ? context.characters[charId].name : "None";
-    const currentName = $('.persona_name').first().text().trim() || $('h5#your_name').text().trim() || "User";
+    // 1. 获取正确的当前数据
+    let charName = "Char";
+    if (window.TavernHelper && window.TavernHelper.getCharData) {
+        const cData = window.TavernHelper.getCharData('current');
+        if (cData) charName = cData.name;
+    }
+    const currentName = $('.persona_name').first().text().trim() || 
+                        $('h5#your_name').text().trim() || 
+                        "User";
 
     if (!promptsCache || !promptsCache.initial) loadData(); 
 
+    // 准备素材
     const rawCharInfo = getCharacterInfoText(); 
     const rawWi = data.wiText || "";
     const rawGreetings = data.greetingsText || "";
@@ -570,40 +634,37 @@ async function runGeneration(data, apiConfig, overridePrompt = null) {
     const requestText = data.request || "";
 
     const wrappedCharInfo = wrapAsXiTaReference(rawCharInfo, `Entity Profile: ${charName}`);
-    const wrappedWi = wrapAsXiTaReference(rawWi, "Global State Variables");
+    // 世界书：独立发送，不混入 User Message
+    const wrappedWi = wrapAsXiTaReference(rawWi, "Global State Variables"); 
     const wrappedGreetings = wrapAsXiTaReference(rawGreetings, "Init Sequence");
     const wrappedTags = wrapAsXiTaReference(currentTemplate, "Schema Definition");
-    
     const wrappedInput = wrapInputForSafety(requestText, currentText, data.mode === 'refine');
 
-    // 1. 获取酒馆当前的 System Prompt (Main + Jailbreak)
-    let activeSystemPrompt = "";
-    try {
-        const settings = context.chatCompletionSettings;
-        if (settings) {
-            const mainPrompt = settings.main_prompt || "";
-            const jailbreakPrompt = (settings.jailbreak_toggle && settings.jailbreak_prompt) ? settings.jailbreak_prompt : "";
-            activeSystemPrompt = `${mainPrompt}\n\n${jailbreakPrompt}`.trim();
-        }
-    } catch (e) { console.warn("Failed to fetch ST system prompt", e); }
+    // 2. 获取真正的 System Prompt (破限)
+    let activeSystemPrompt = getRealSystemPrompt();
 
     if (!activeSystemPrompt) {
-        console.log("[PW] ST System Prompt is empty. Falling back to Internal Kernel Mode.");
+        console.log("[PW] 警告：未能读取到酒馆预设，使用内置 Fallback");
         activeSystemPrompt = fallbackSystemPrompt.replace(/{{user}}/g, currentName);
+    } else {
+        activeSystemPrompt = activeSystemPrompt
+            .replace(/{{user}}/g, currentName)
+            .replace(/{{char}}/g, charName);
     }
 
+    // 3. 构建 User Message (注意：这里不再包含 ${wrappedWi})
     let userMessageContent = "";
-    let prefillContent = "```yaml\n基本信息:"; // [核心] 强制开头，AI 无法拒绝
+    let prefillContent = "```yaml\n基本信息:"; 
 
     if (overridePrompt) {
         userMessageContent = overridePrompt
             .replace(/{{user}}/g, currentName)
             .replace(/{{char}}/g, charName)
             .replace(/{{charInfo}}/g, wrappedCharInfo)
-            .replace(/{{wi}}/g, wrappedWi);
-        prefillContent = ""; // 模版生成不需要强制 YAML 开头
+            // 确保清理 override 里的 {{wi}}
+            .replace(/{{wi}}/g, ""); 
+        prefillContent = ""; 
     } else {
-        // 人设生成：User Message
         userMessageContent = `
 [Target: Generate User Profile for "${currentName}"]
 [Context: The user needs a detailed profile compatible with the current scenario.]
@@ -611,7 +672,6 @@ async function runGeneration(data, apiConfig, overridePrompt = null) {
 <source_materials>
 ${wrappedCharInfo}
 ${wrappedGreetings}
-${wrappedWi}
 </source_materials>
 
 <target_schema>
@@ -626,6 +686,25 @@ ${wrappedInput}
 Fill the target schema based on the source materials and instructions. Output ONLY the YAML. Start directly with the YAML block.`;
     }
 
+    // ============================================================
+    // [新增] 调试显示辅助函数
+    // ============================================================
+    const updateDebugView = (messages) => {
+        let debugText = `=== 发送时间: ${new Date().toLocaleTimeString()} ===\n\n`;
+        messages.forEach((msg, idx) => {
+            debugText += `[BLOCK ${idx + 1}: ${msg.role.toUpperCase()}]\n`;
+            debugText += `--------------------------------------------------\n`;
+            debugText += `${msg.content}\n`;
+            debugText += `--------------------------------------------------\n\n`;
+        });
+        const $debugArea = $('#pw-debug-preview');
+        if ($debugArea.length) {
+            $debugArea.val(debugText);
+        } else {
+            console.log("[PW Debug]", debugText);
+        }
+    };
+
     console.log(`[PW] Sending Prompt...`);
     
     let responseContent = "";
@@ -634,20 +713,27 @@ Fill the target schema based on the source materials and instructions. Output ON
 
     try {
         if (apiConfig.apiSource === 'independent') {
+            // --- 独立 API ---
             let baseUrl = apiConfig.indepApiUrl.replace(/\/$/, '');
             if (baseUrl.endsWith('/chat/completions')) baseUrl = baseUrl.replace(/\/chat\/completions$/, '');
             const url = `${baseUrl}/chat/completions`;
             
-            const messages = [
-                { role: 'system', content: activeSystemPrompt },
-                { role: 'user', content: userMessageContent }
-            ];
-
-            // 独立 API 也加上 prefill (如果模型支持)
+            // 构建消息链：System(破限) -> System(WI) -> User -> Assistant
+            const messages = [{ role: 'system', content: activeSystemPrompt }];
+            
+            if (wrappedWi && wrappedWi.trim().length > 0) {
+                messages.push({ role: 'system', content: wrappedWi });
+            }
+            
+            messages.push({ role: 'user', content: userMessageContent });
+            
             if (prefillContent) {
                 messages.push({ role: 'assistant', content: prefillContent });
             }
             
+            // 预览
+            updateDebugView(messages);
+
             const res = await fetch(url, {
                 method: 'POST', 
                 headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiConfig.indepApiKey}` },
@@ -667,28 +753,49 @@ Fill the target schema based on the source materials and instructions. Output ON
             responseContent = json.choices[0].message.content;
 
         } else {
-            // [v11.0 核心] 使用 TavernHelper.generateRaw 并手动构建 conversation
+            // --- 主 API (TavernHelper) ---
             if (window.TavernHelper && typeof window.TavernHelper.generateRaw === 'function') {
                 
-                // 手动构建消息链
+                // 手动构建 Prompt 顺序数组
                 const promptArray = [
-                    { role: 'system', content: activeSystemPrompt },
-                    { role: 'user', content: userMessageContent }
+                    { role: 'system', content: activeSystemPrompt }
                 ];
+
+                // 独立的世界书层
+                if (wrappedWi && wrappedWi.trim().length > 0) {
+                    promptArray.push({ role: 'system', content: wrappedWi });
+                }
+
+                promptArray.push({ role: 'user', content: userMessageContent });
                 
-                // [强制 Prefill] 将助手的第一句话塞进去，强迫它接话
                 if (prefillContent) {
                     promptArray.push({ role: 'assistant', content: prefillContent });
                 }
 
-                // 调用 generateRaw，传入 ordered_prompts 覆盖默认行为
+                // 预览
+                updateDebugView(promptArray);
+
                 responseContent = await window.TavernHelper.generateRaw({
-                    user_input: '', // 我们手动构建了，所以这里留空
+                    user_input: '', 
                     ordered_prompts: promptArray,
+                    
+                    // 彻底覆盖，防止自动注入
                     overrides: { 
-                        chat_history: { prompts: [] }, // 禁用历史，只发我们构建的
-                        world_info_before: '', world_info_after: '' 
-                    }
+                        world_info_before: '', 
+                        world_info_after: '',
+                        persona_description: '', 
+                        char_description: '',
+                        char_personality: '',
+                        scenario: '',
+                        dialogue_examples: '',
+                        chat_history: { 
+                            prompts: [], 
+                            with_depth_entries: false, 
+                            author_note: ''
+                        }
+                    },
+                    injects: [], 
+                    max_chat_history: 0
                 });
 
             } else {
@@ -705,19 +812,13 @@ Fill the target schema based on the source materials and instructions. Output ON
     console.log("[PW] RAW RESPONSE:", responseContent);
 
     if (!responseContent || responseContent.trim().length === 0) {
-        throw new Error("API 返回内容为空 (Empty Response) - 请检查控制台日志");
+        throw new Error("API 返回内容为空 (Empty Response)");
     }
 
     lastRawResponse = responseContent;
 
-    // 如果使用了 prefill，API 返回的内容是不包含 prefill 本身的，我们需要补回去
     if (prefillContent && !responseContent.startsWith(prefillContent) && !responseContent.startsWith("```yaml")) {
-        // 有些 API 会重复 prefill，有些不会。简单判断一下。
-        // 如果返回的内容直接是 "  姓名: xxx"，说明接上了，我们需要把头补上
-        if (responseContent.trim().startsWith("姓名") || responseContent.trim().startsWith("基本信息")) {
-             // 啥也不做，看来它包含或者接上了
-        } else {
-             // 补全开头
+        if (!responseContent.trim().startsWith("姓名") && !responseContent.trim().startsWith("基本信息")) {
              responseContent = prefillContent + responseContent;
         }
     }
@@ -819,17 +920,11 @@ async function openCreatorPopup() {
         .pw-template-toolbar { display: flex; justify-content: flex-start; align-items: center; padding: 5px 10px; background: rgba(0,0,0,0.1); border-bottom: 1px solid var(--SmartThemeBorderColor); border-radius: 6px 6px 0 0; }
         .pw-template-footer { display: flex; justify-content: flex-end; align-items: center; padding: 5px 10px; background: rgba(0,0,0,0.1); border-top: 1px solid var(--SmartThemeBorderColor); border-radius: 0 0 6px 6px; gap: 8px; }
 
-        /* [手机端/窄屏] 响应式修复 (核心修改) */
         @media screen and (max-width: 600px) {
-            /* 1. API 设置行：强制换行，防止溢出 */
             .pw-row { flex-wrap: wrap; }
             .pw-row label { width: 100%; margin-bottom: 4px; }
             .pw-input, .pw-select, #pw-api-url, #pw-api-key { min-width: 0 !important; width: 100% !important; flex: 1 1 auto; }
-
-            /* 2. 世界书筛选工具栏 */
             .pw-wi-depth-tools { gap: 5px; }
-            
-            /* [NEW] 通用强制高度规则：解决高度不一致问题 */
             .pw-wi-depth-tools .pw-keyword-input, 
             .pw-wi-depth-tools .pw-pos-select, 
             .pw-wi-depth-tools .pw-depth-input, 
@@ -838,54 +933,13 @@ async function openCreatorPopup() {
                 box-sizing: border-box !important;
                 vertical-align: middle;
             }
-
-            /* 第一行：搜索框 + 筛选按钮 (变小) */
-            .pw-keyword-input {
-                width: auto;
-                flex: 1;
-                font-size: 0.8em; 
-                padding: 4px 6px; 
-            }
-            #d-filter-toggle {
-                font-size: 0.8em; 
-                padding: 4px 8px; 
-            }
-
-            /* 第二行：位置 + 深度 + 重置 (强制不换行，且对齐第一行的高度) */
-            .pw-wi-filter-row:nth-child(2) {
-                flex-wrap: nowrap !important;
-                gap: 4px;
-                align-items: center; /* 垂直居中 */
-            }
-
-            /* 缩小位置选择框 */
-            .pw-pos-select { 
-                flex: 0 0 85px !important; 
-                max-width: 85px !important; 
-                padding: 4px 2px;
-                font-size: 0.8em;
-                margin-bottom: 0;
-            }
-
-            /* 缩小深度输入框 */
-            .pw-depth-input {
-                flex: 1;
-                min-width: 0;
-                padding: 4px 2px;
-                text-align: center;
-                font-size: 0.8em;
-            }
-            
-            /* 分隔符 */
+            .pw-keyword-input { width: auto; flex: 1; font-size: 0.8em; padding: 4px 6px; }
+            #d-filter-toggle { font-size: 0.8em; padding: 4px 8px; }
+            .pw-wi-filter-row:nth-child(2) { flex-wrap: nowrap !important; gap: 4px; align-items: center; }
+            .pw-pos-select { flex: 0 0 85px !important; max-width: 85px !important; padding: 4px 2px; font-size: 0.8em; margin-bottom: 0; }
+            .pw-depth-input { flex: 1; min-width: 0; padding: 4px 2px; text-align: center; font-size: 0.8em; }
             .pw-wi-filter-row span { font-size: 0.8em; align-self: center; }
-
-            /* 重置按钮 */
-            #d-reset {
-                margin-left: 2px;
-                padding: 4px 6px;
-                font-size: 0.8em;
-                white-space: nowrap;
-            }
+            #d-reset { margin-left: 2px; padding: 4px 6px; font-size: 0.8em; white-space: nowrap; }
         }
     </style>
     `;
@@ -923,7 +977,6 @@ ${forcedStyles}
                 <div class="pw-tags-container" id="pw-template-chips" style="display:${chipsDisplay};"></div>
                 
                 <div class="pw-template-editor-area" id="pw-template-editor">
-                    <!-- 1. 快捷键栏 (上) -->
                     <div class="pw-template-toolbar">
                         <div class="pw-shortcut-bar">
                             <div class="pw-shortcut-btn" data-key="  "><span>缩进</span><span class="code">Tab</span></div>
@@ -932,11 +985,7 @@ ${forcedStyles}
                             <div class="pw-shortcut-btn" data-key="\n"><span>换行</span><span class="code">Enter</span></div>
                         </div>
                     </div>
-
-                    <!-- 2. 编辑区 (中) -->
                     <textarea id="pw-template-text" class="pw-template-textarea">${currentTemplate}</textarea>
-                    
-                    <!-- 3. 操作按钮 (下) -->
                     <div class="pw-template-footer">
                         <button class="pw-mini-btn" id="pw-gen-template-smart" title="根据当前世界书和设定，生成定制化模版">生成模板</button>
                         <button class="pw-mini-btn" id="pw-save-template">保存模版</button>
@@ -1041,7 +1090,7 @@ ${forcedStyles}
         </div>
     </div>
     
-    <!-- API View -->
+    <!-- API View [修改] 增加调试框 -->
     <div id="pw-view-api" class="pw-view">
         <div class="pw-scroll-area">
             <div class="pw-card-section">
@@ -1079,6 +1128,15 @@ ${forcedStyles}
                     
                     <div style="text-align:right; margin-top:5px;"><button id="pw-api-save" class="pw-btn primary" style="width:100%;">保存 Prompt</button></div>
                 </div>
+            </div>
+
+            <!-- 调试预览区域 -->
+            <div class="pw-card-section" style="border-top: 1px solid rgba(255,255,255,0.1); margin-top: 10px; padding-top: 10px;">
+                <div class="pw-row" style="margin-bottom: 5px;">
+                    <label style="color: #ffbc42;"><i class="fa-solid fa-bug"></i> 实时发送内容预览 (Debug)</label>
+                </div>
+                <div style="font-size: 0.8em; color: #888; margin-bottom: 5px;">点击“生成设定”后，下方将显示实际发给 AI 的完整上下文结构。</div>
+                <textarea id="pw-debug-preview" class="pw-textarea" readonly style="min-height: 250px; font-family: monospace; font-size: 12px; white-space: pre; background: rgba(0,0,0,0.3); color: #ccc;" placeholder="等待生成..."></textarea>
             </div>
         </div>
     </div>
@@ -1218,30 +1276,23 @@ function bindEvents() {
         
         try {
             const contextData = await collectContextData();
-            // 手动获取角色描述文本，用于判断是否为空
             const charInfoText = getCharacterInfoText(); 
             
-            // 简单的非空检查阈值
             const hasCharInfo = charInfoText && charInfoText.length > 50; 
             const hasWi = contextData.wi && contextData.wi.length > 10;
 
-            // [修改逻辑] 两步弹窗确认
             if (!hasCharInfo && !hasWi) {
-                // 弹窗 1：询问意图
                 const wantGeneric = confirm("当前未检测到关联的角色卡或世界书信息。\n\n是否要生成通用模版？");
                 
                 if (!wantGeneric) {
-                    // 用户点取消：什么都不做，直接结束
                     isProcessing = false;
                     $btn.html(originalText);
                     return;
                 }
 
-                // 弹窗 2：询问方式 (Wording Updated)
                 const useDefault = confirm("请选择模版来源：\n\n点击【确定】使用内置默认模版（推荐）\n点击【取消】生成全新的通用模版");
 
                 if (useDefault) {
-                    // 用户点确定：使用内置默认
                     $('#pw-template-text').val(defaultYamlTemplate);
                     currentTemplate = defaultYamlTemplate;
                     renderTemplateChips();
@@ -1249,10 +1300,8 @@ function bindEvents() {
                     
                     isProcessing = false;
                     $btn.html(originalText);
-                    return; // 结束，不请求 API
+                    return; 
                 }
-                
-                // 用户点取消：继续向下执行，让 AI 生成
             }
 
             const modelVal = $('#pw-api-source').val() === 'independent' ? $('#pw-api-model-select').val() : null;
@@ -1264,7 +1313,6 @@ function bindEvents() {
                 indepApiModel: modelVal
             };
             
-            // 使用 overridePrompt 调用，确保使用的是中文模版生成 prompt
             const generatedTemplate = await runGeneration(config, config, defaultTemplateGenPrompt);
             
             if (generatedTemplate) {
@@ -1408,7 +1456,6 @@ function bindEvents() {
         $(this).addClass('active');
         const view = $(this).data('view');
         
-        // Hide all
         $('#pw-diff-list-view, #pw-diff-raw-view, #pw-diff-old-raw-view').hide();
 
         if (view === 'diff') { 
@@ -1642,7 +1689,7 @@ function bindEvents() {
         }
     });
 
-    // [需求2] 世界书保存
+    // 世界书保存
     $(document).on('click.pw', '#pw-btn-save-wi', async function () {
         const content = $('#pw-result-text').val();
         if (!content) return toastr.warning("内容为空，无法保存");
@@ -2113,5 +2160,5 @@ function addPersonaButton() {
 jQuery(async () => {
     addPersonaButton(); 
     bindEvents(); 
-    console.log("[PW] Persona Weaver Loaded (v11.0 - Prefill Force)");
+    console.log("[PW] Persona Weaver Loaded (v11.1 - Debug & WI-Fix)");
 });
