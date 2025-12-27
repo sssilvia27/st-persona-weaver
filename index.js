@@ -2,7 +2,7 @@ import { extension_settings, getContext } from "../../../extensions.js";
 import { saveSettingsDebounced, callPopup, getRequestHeaders, saveChat, reloadCurrentChat, saveCharacterDebounced } from "../../../../script.js";
 
 const extensionName = "st-persona-weaver";
-const STORAGE_KEY_HISTORY = 'pw_history_v27_raw_output'; // 升级版本号
+const STORAGE_KEY_HISTORY = 'pw_history_v28_prefill_force'; // 升级版本号
 const STORAGE_KEY_STATE = 'pw_state_v20';
 const STORAGE_KEY_TEMPLATE = 'pw_template_v5_data_schema'; 
 const STORAGE_KEY_PROMPTS = 'pw_prompts_v20_db_recovery'; 
@@ -60,8 +60,7 @@ const defaultYamlTemplate =
   兴奋阈值:
   禁忌边界:`;
 
-// [System Prompt]
-// 如果读取不到酒馆预设，才使用这个。
+// 系统指令 (后备)
 const fallbackSystemPrompt =
 `[TASK: DATABASE_RECOVERY_OPERATION]
 [TARGET: User Profile "{{user}}"]
@@ -436,7 +435,7 @@ async function forceSavePersona(name, description) {
     return true;
 }
 
-// [需求2] 世界书逻辑：Get -> Find -> Update/Create
+// 世界书保存逻辑
 async function syncToWorldInfoViaHelper(userName, content) {
     if (!window.TavernHelper) return toastr.error(TEXT.TOAST_WI_ERROR);
 
@@ -555,7 +554,7 @@ ${oldText}
     }
 }
 
-// [v10.2 修复] 运行逻辑：双重保险 + 移除过度过滤 + 详细调试日志
+// [v11.0 核心] 运行逻辑：强制 Prefill + GenerateRaw 组合拳
 async function runGeneration(data, apiConfig, overridePrompt = null) {
     const context = getContext();
     const charId = context.characterId;
@@ -577,6 +576,7 @@ async function runGeneration(data, apiConfig, overridePrompt = null) {
     
     const wrappedInput = wrapInputForSafety(requestText, currentText, data.mode === 'refine');
 
+    // 1. 获取酒馆当前的 System Prompt (Main + Jailbreak)
     let activeSystemPrompt = "";
     try {
         const settings = context.chatCompletionSettings;
@@ -587,23 +587,23 @@ async function runGeneration(data, apiConfig, overridePrompt = null) {
         }
     } catch (e) { console.warn("Failed to fetch ST system prompt", e); }
 
-    // Fallback if no ST preset found
     if (!activeSystemPrompt) {
         console.log("[PW] ST System Prompt is empty. Falling back to Internal Kernel Mode.");
         activeSystemPrompt = fallbackSystemPrompt.replace(/{{user}}/g, currentName);
     }
 
     let userMessageContent = "";
+    let prefillContent = "```yaml\n基本信息:"; // [核心] 强制开头，AI 无法拒绝
 
     if (overridePrompt) {
-        // 模版生成模式
         userMessageContent = overridePrompt
             .replace(/{{user}}/g, currentName)
             .replace(/{{char}}/g, charName)
             .replace(/{{charInfo}}/g, wrappedCharInfo)
             .replace(/{{wi}}/g, wrappedWi);
+        prefillContent = ""; // 模版生成不需要强制 YAML 开头
     } else {
-        // 人设生成
+        // 人设生成：User Message
         userMessageContent = `
 [Target: Generate User Profile for "${currentName}"]
 [Context: The user needs a detailed profile compatible with the current scenario.]
@@ -623,12 +623,10 @@ ${wrappedInput}
 </user_instruction>
 
 [Action]:
-Fill the target schema based on the source materials and instructions. Output ONLY the YAML.`;
+Fill the target schema based on the source materials and instructions. Output ONLY the YAML. Start directly with the YAML block.`;
     }
 
     console.log(`[PW] Sending Prompt...`);
-    console.log(`[PW] System Length: ${activeSystemPrompt.length}`);
-    console.log(`[PW] User Length: ${userMessageContent.length}`);
     
     let responseContent = "";
     const controller = new AbortController();
@@ -644,6 +642,11 @@ Fill the target schema based on the source materials and instructions. Output ON
                 { role: 'system', content: activeSystemPrompt },
                 { role: 'user', content: userMessageContent }
             ];
+
+            // 独立 API 也加上 prefill (如果模型支持)
+            if (prefillContent) {
+                messages.push({ role: 'assistant', content: prefillContent });
+            }
             
             const res = await fetch(url, {
                 method: 'POST', 
@@ -659,22 +662,35 @@ Fill the target schema based on the source materials and instructions. Output ON
 
             const text = await res.text();
             let json = JSON.parse(text);
-            
             if (json.error) throw new Error(`API Error: ${json.error.message}`);
             if (!json.choices || !json.choices.length) throw new Error("No choices returned");
-
             responseContent = json.choices[0].message.content;
 
         } else {
-            // [v10.2] 使用 generateQuietPrompt 并跳过 WIAN 以避免上下文重复
-            if (typeof context.generateQuietPrompt === 'function') {
-                // generateQuietPrompt(prompt, quiet_to_loud, skip_wian, image, name)
-                responseContent = await context.generateQuietPrompt(userMessageContent, false, true, null, currentName);
-            } else if (window.TavernHelper && typeof window.TavernHelper.generateRaw === 'function') {
-                 responseContent = await window.TavernHelper.generateRaw({
-                    user_input: userMessageContent, 
-                    overrides: { chat_history: { prompts: [] }, world_info_before: '', world_info_after: '' }
+            // [v11.0 核心] 使用 TavernHelper.generateRaw 并手动构建 conversation
+            if (window.TavernHelper && typeof window.TavernHelper.generateRaw === 'function') {
+                
+                // 手动构建消息链
+                const promptArray = [
+                    { role: 'system', content: activeSystemPrompt },
+                    { role: 'user', content: userMessageContent }
+                ];
+                
+                // [强制 Prefill] 将助手的第一句话塞进去，强迫它接话
+                if (prefillContent) {
+                    promptArray.push({ role: 'assistant', content: prefillContent });
+                }
+
+                // 调用 generateRaw，传入 ordered_prompts 覆盖默认行为
+                responseContent = await window.TavernHelper.generateRaw({
+                    user_input: '', // 我们手动构建了，所以这里留空
+                    ordered_prompts: promptArray,
+                    overrides: { 
+                        chat_history: { prompts: [] }, // 禁用历史，只发我们构建的
+                        world_info_before: '', world_info_after: '' 
+                    }
                 });
+
             } else {
                 throw new Error("ST版本过旧或未安装 TavernHelper");
             }
@@ -686,17 +702,26 @@ Fill the target schema based on the source materials and instructions. Output ON
         clearTimeout(timeoutId); 
     }
     
-    // [v10.2 核心] 调试日志：查看 API 到底返回了什么
     console.log("[PW] RAW RESPONSE:", responseContent);
 
-    // 只要有内容，就视为成功。不再做严格的 Regex 过滤，防止误删。
     if (!responseContent || responseContent.trim().length === 0) {
-        throw new Error("API 返回内容为空 (Empty Response)");
+        throw new Error("API 返回内容为空 (Empty Response) - 请检查控制台日志");
     }
 
     lastRawResponse = responseContent;
 
-    // 只移除 Markdown 代码块标记，保留所有内部文本
+    // 如果使用了 prefill，API 返回的内容是不包含 prefill 本身的，我们需要补回去
+    if (prefillContent && !responseContent.startsWith(prefillContent) && !responseContent.startsWith("```yaml")) {
+        // 有些 API 会重复 prefill，有些不会。简单判断一下。
+        // 如果返回的内容直接是 "  姓名: xxx"，说明接上了，我们需要把头补上
+        if (responseContent.trim().startsWith("姓名") || responseContent.trim().startsWith("基本信息")) {
+             // 啥也不做，看来它包含或者接上了
+        } else {
+             // 补全开头
+             responseContent = prefillContent + responseContent;
+        }
+    }
+
     return responseContent.replace(/```[a-z]*\n?/g, '').replace(/```/g, '').trim();
 }
 
@@ -2088,5 +2113,5 @@ function addPersonaButton() {
 jQuery(async () => {
     addPersonaButton(); 
     bindEvents(); 
-    console.log("[PW] Persona Weaver Loaded (v10.2 - Raw Output Fix)");
+    console.log("[PW] Persona Weaver Loaded (v11.0 - Prefill Force)");
 });
