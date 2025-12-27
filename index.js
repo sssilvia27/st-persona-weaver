@@ -2,9 +2,9 @@ import { extension_settings, getContext } from "../../../extensions.js";
 import { saveSettingsDebounced, callPopup, getRequestHeaders, saveChat, reloadCurrentChat, saveCharacterDebounced } from "../../../../script.js";
 
 const extensionName = "st-persona-weaver";
-const CURRENT_VERSION = "1.0.0"; // 【本地测试用】你可以保持这个为 1.0.0，然后在 GitHub 上把 version 改成 1.0.1 来触发更新提示
+const CURRENT_VERSION = "1.0.0"; // 本地测试版本号
 
-// 【测试地址】指向你提供的 dev 分支
+// 【测试地址】保持你提供的 dev 分支
 const UPDATE_CHECK_URL = "https://raw.githubusercontent.com/sisisisilviaxie-star/st-persona-weaver/sisisisilviaxie-star-main-dev/manifest.json";
 
 const STORAGE_KEY_HISTORY = 'pw_history_v29_new_template'; 
@@ -857,8 +857,9 @@ async function openCreatorPopup() {
     };
 
     const charName = getContext().characters[getContext().characterId]?.name || "None";
-    // 标题增加 NEW 提醒
-    const newBadge = hasNewVersion ? `<span class="pw-badge-new" style="background:red; color:white; font-size:0.6em; vertical-align:super; padding:1px 3px; border-radius:4px; margin-left:2px; font-weight:bold;">NEW</span>` : '';
+    
+    // [变更 3] NEW 标记无背景，红色文字，可点击
+    const newBadge = hasNewVersion ? `<span id="pw-new-badge" title="点击查看更新" style="cursor:pointer; color:#ff4444; font-size:0.6em; font-weight:bold; vertical-align: super; margin-left: 2px;">NEW</span>` : '';
     const headerTitle = `${TEXT.PANEL_TITLE}${newBadge}<span class="pw-header-subtitle">User: ${currentName} & Char: ${charName}</span>`;
 
     const chipsDisplay = uiStateCache.templateExpanded ? 'flex' : 'none';
@@ -927,7 +928,6 @@ async function openCreatorPopup() {
         .pw-template-toolbar { display: flex; justify-content: flex-start; align-items: center; padding: 5px 10px; background: rgba(0,0,0,0.1); border-bottom: 1px solid var(--SmartThemeBorderColor); border-radius: 6px 6px 0 0; }
         .pw-template-footer { display: flex; justify-content: flex-end; align-items: center; padding: 5px 10px; background: rgba(0,0,0,0.1); border-top: 1px solid var(--SmartThemeBorderColor); border-radius: 0 0 6px 6px; gap: 8px; }
 
-        /* [新增] 适配酒馆主题的折叠栏样式 */
         .pw-context-header {
             background-color: var(--SmartThemeBtnBg);
             color: var(--SmartThemeBtnText);
@@ -952,7 +952,6 @@ async function openCreatorPopup() {
             .pw-row { flex-wrap: wrap; }
             .pw-row label { width: 100%; margin-bottom: 4px; }
             .pw-input, .pw-select, #pw-api-url, #pw-api-key { min-width: 0 !important; width: 100% !important; flex: 1 1 auto; }
-            /* ... (keep other mobile styles) ... */
         }
     </style>
     `;
@@ -1140,7 +1139,7 @@ ${forcedStyles}
         </div>
     </div>
 
-    <!-- System View (新增) -->
+    <!-- System View -->
     <div id="pw-view-system" class="pw-view">
         <div class="pw-scroll-area">
             
@@ -1153,7 +1152,7 @@ ${forcedStyles}
                 ${updateUiHtml}
             </div>
 
-            <!-- 2. Prompt 编辑区域 (使用新样式) -->
+            <!-- 2. Prompt 编辑区域 -->
             <div class="pw-card-section">
                 <div class="pw-context-header" id="pw-prompt-header">
                     <span><i class="fa-solid fa-terminal"></i> Prompt 查看与编辑 (User Prompt)</span>
@@ -1177,33 +1176,32 @@ ${forcedStyles}
                     </div>
                     <textarea id="pw-prompt-editor" class="pw-textarea pw-auto-height" style="min-height:150px; font-size:0.85em;"></textarea>
                     
-                    <div style="text-align:right; margin-top:5px; display:flex; gap:10px; justify-content:flex-end;">
+                    <div style="text-align:right; margin-top:10px; display:flex; gap:10px; justify-content:flex-end; border-top: 1px solid rgba(0,0,0,0.1); padding-top: 10px;">
+                        <!-- [新增] Debug 切换按钮 -->
+                        <button class="pw-mini-btn" id="pw-toggle-debug-btn" style="margin-right:auto;"><i class="fa-solid fa-bug"></i> Debug</button>
+                        
                         <button class="pw-mini-btn" id="pw-reset-prompt" style="font-size:0.8em;">恢复默认</button>
                         <button id="pw-api-save" class="pw-btn primary" style="width:auto; padding: 5px 20px;">保存 Prompt</button>
                     </div>
                 </div>
             </div>
 
-            <!-- 3. Debug 预览区域 (使用新样式) -->
-            <div class="pw-card-section" style="margin-top: 10px;">
-                <div class="pw-context-header" id="pw-debug-header">
-                    <label style="color: var(--SmartThemeQuoteColor); cursor: pointer; margin: 0;"><i class="fa-solid fa-bug"></i> 实时发送内容预览 (Debug)</label>
-                    <i class="fa-solid fa-chevron-down arrow"></i>
+            <!-- 3. Debug 预览区域 ([变更] 默认隐藏，无折叠头，纯标签) -->
+            <div id="pw-debug-wrapper" class="pw-card-section" style="display:none; margin-top: 10px; border-top: 1px solid var(--SmartThemeBorderColor); padding-top: 10px;">
+                <div style="margin-bottom: 5px;">
+                    <label style="color: var(--SmartThemeQuoteColor); font-weight:bold;"><i class="fa-solid fa-bug"></i> 实时发送内容预览 (Debug)</label>
                 </div>
-                
-                <div id="pw-debug-container" style="display:none; margin-top:5px; padding: 10px; border: 1px solid var(--SmartThemeBorderColor); border-radius: 6px; background: rgba(0,0,0,0.1);">
-                    <div style="font-size: 0.8em; opacity: 0.7; margin-bottom: 5px;">点击“生成设定”后，下方将显示实际发给 AI 的完整内容。</div>
-                    <textarea id="pw-debug-preview" class="pw-textarea" readonly style="
-                        min-height: 250px; 
-                        font-family: 'Consolas', 'Monaco', monospace; 
-                        font-size: 12px; 
-                        white-space: pre-wrap; 
-                        background: var(--SmartThemeInputBg); 
-                        color: var(--SmartThemeBodyColor); 
-                        border: 1px solid var(--SmartThemeBorderColor);
-                        width: 100%;
-                    " placeholder="等待生成..."></textarea>
-                </div>
+                <div style="font-size: 0.8em; opacity: 0.7; margin-bottom: 5px;">点击“生成设定”后，下方将显示实际发给 AI 的完整内容。</div>
+                <textarea id="pw-debug-preview" class="pw-textarea" readonly style="
+                    min-height: 250px; 
+                    font-family: 'Consolas', 'Monaco', monospace; 
+                    font-size: 12px; 
+                    white-space: pre-wrap; 
+                    background: var(--SmartThemeInputBg); 
+                    color: var(--SmartThemeBodyColor); 
+                    border: 1px solid var(--SmartThemeBorderColor);
+                    width: 100%;
+                " placeholder="等待生成..."></textarea>
             </div>
 
         </div>
@@ -1262,12 +1260,14 @@ function bindEvents() {
         else { $body.slideDown(); $arrow.addClass('fa-flip-vertical'); }
     });
 
-    // --- [新] Debug Header Toggle ---
-    $(document).on('click.pw', '#pw-debug-header', function() {
-        const $body = $('#pw-debug-container');
-        const $arrow = $(this).find('.arrow');
-        if ($body.is(':visible')) { $body.slideUp(); $arrow.removeClass('fa-flip-vertical'); }
-        else { $body.slideDown(); $arrow.addClass('fa-flip-vertical'); }
+    // --- [新增] Debug 切换按钮逻辑 ---
+    $(document).on('click.pw', '#pw-toggle-debug-btn', function() {
+        $('#pw-debug-wrapper').slideToggle();
+    });
+
+    // --- [新增] NEW 标记点击跳转 ---
+    $(document).on('click.pw', '#pw-new-badge', function() {
+        $('.pw-tab[data-tab="system"]').click();
     });
 
     // --- Prompt Editor Type Switch ---
@@ -1280,7 +1280,7 @@ function bindEvents() {
         }
     });
 
-    // --- [新] Update Button Logic ---
+    // --- Update Button Logic ---
     $(document).on('click.pw', '#pw-btn-update', function() {
         if (!window.TavernHelper || !window.TavernHelper.updateExtension) {
             toastr.error("TavernHelper 未加载，无法自动更新，请手动更新。");
