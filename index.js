@@ -133,7 +133,7 @@ const defaultSettings = {
     autoSwitchPersona: true, syncToWorldInfo: false,
     historyLimit: 9999, 
     apiSource: 'main',
-    indepApiUrl: 'https://api.openai.com/v1', indepApiKey: '', indepApiModel: 'gpt-3.5-turbo'
+    indepApiUrl: 'https://api.openai.com/v1', indepApiKey: '', indepApiKey: '', indepApiModel: 'gpt-3.5-turbo'
 };
 
 const TEXT = {
@@ -854,33 +854,43 @@ async function openCreatorPopup() {
         .pw-template-toolbar { display: flex; justify-content: flex-start; align-items: center; padding: 5px 10px; background: rgba(0,0,0,0.1); border-bottom: 1px solid var(--SmartThemeBorderColor); border-radius: 6px 6px 0 0; }
         .pw-template-footer { display: flex; justify-content: flex-end; align-items: center; padding: 5px 10px; background: rgba(0,0,0,0.1); border-top: 1px solid var(--SmartThemeBorderColor); border-radius: 0 0 6px 6px; gap: 8px; }
 
-        /* [手机端/窄屏] 响应式修复 */
+        /* [手机端/窄屏] 响应式修复 (核心修改) */
         @media screen and (max-width: 600px) {
-            /* API设置行 */
+            /* 1. API 设置行：强制换行，防止溢出 */
             .pw-row { flex-wrap: wrap; }
             .pw-row label { width: 100%; margin-bottom: 4px; }
             .pw-input, .pw-select, #pw-api-url, #pw-api-key { min-width: 0 !important; width: 100% !important; flex: 1 1 auto; }
 
-            /* 世界书筛选工具栏 */
+            /* 2. 世界书筛选工具栏 */
             .pw-wi-depth-tools { gap: 5px; }
             
-            /* 第一行：搜索框 + 筛选按钮 (缩小字体和Padding) */
+            /* [NEW] 通用强制高度规则：解决高度不一致问题 */
+            .pw-wi-depth-tools .pw-keyword-input, 
+            .pw-wi-depth-tools .pw-pos-select, 
+            .pw-wi-depth-tools .pw-depth-input, 
+            .pw-wi-depth-tools .pw-depth-btn {
+                height: 30px !important;
+                box-sizing: border-box !important;
+                vertical-align: middle;
+            }
+
+            /* 第一行：搜索框 + 筛选按钮 (变小) */
             .pw-keyword-input {
                 width: auto;
                 flex: 1;
-                font-size: 0.8em; /* 缩小字体 */
-                padding: 4px 6px; /* 缩小内边距 */
+                font-size: 0.8em; 
+                padding: 4px 6px; 
             }
             #d-filter-toggle {
-                font-size: 0.8em; /* 缩小字体 */
-                padding: 4px 8px; /* 缩小内边距 */
+                font-size: 0.8em; 
+                padding: 4px 8px; 
             }
 
             /* 第二行：位置 + 深度 + 重置 (强制不换行，且对齐第一行的高度) */
             .pw-wi-filter-row:nth-child(2) {
                 flex-wrap: nowrap !important;
                 gap: 4px;
-                align-items: stretch; /* 确保高度拉伸一致 */
+                align-items: center; /* 垂直居中 */
             }
 
             /* 缩小位置选择框 */
