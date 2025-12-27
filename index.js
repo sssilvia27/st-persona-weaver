@@ -1,9 +1,8 @@
-
 import { extension_settings, getContext } from "../../../extensions.js";
 import { saveSettingsDebounced, callPopup, getRequestHeaders, saveChat, reloadCurrentChat, saveCharacterDebounced } from "../../../../script.js";
 
 const extensionName = "st-persona-weaver";
-const CURRENT_VERSION = "1.0.1"; // 本地测试版本号
+const CURRENT_VERSION = "1.0.0"; // 本地测试版本号
 
 // 【测试地址】
 const UPDATE_CHECK_URL = "https://raw.githubusercontent.com/sisisisilviaxie-star/st-persona-weaver/sisisisilviaxie-star-main-dev/manifest.json";
@@ -169,7 +168,7 @@ let lastRawResponse = "";
 let isProcessing = false;
 let currentGreetingsList = []; 
 let wiSelectionCache = {};
-let uiStateCache = { templateExpanded: true };
+let uiStateCache = { templateExpanded: true, theme: 'style.css' }; // Added theme state
 let hasNewVersion = false; // 新版本标志
 
 // ============================================================================
@@ -653,8 +652,8 @@ function loadData() {
         wiSelectionCache = JSON.parse(localStorage.getItem(STORAGE_KEY_WI_STATE)) || {};
     } catch { wiSelectionCache = {}; }
     try {
-        uiStateCache = JSON.parse(localStorage.getItem(STORAGE_KEY_UI_STATE)) || { templateExpanded: true };
-    } catch { uiStateCache = { templateExpanded: true }; }
+        uiStateCache = JSON.parse(localStorage.getItem(STORAGE_KEY_UI_STATE)) || { templateExpanded: true, theme: 'style.css' };
+    } catch { uiStateCache = { templateExpanded: true, theme: 'style.css' }; }
 }
 
 function saveData() {
@@ -1062,6 +1061,17 @@ async function openCreatorPopup() {
                 ${updateUiHtml}
             </div>
 
+            <!-- Theme Selector -->
+            <div class="pw-card-section">
+                <div class="pw-row">
+                    <label style="color: var(--SmartThemeQuoteColor); font-weight:bold;">界面主题</label>
+                    <select id="pw-theme-select" class="pw-input" style="flex:1;">
+                        <option value="style.css" selected>默认 (Native)</option>
+                        <!-- Add more options here if you add more css files -->
+                    </select>
+                </div>
+            </div>
+
             <!-- 2. Prompt 编辑区域 -->
             <div class="pw-card-section">
                 <div class="pw-context-header" id="pw-prompt-header">
@@ -1206,6 +1216,14 @@ function bindEvents() {
                 toastr.error("更新失败，请查看控制台。");
             }
         });
+    });
+
+    // --- Theme Selector Logic ---
+    $(document).on('change.pw', '#pw-theme-select', function() {
+        const theme = $(this).val();
+        loadThemeCSS(theme);
+        uiStateCache.theme = theme;
+        saveData();
     });
 
     // --- Greetings Select Handling ---
@@ -1842,14 +1860,16 @@ function bindEvents() {
 
 // 动态加载外部 CSS 文件
 function loadThemeCSS(fileName) {
-    if ($('#pw-style-link').length) return;
-    const cssUrl = `scripts/extensions/third-party/${extensionName}/${fileName}`;
-    $('<link>')
-        .attr('rel', 'stylesheet')
-        .attr('type', 'text/css')
-        .attr('href', cssUrl)
-        .attr('id', 'pw-style-link')
-        .appendTo('head');
+    if ($('#pw-style-link').length) {
+        $('#pw-style-link').attr('href', `scripts/extensions/third-party/${extensionName}/${fileName}`);
+    } else {
+        $('<link>')
+            .attr('rel', 'stylesheet')
+            .attr('type', 'text/css')
+            .attr('href', `scripts/extensions/third-party/${extensionName}/${fileName}`)
+            .attr('id', 'pw-style-link')
+            .appendTo('head');
+    }
 }
 
 const renderTemplateChips = () => {
@@ -1963,11 +1983,14 @@ const renderWiBooks = async () => {
         <div class="pw-wi-book">
             <div class="pw-wi-header" style="display:flex; align-items:center;">
                 <input type="checkbox" class="pw-wi-header-checkbox pw-wi-select-all" title="全选/全不选 (仅选中当前可见条目)">
-                <span style="flex:1; display:flex; align-items:center;">
-                    <i class="fa-solid fa-book" style="margin-right:5px;"></i> ${book} ${isBound ? '<span class="pw-bound-status" style="margin-left:5px;">(已绑定)</span>' : ''}
+                <span class="pw-wi-book-title">
+                    ${book} ${isBound ? '<span class="pw-bound-status">(已绑定)</span>' : ''}
                 </span>
-                <div class="pw-wi-filter-toggle" title="展开/收起筛选"><i class="fa-solid fa-filter"></i></div>
-                <div>${!isBound ? '<i class="fa-solid fa-times remove-book pw-remove-book-icon" title="移除"></i>' : ''}<i class="fa-solid fa-chevron-down arrow"></i></div>
+                <div class="pw-wi-header-actions">
+                    <div class="pw-wi-filter-toggle" title="展开/收起筛选"><i class="fa-solid fa-filter"></i></div>
+                    ${!isBound ? '<i class="fa-solid fa-times remove-book pw-remove-book-icon" title="移除"></i>' : ''}
+                    <i class="fa-solid fa-chevron-down arrow"></i>
+                </div>
             </div>
             <div class="pw-wi-list" data-book="${book}"></div>
         </div>`);
@@ -2009,7 +2032,7 @@ const renderWiBooks = async () => {
         });
 
         $el.find('.pw-wi-header').on('click', async function (e) {
-            if ($(e.target).hasClass('pw-wi-header-checkbox') || $(e.target).closest('.pw-wi-filter-toggle').length) return; 
+            if ($(e.target).hasClass('pw-wi-header-checkbox') || $(e.target).closest('.pw-wi-filter-toggle').length || $(e.target).closest('.pw-remove-book-icon').length) return; 
 
             const $list = $el.find('.pw-wi-list');
             const $arrow = $(this).find('.arrow');
@@ -2030,12 +2053,14 @@ const renderWiBooks = async () => {
                     if (entries.length === 0) {
                         $list.html('<div style="padding:10px;opacity:0.5;">无条目</div>');
                     } else {
+                        // [Layout Fix] 3 Rows Structure
                         const $tools = $(`
                         <div class="pw-wi-depth-tools">
+                            <!-- Row 1: Keyword -->
                             <div class="pw-wi-filter-row">
                                 <input type="text" class="pw-keyword-input" id="keyword" placeholder="关键词查找...">
-                                <button class="pw-depth-btn" id="d-filter-toggle" title="启用/取消筛选">筛选</button>
                             </div>
+                            <!-- Row 2: Position & Depth -->
                             <div class="pw-wi-filter-row">
                                 <select id="p-select" class="pw-pos-select">
                                     <option value="unknown">全部位置</option>
@@ -2052,7 +2077,12 @@ const renderWiBooks = async () => {
                                 <input type="number" class="pw-depth-input" id="d-min" placeholder="0" title="最小深度">
                                 <span>-</span>
                                 <input type="number" class="pw-depth-input" id="d-max" placeholder="Max" title="最大深度">
-                                <button class="pw-depth-btn" id="d-reset" title="恢复为世界书原始状态" style="margin-left:auto;">重置</button>
+                            </div>
+                            <!-- Row 3: Buttons -->
+                            <div class="pw-wi-filter-row">
+                                <button class="pw-depth-btn" id="d-filter-toggle" title="启用/取消筛选">筛选</button>
+                                <button class="pw-depth-btn" id="d-clear-search">清空内容</button>
+                                <button class="pw-depth-btn" id="d-reset" title="恢复为世界书原始状态">重置状态</button>
                             </div>
                         </div>`);
                         
@@ -2095,6 +2125,11 @@ const renderWiBooks = async () => {
                                 isFiltering = true;
                                 applyFilter();
                             }
+                        });
+
+                        $tools.find('#d-clear-search').on('click', function() {
+                            $tools.find('#keyword').val('');
+                            if(isFiltering) applyFilter();
                         });
 
                         $tools.find('#d-reset').on('click', function() {
@@ -2193,7 +2228,6 @@ function addPersonaButton() {
 jQuery(async () => {
     addPersonaButton(); 
     bindEvents(); 
-    loadThemeCSS('style.css'); // 默认加载
+    loadThemeCSS('style.css'); // Load default theme
     console.log("[PW] Persona Weaver Loaded (v11.4 - Restore Editor)");
 });
-
