@@ -2,7 +2,7 @@ import { extension_settings, getContext } from "../../../extensions.js";
 import { saveSettingsDebounced, callPopup, getRequestHeaders, saveChat, reloadCurrentChat, saveCharacterDebounced } from "../../../../script.js";
 
 const extensionName = "st-persona-weaver";
-const CURRENT_VERSION = "1.5.2"; 
+const CURRENT_VERSION = "1.5.3"; 
 
 // 【测试地址】
 const UPDATE_CHECK_URL = "https://raw.githubusercontent.com/sisisisilviaxie-star/st-persona-weaver/sisisisilviaxie-star-main-dev/manifest.json";
@@ -16,7 +16,7 @@ const STORAGE_KEY_UI_STATE = 'pw_ui_state_v1';
 const STORAGE_KEY_THEMES = 'pw_custom_themes_v1'; 
 const BUTTON_ID = 'pw_persona_tool_btn';
 
-const HISTORY_PER_PAGE = 20; // 20 items per page
+const HISTORY_PER_PAGE = 20;
 
 // 1. 默认 User 模版
 const defaultYamlTemplate =
@@ -606,14 +606,23 @@ async function runGeneration(data, apiConfig, isTemplateMode = false) {
     if (!responseContent) throw new Error("API 返回为空");
     lastRawResponse = responseContent;
 
-    if (prefillContent && !responseContent.startsWith(prefillContent) && !responseContent.startsWith("```yaml")) {
-        const trimRes = responseContent.trim();
-        if (!trimRes.startsWith("```yaml") && (trimRes.startsWith("姓名") || trimRes.startsWith("  姓名") || trimRes.startsWith("基本信息"))) {
-             responseContent = prefillContent + responseContent;
+    // [Fix 3] 纯净提取 YAML 代码块
+    const yamlRegex = /```(?:yaml)?\n([\s\S]*?)```/i;
+    const match = responseContent.match(yamlRegex);
+    if (match && match[1]) {
+        responseContent = match[1].trim(); // 仅保留代码块内容
+    } else {
+        // Fallback: 如果没有代码块，保留原逻辑
+        if (prefillContent && !responseContent.startsWith(prefillContent) && !responseContent.startsWith("```yaml")) {
+            const trimRes = responseContent.trim();
+            if (!trimRes.startsWith("```yaml") && (trimRes.startsWith("姓名") || trimRes.startsWith("  姓名") || trimRes.startsWith("基本信息"))) {
+                 responseContent = prefillContent + responseContent;
+            }
         }
+        responseContent = responseContent.replace(/```[a-z]*\n?/g, '').replace(/```/g, '').trim();
     }
 
-    return responseContent.replace(/```[a-z]*\n?/g, '').replace(/```/g, '').trim();
+    return responseContent;
 }
 
 // ============================================================================
@@ -672,7 +681,7 @@ function saveData() {
 }
 
 function saveHistory(item) {
-    const limit = 1000; // Hardcoded safety limit to prevent 10-item cap issues
+    const limit = 1000; 
 
     if (!item.title || item.title === "未命名") {
         const context = getContext();
@@ -835,9 +844,8 @@ async function openCreatorPopup() {
     const context = getContext();
     loadData();
 
-    // --- Async Update Check (Performance Fix) ---
     hasNewVersion = false; 
-    let updatePromise = checkForUpdates(); // Start check but don't await
+    let updatePromise = checkForUpdates(); 
 
     const savedState = loadState();
     const config = { ...defaultSettings, ...extension_settings[extensionName], ...savedState.localConfig };
@@ -858,14 +866,12 @@ async function openCreatorPopup() {
 
     const charName = getContext().characters[getContext().characterId]?.name || "None";
     
-    // NEW Badge hidden by default, shown via async update
     const newBadge = `<span id="pw-new-badge" title="点击查看更新" style="display:none; cursor:pointer; color:#ff4444; font-size:0.6em; font-weight:bold; vertical-align: super; margin-left: 2px;">NEW</span>`;
     const headerTitle = `${TEXT.PANEL_TITLE}${newBadge}<span class="pw-header-subtitle">User: ${currentName} & Char: ${charName}</span>`;
 
     const chipsDisplay = uiStateCache.templateExpanded ? 'flex' : 'none';
     const chipsIcon = uiStateCache.templateExpanded ? 'fa-angle-up' : 'fa-angle-down';
 
-    // Update UI Container Placeholder
     const updateUiHtml = `<div id="pw-update-container"><div style="margin-top:10px; opacity:0.6; font-size:0.9em;"><i class="fas fa-spinner fa-spin"></i> 正在检查更新...</div></div>`;
 
     const html = `
@@ -891,7 +897,6 @@ async function openCreatorPopup() {
 
             <div>
                 <div class="pw-tags-header">
-                    <!-- [Fix] Clickable text block -->
                     <span class="pw-tags-label" id="pw-template-block-header" style="cursor:pointer; user-select:none;">
                         模版块 (点击填入) 
                         <i class="fa-solid ${chipsIcon}" style="margin-left:5px;" title="折叠/展开"></i>
@@ -990,7 +995,6 @@ async function openCreatorPopup() {
             <div class="pw-card-section">
                 <div class="pw-row">
                     <label class="pw-section-label pw-label-gold">角色开场白</label>
-                    <!-- [Fix] Width removed max-width -->
                     <select id="pw-greetings-select" class="pw-input" style="flex:1; width:100%;">
                         <option value="">(不使用开场白)</option>
                     </select>
@@ -1058,6 +1062,7 @@ async function openCreatorPopup() {
                             <option value="style.css" selected>默认 (Native)</option>
                             <!-- Custom themes will be added here -->
                         </select>
+                        <button class="pw-btn danger" id="pw-btn-delete-theme" title="删除当前主题" style="padding:6px 10px; display:none;"><i class="fa-solid fa-trash"></i></button>
                         <input type="file" id="pw-theme-import" accept=".css" style="display:none;">
                         <button class="pw-btn primary" id="pw-btn-import-theme" title="导入本地 .css 文件" style="padding:6px 10px;"><i class="fa-solid fa-file-import"></i></button>
                         
@@ -1091,7 +1096,9 @@ async function openCreatorPopup() {
                     <textarea id="pw-prompt-editor" class="pw-textarea pw-auto-height" style="min-height:150px; font-size:0.85em;"></textarea>
                     
                     <div style="text-align:right; margin-top:10px; display:flex; gap:10px; justify-content:flex-end; border-top: 1px solid rgba(0,0,0,0.1); padding-top: 10px;">
-                        <button class="pw-mini-btn" id="pw-toggle-debug-btn" style="margin-right:auto;"><i class="fa-solid fa-bug"></i> Debug</button>
+                        <!-- [Fix 6] New Debug Button Class -->
+                        <div id="pw-toggle-debug-btn" class="pw-toggle-switch" style="margin-right:auto;"><i class="fa-solid fa-bug"></i> Debug</div>
+                        
                         <button class="pw-mini-btn" id="pw-reset-prompt" style="font-size:0.8em;">恢复默认</button>
                         <button id="pw-api-save" class="pw-btn primary" style="width:auto; padding: 5px 20px;">保存 Prompt</button>
                     </div>
@@ -1186,9 +1193,11 @@ async function openCreatorPopup() {
     if (savedTheme === 'style.css') {
         loadThemeCSS('style.css');
         $('#pw-theme-select').val('style.css');
+        $('#pw-btn-delete-theme').hide(); // Hide delete for default
     } else if (customThemes[savedTheme]) {
         applyCustomTheme(customThemes[savedTheme]);
         $('#pw-theme-select').val(savedTheme);
+        $('#pw-btn-delete-theme').show(); // Show delete for custom
     }
 
     $('.pw-auto-height').each(function() {
@@ -1230,9 +1239,18 @@ function bindEvents() {
         else { $body.slideDown(); $arrow.addClass('fa-flip-vertical'); }
     });
 
-    // --- Debug 切换按钮逻辑 ---
+    // --- [Fix 6] Debug Toggle Button Logic ---
     $(document).on('click.pw', '#pw-toggle-debug-btn', function() {
-        $('#pw-debug-wrapper').slideToggle();
+        const $wrapper = $('#pw-debug-wrapper');
+        const $btn = $(this);
+        
+        $wrapper.slideToggle(200, function() {
+            if ($wrapper.is(':visible')) {
+                $btn.addClass('active');
+            } else {
+                $btn.removeClass('active');
+            }
+        });
     });
 
     // --- NEW 标记点击跳转 ---
@@ -1287,6 +1305,26 @@ function bindEvents() {
         $(this).val('');
     });
 
+    // --- [Fix 4] Delete Theme Logic ---
+    $(document).on('click.pw', '#pw-btn-delete-theme', function() {
+        const current = $('#pw-theme-select').val();
+        if (current === 'style.css') return; // Should be hidden anyway
+        
+        if (confirm(`确定要删除主题 "${current}" 吗？`)) {
+            delete customThemes[current];
+            saveData();
+            
+            // Switch back to default
+            uiStateCache.theme = 'style.css';
+            saveData();
+            loadThemeCSS('style.css');
+            
+            renderThemeOptions();
+            $('#pw-theme-select').val('style.css');
+            toastr.success("主题已删除");
+        }
+    });
+
     // --- [New] Download Theme Template ---
     $(document).on('click.pw', '#pw-btn-download-template', function() {
         const template = `/* Persona Weaver Theme Template */
@@ -1321,8 +1359,10 @@ function bindEvents() {
         
         if (theme === 'style.css') {
             loadThemeCSS(theme);
+            $('#pw-btn-delete-theme').hide();
         } else if (customThemes[theme]) {
             applyCustomTheme(customThemes[theme]);
+            $('#pw-btn-delete-theme').show();
         }
     });
 
@@ -1386,17 +1426,18 @@ function bindEvents() {
             $('#pw-template-chips').hide();
             $('#pw-template-editor').css('display', 'flex');
             $('#pw-toggle-edit-template').text("取消编辑").addClass('editing');
-            $('#pw-toggle-chips-vis').hide(); 
+            $('#pw-template-block-header').find('i').hide(); 
         } else {
             $('#pw-template-editor').hide();
             $('#pw-template-chips').css('display', 'flex');
             $('#pw-toggle-edit-template').text("编辑模版").removeClass('editing');
-            $('#pw-toggle-chips-vis').show();
+            $('#pw-template-block-header').find('i').show();
         }
     });
 
     // [Fix] Click text block to toggle
     $(document).on('click.pw', '#pw-template-block-header', function() {
+        if (isEditingTemplate) return; // Don't toggle if editing
         const $chips = $('#pw-template-chips');
         const $icon = $(this).find('i');
         if ($chips.is(':visible')) {
@@ -1499,7 +1540,7 @@ function bindEvents() {
         $('#pw-template-editor').hide();
         $('#pw-template-chips').css('display', 'flex');
         $('#pw-toggle-edit-template').text("编辑模版").removeClass('editing');
-        $('#pw-toggle-chips-vis').show();
+        $('#pw-template-block-header').find('i').show();
         toastr.success("模版已更新并保存至记录");
     });
 
@@ -1873,20 +1914,33 @@ function bindEvents() {
         toastr.success(TEXT.TOAST_SNAPSHOT);
     });
 
+    // [Fix 1] History Edit Fix: Stop Propagation
     $(document).on('click.pw', '.pw-hist-action-btn.edit', function (e) {
         e.stopPropagation();
         const $header = $(this).closest('.pw-hist-header');
         const $display = $header.find('.pw-hist-title-display');
         const $input = $header.find('.pw-hist-title-input');
         $display.hide(); $input.show().focus();
-        const saveEdit = () => {
+        
+        const saveEdit = (ev) => {
+            if (ev) ev.stopPropagation(); // Stop bubble
             const newVal = $input.val();
             $display.text(newVal).show(); $input.hide();
             const index = $header.closest('.pw-history-item').find('.pw-hist-action-btn.del').data('index');
             if (historyCache[index]) { historyCache[index].title = newVal; saveData(); }
             $(document).off('click.pw-hist-blur');
         };
-        $input.one('blur keyup', function (ev) { if (ev.type === 'keyup' && ev.key !== 'Enter') return; saveEdit(); });
+        
+        // Prevent click inside input from bubbling
+        $input.on('click', function(ev) { ev.stopPropagation(); });
+
+        $input.one('blur keyup', function (ev) { 
+            if (ev.type === 'keyup') {
+                if (ev.key === 'Enter') saveEdit(ev);
+                return;
+            }
+            saveEdit(ev); 
+        });
     });
 
     $(document).on('change.pw', '#pw-api-source', function () { $('#pw-indep-settings').toggle($(this).val() === 'independent'); });
@@ -1954,7 +2008,6 @@ function bindEvents() {
         }
     });
 
-    // [Fix] Removed refresh button logic
     $(document).on('click.pw', '#pw-wi-add', () => { const val = $('#pw-wi-select').val(); if (val && !window.pwExtraBooks.includes(val)) { window.pwExtraBooks.push(val); renderWiBooks(); } });
     
     $(document).on('input.pw', '#pw-history-search', function() { historyPage = 1; renderHistoryList(); });
@@ -1962,9 +2015,11 @@ function bindEvents() {
     $(document).on('click.pw', '#pw-history-clear-all', function () { if (confirm("清空?")) { historyCache = []; saveData(); renderHistoryList(); } });
 }
 
-// 动态加载外部 CSS 文件
+// 动态加载外部 CSS 文件 (用于 style.css)
 function loadThemeCSS(fileName) {
-    // [Fix] Add version query to bust cache
+    // [Fix 5] Clear custom style when loading file
+    $('#pw-custom-style').remove();
+
     const versionQuery = `?v=${CURRENT_VERSION}`; 
     const href = `scripts/extensions/third-party/${extensionName}/${fileName}${versionQuery}`;
 
@@ -1980,11 +2035,12 @@ function loadThemeCSS(fileName) {
     }
 }
 
-// 应用自定义 CSS 内容
+// 应用自定义 CSS 内容 (用于导入的主题)
 function applyCustomTheme(cssContent) {
-    $('#pw-style-link').remove(); // 移除外部链接
-    if ($('#pw-custom-style').length) $('#pw-custom-style').remove();
+    // [Fix 5] Clear file link when loading custom
+    $('#pw-style-link').remove(); 
     
+    if ($('#pw-custom-style').length) $('#pw-custom-style').remove();
     $('<style id="pw-custom-style">').text(cssContent).appendTo('head');
 }
 
@@ -2117,7 +2173,6 @@ const renderWiBooks = async () => {
         <div class="pw-wi-book">
             <div class="pw-wi-header" style="display:flex; align-items:center;">
                 <input type="checkbox" class="pw-wi-header-checkbox pw-wi-select-all" title="全选/全不选 (仅选中当前可见条目)">
-                <!-- [Fix] Added word-break logic via CSS -->
                 <span class="pw-wi-book-title">
                     ${book} ${isBound ? '<span class="pw-bound-status">(已绑定)</span>' : ''}
                 </span>
@@ -2295,7 +2350,7 @@ const renderWiBooks = async () => {
                             <div class="pw-wi-item" data-depth="${entry.depth}" data-code="${getPosFilterCode(entry.position)}" data-original-enabled="${entry.enabled}">
                                 <div class="pw-wi-item-row">
                                     <input type="checkbox" class="pw-wi-check" value="${entry.uid}" ${checkedAttr} data-content="${encodeURIComponent(entry.content)}">
-                                    <div class="pw-wi-title-text" style="font-weight:bold; font-size:0.9em; flex:1; display:flex; align-items:center;">
+                                    <div class="pw-wi-title-text">
                                         ${infoLabel} ${entry.displayName}
                                     </div>
                                     <i class="fa-solid fa-eye pw-wi-toggle-icon"></i>
@@ -2317,7 +2372,14 @@ const renderWiBooks = async () => {
                                 const $desc = $(this).closest('.pw-wi-item').find('.pw-wi-desc');
                                 if ($desc.is(':visible')) { $desc.slideUp(); $(this).removeClass('active'); } else { $desc.slideDown(); $(this).addClass('active'); }
                             });
-                            $item.find('.pw-wi-close-bar').on('click', function () { $(this).parent().slideUp(); $item.find('.pw-wi-toggle-icon').removeClass('active'); });
+                            
+                            // [Fix 2] Better Collapse Animation Logic
+                            $item.find('.pw-wi-close-bar').on('click', function () { 
+                                const $desc = $(this).parent();
+                                $desc.stop(true, true).slideUp(); 
+                                $item.find('.pw-wi-toggle-icon').removeClass('active'); 
+                            });
+                            
                             $list.append($item);
                         });
                     }
@@ -2364,5 +2426,5 @@ jQuery(async () => {
     addPersonaButton(); 
     bindEvents(); 
     loadThemeCSS('style.css'); // Default theme
-    console.log("[PW] Persona Weaver Loaded (v1.5 - Optimized)");
-});
+    console.log("[PW] Persona Weaver Loaded (v1.5.3 - Final Polish)");
+})
