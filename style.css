@@ -1,6 +1,6 @@
 /* =========================================
    File: style.css
-   Version: 1.5.1 (Fixed & Stacked Buttons)
+   Version: 1.5.2 (Ultra Compact Buttons)
 ========================================= */
 
 .pw-wrapper {
@@ -174,9 +174,9 @@
 }
 
 /* =========================================
-   Variable Buttons (Stacked - User, Char etc.)
+   Variable Buttons (Stacked - Tiny Size)
 ========================================= */
-.pw-var-btns { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+.pw-var-btns { display: flex; flex-wrap: wrap; gap: 3px; margin-bottom: 8px; }
 
 .pw-var-btn { 
     /* Stacked Layout */
@@ -185,18 +185,19 @@
     align-items: center; 
     justify-content: center;
     
-    padding: 6px 12px; 
-    min-width: 60px; /* Consistent width */
+    /* Tiny Sizing */
+    padding: 2px 6px; 
+    min-width: 40px; 
     
     border: 1px solid var(--pw-border); 
-    border-radius: 6px; 
-    background: rgba(128,128,128,0.08); /* Card-like bg */
+    border-radius: 4px; 
+    background: rgba(128,128,128,0.08); 
     
     color: var(--pw-text-main);
     cursor: pointer; 
     transition: all 0.2s;
     user-select: none;
-    line-height: 1.3;
+    line-height: 1.1; /* Tight line height */
 }
 
 .pw-var-btn:hover { 
@@ -208,10 +209,10 @@
 
 /* Label (Top Row) */
 .pw-var-btn span:first-child {
-    font-size: 0.85em; 
+    font-size: 0.75em; 
     font-weight: bold;
     opacity: 0.9;
-    margin-bottom: 2px;
+    margin-bottom: 1px;
 }
 
 /* Variable Code (Bottom Row) */
@@ -221,7 +222,7 @@
     border: none;
     padding: 0;
     font-family: Consolas, "Courier New", monospace;
-    font-size: 0.8em; 
+    font-size: 0.7em; 
     opacity: 0.6;
 }
 
