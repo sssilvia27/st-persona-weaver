@@ -1,6 +1,6 @@
 /* =========================================
    File: style.css
-   Version: 1.5.0 (Layout Updated)
+   Version: 1.5.1 (Fixed & Stacked Buttons)
 ========================================= */
 
 .pw-wrapper {
@@ -142,10 +142,8 @@
 .pw-template-footer { display: flex; justify-content: space-between; align-items: center; background: rgba(128,128,128,0.1); padding: 5px 10px; border-top: 1px solid var(--pw-border); }
 
 /* =========================================
-   Shortcut & Variable Buttons (Layout Updated)
+   Shortcut Buttons (Horizontal - Tab, Enter etc.)
 ========================================= */
-
-/* 1. 顶部模版编辑器的快捷键栏 (保持单行左右结构，节省空间) */
 .pw-shortcut-bar { display: flex; gap: 5px; align-items: center; }
 
 .pw-shortcut-btn { 
@@ -157,13 +155,12 @@
     border-radius: 4px; 
     border: 1px solid var(--pw-border); 
     opacity: 0.8; 
-    display: inline-flex; 
-    align-items: center; /* 左右垂直居中 */
+    display: inline-flex; align-items: center;
     transition: all 0.2s;
 }
 .pw-shortcut-btn:hover { opacity: 1; border-color: var(--pw-text-main); background: rgba(128,128,128,0.25); }
 
-/* 快捷键里的代码块 (保持左间距) */
+/* Box style code for shortcuts */
 .pw-shortcut-btn .code {
     margin-left: 6px; 
     font-family: Consolas, "Courier New", monospace;
@@ -176,62 +173,56 @@
     opacity: 0.9;
 }
 
-/* 2. Prompt 编辑区的变量按钮 (改为双行上下结构) */
-.pw-var-btns { 
-    display: flex; 
-    flex-wrap: wrap; 
-    gap: 6px; 
-    margin-bottom: 8px; 
-    /* 让同一行的按钮高度自动拉伸一致 */
-    align-items: stretch; 
-}
+/* =========================================
+   Variable Buttons (Stacked - User, Char etc.)
+========================================= */
+.pw-var-btns { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
 
 .pw-var-btn { 
-    font-size: 0.8em; 
-    padding: 6px 10px; /* 增加内边距 */
-    border: 1px solid var(--pw-border); 
-    border-radius: 6px; 
-    cursor: pointer; 
-    opacity: 0.9; 
-    color: var(--pw-text-main);
-    background: rgba(128,128,128,0.05);
-    
-    /* 关键修改：垂直排列 */
-    display: flex; 
+    /* Stacked Layout */
+    display: inline-flex; 
     flex-direction: column; 
     align-items: center; 
     justify-content: center;
-    text-align: center;
     
-    /* 稍微给点宽度，看起来像卡片 */
-    min-width: 80px; 
-    flex-grow: 1; /* 自动填满空隙 */
-    max-width: 140px; /* 防止在大屏幕上太宽 */
+    padding: 6px 12px; 
+    min-width: 60px; /* Consistent width */
+    
+    border: 1px solid var(--pw-border); 
+    border-radius: 6px; 
+    background: rgba(128,128,128,0.08); /* Card-like bg */
+    
+    color: var(--pw-text-main);
+    cursor: pointer; 
+    transition: all 0.2s;
+    user-select: none;
+    line-height: 1.3;
 }
+
 .pw-var-btn:hover { 
     opacity: 1; 
     border-color: var(--pw-text-main); 
     background: rgba(128,128,128,0.15); 
-    transform: translateY(-1px);
+    transform: translateY(-1px); 
 }
 
-/* 变量按钮里的代码块 (改为上间距) */
+/* Label (Top Row) */
+.pw-var-btn span:first-child {
+    font-size: 0.85em; 
+    font-weight: bold;
+    opacity: 0.9;
+    margin-bottom: 2px;
+}
+
+/* Variable Code (Bottom Row) */
 .pw-var-btn .code {
-    margin-top: 4px; /* 文字和代码之间的间距 */
-    margin-left: 0;
-    
+    margin-left: 0; 
+    background: transparent; 
+    border: none;
+    padding: 0;
     font-family: Consolas, "Courier New", monospace;
-    background: rgba(128, 128, 128, 0.15); /* 稍微淡一点的背景 */
-    padding: 2px 6px;
-    border-radius: 4px;
-    font-size: 0.9em; /* 保持字号 */
-    font-weight: normal;
-    border: 1px solid rgba(128, 128, 128, 0.1);
-    width: 100%; /* 撑满按钮宽度 */
-    box-sizing: border-box;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    font-size: 0.8em; 
+    opacity: 0.6;
 }
 
 /* =========================================
