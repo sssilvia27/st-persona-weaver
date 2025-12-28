@@ -1,6 +1,6 @@
 /* =========================================
    File: style.css
-   Version: 1.5.4 (Decorated Chips & Fixes)
+   Version: 2.0.0 (Native Default)
 ========================================= */
 
 .pw-wrapper {
@@ -10,11 +10,6 @@
     --pw-paper-bg: var(--smart-theme-input-bg, rgba(0, 0, 0, 0.05)); 
     --pw-danger: #ff6b6b;
     
-    /* Diff 界面专用硬编码颜色 */
-    --pw-diff-green: #83c168;
-    --pw-diff-red: #ff6b6b;
-    --pw-diff-bg: #1a1a1a; 
-
     display: flex; flex-direction: column; height: 100%; max-height: 90vh;
     font-size: 14px; 
     color: var(--pw-text-main);
@@ -69,7 +64,6 @@
 .pw-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; flex-wrap: wrap; }
 .pw-section-label { font-weight: bold; font-size: 1em; padding: 2px 4px; color: var(--pw-text-main); opacity: 0.9; }
 
-/* Info Display */
 .pw-info-display {
     display: flex; align-items: center; gap: 10px; 
     background: rgba(128,128,128,0.1); padding: 8px; border-radius: 6px; 
@@ -84,7 +78,6 @@
 }
 .pw-load-btn:hover { opacity: 1; background: rgba(128,128,128,0.2); }
 
-/* Inputs */
 .pw-input, .pw-textarea, .pw-select {
     background-color: var(--pw-paper-bg); border: 1px solid var(--pw-border);
     color: var(--pw-text-main); border-radius: 6px; padding: 8px;
@@ -94,8 +87,6 @@
 .pw-textarea { resize: vertical; line-height: 1.5; }
 #pw-request { min-height: 200px; transition: min-height 0.3s ease; }
 #pw-request.minimized { min-height: 80px; height: 80px !important; }
-
-/* Greetings Fix: Full Width */
 #pw-greetings-select { flex: 1; width: 100%; max-width: 100%; }
 
 /* Buttons */
@@ -120,7 +111,7 @@
 
 /* Toggle Switch Button (Debug) */
 .pw-toggle-switch {
-    border-radius: 50px !important; /* Capsule shape */
+    border-radius: 50px !important;
     padding: 4px 14px !important;
     transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
     border: 1px solid var(--pw-border);
@@ -132,46 +123,33 @@
     font-size: 0.85em; font-weight: bold;
 }
 .pw-toggle-switch:hover { opacity: 1; }
-
 .pw-toggle-switch.active {
-    background: var(--pw-text-main); /* Active color */
-    color: var(--smart-theme-bg, #000); /* Contrast text */
-    border-color: transparent;
-    opacity: 1;
-    box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+    background: var(--pw-text-main); color: var(--smart-theme-bg, #000); border-color: transparent; opacity: 1; box-shadow: 0 2px 5px rgba(0,0,0,0.2);
 }
 
 /* Template Editor */
 .pw-tags-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
 .pw-tags-label { 
     font-weight: bold; opacity: 0.8; font-size: 0.85em; color: var(--pw-text-main); 
-    cursor: pointer; user-select: none; /* Clickable Header */
+    cursor: pointer; user-select: none; 
 }
 .pw-tags-label:hover { opacity: 1; }
-
 .pw-tags-edit-toggle { cursor: pointer; font-size: 0.8em; opacity: 0.7; text-decoration: underline; }
 .pw-tags-edit-toggle.editing { color: var(--pw-danger) !important; }
 .pw-tags-container { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
 
-/* [MODIFIED] Added Left Decorative Bar */
+/* [New] Decorated Chip */
 .pw-tag-chip {
     display: inline-flex; align-items: center; background: rgba(128, 128, 128, 0.15);
     border: 1px solid var(--pw-border); 
-    
-    /* 装饰条 */
     border-left: 5px solid var(--pw-text-main); 
     padding: 4px 10px 4px 8px; 
-    
     border-radius: 4px;
     font-size: 0.9em; cursor: pointer; transition: all 0.2s; 
-    color: var(--pw-text-main);
-    opacity: 0.9;
+    color: var(--pw-text-main); opacity: 0.9;
 }
 .pw-tag-chip:hover { 
-    background: rgba(128, 128, 128, 0.3); 
-    transform: translateY(-1px); 
-    opacity: 1;
-    /* 悬停时装饰条跟随主色 */
+    background: rgba(128, 128, 128, 0.3); transform: translateY(-1px); opacity: 1;
     border-left-color: var(--pw-text-main);
 }
 
@@ -180,11 +158,8 @@
 .pw-template-toolbar { display: flex; justify-content: flex-start; align-items: center; padding: 5px 10px; background: rgba(128,128,128,0.2); border-bottom: 1px solid var(--pw-border); border-radius: 6px 6px 0 0; }
 .pw-template-footer { display: flex; justify-content: space-between; align-items: center; background: rgba(128,128,128,0.1); padding: 5px 10px; border-top: 1px solid var(--pw-border); }
 
-/* =========================================
-   Shortcut Buttons (Stacked like Prompt Buttons)
-========================================= */
+/* Stacked Buttons */
 .pw-shortcut-bar { display: flex; gap: 5px; align-items: center; }
-
 .pw-shortcut-btn { 
     display: inline-flex; flex-direction: column; align-items: center; justify-content: center;
     padding: 5px 2px; min-width: 50px; 
@@ -195,11 +170,7 @@
 .pw-shortcut-btn span:first-child { font-size: 0.75em; font-weight: bold; opacity: 0.9; margin-bottom: 1px; }
 .pw-shortcut-btn .code { margin-left: 0; background: transparent; border: none; padding: 0; font-family: Consolas, "Courier New", monospace; font-size: 0.7em; opacity: 0.6; }
 
-/* =========================================
-   Variable Buttons (Stacked - Tiny Size)
-========================================= */
 .pw-var-btns { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
-
 .pw-var-btn { 
     display: inline-flex; flex-direction: column; align-items: center; justify-content: center;
     padding: 5px 2px; min-width: 50px; 
@@ -210,9 +181,7 @@
 .pw-var-btn span:first-child { font-size: 0.75em; font-weight: bold; opacity: 0.9; margin-bottom: 1px; }
 .pw-var-btn .code { margin-left: 0; background: transparent; border: none; padding: 0; font-family: Consolas, "Courier New", monospace; font-size: 0.7em; opacity: 0.6; }
 
-/* =========================================
-   Result & Refine
-========================================= */
+/* Result & Refine */
 .pw-relative-container { position: relative; }
 .pw-result-textarea {
     width: 100%; min-height: 450px; background: var(--pw-paper-bg);
@@ -227,29 +196,23 @@
 .pw-refine-btn-text { writing-mode: vertical-rl; text-orientation: upright; letter-spacing: 2px; }
 .pw-float-quote-btn { position: fixed; top: 20%; right: 0; background: var(--pw-paper-bg); color: var(--pw-text-main); padding: 8px 12px; border-radius: 20px 0 0 20px; font-weight: bold; font-size: 0.85em; box-shadow: -2px 2px 8px rgba(0,0,0,0.4); cursor: pointer; z-index: 9999; display: none; align-items: center; gap: 4px; border: 1px solid var(--pw-border); border-right: none; backdrop-filter: blur(5px); }
 
-/* =========================================
-   World Info (Layout & Spacing)
-========================================= */
+/* World Info */
 .pw-wi-book { border: 1px solid var(--pw-border); border-radius: 6px; margin-bottom: 6px; overflow: hidden; }
 .pw-wi-header { padding: 8px; background: rgba(128,128,128,0.1); cursor: pointer; display: flex; justify-content: space-between; align-items: center; color: var(--pw-text-main); }
 .pw-wi-header-checkbox { margin-right: 8px; transform: scale(1.2); cursor: pointer; }
-
 .pw-wi-book-title { 
     flex: 1; display: block; overflow: visible; text-overflow: clip; white-space: normal; word-break: break-word; 
     margin-right: 10px; font-weight: bold; min-width: 0; line-height: 1.2; text-align: left;
 }
-
 .pw-wi-title-text {
     flex: 1; display: flex; align-items: center; font-weight: bold; font-size: 0.9em;
     text-align: left; white-space: normal; line-height: 1.3;
 }
-
 .pw-wi-header-actions { display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
 .pw-wi-controls { display: flex; gap: 6px; width: 100%; align-items: center; flex-wrap: nowrap !important; }
 .pw-wi-select { flex-grow: 1; width: 100%; min-width: 0; }
 .pw-wi-add-btn { flex-shrink: 0; padding: 6px 12px; width: auto; white-space: nowrap; }
 
-/* Filter Tools */
 .pw-wi-depth-tools { display: none; flex-direction: column; gap: 8px; padding: 10px; background: rgba(0,0,0,0.1); border-bottom: 1px solid var(--pw-border); }
 .pw-wi-filter-row { display: flex; align-items: center; gap: 8px; flex-wrap: nowrap; width: 100%; }
 .pw-keyword-input { width: 100%; padding: 6px; font-size: 0.9em; }
@@ -268,12 +231,9 @@
 .pw-remove-book-icon:hover { transform: scale(1.1); }
 .pw-bound-status { color: var(--pw-text-main) !important; opacity: 0.6; font-size: 0.8em; margin-left: 5px; font-weight: bold; }
 .pw-wi-desc, #pw-greetings-preview { display: none; background: rgba(128,128,128,0.1) !important; color: var(--pw-text-main) !important; border: 1px solid var(--pw-border); border-radius: 4px; padding: 8px; font-size: 0.9em; width: 100%; box-sizing: border-box; resize: vertical; line-height: 1.5; margin-top: 5px; }
-
 .pw-wi-info-badge { font-size: 0.65em; background: rgba(128,128,128,0.1); padding: 1px 4px; border-radius: 3px; color: var(--pw-text-main); opacity: 0.4; margin-right: 5px; white-space: nowrap; vertical-align: middle; }
 
-/* =========================================
-   History Section
-========================================= */
+/* History */
 .pw-search-box { position: relative; display: flex; align-items: center; margin-bottom: 10px; background: rgba(128,128,128,0.1); border-radius: 6px; border: 1px solid var(--pw-border); width: 100%; }
 .pw-search-icon { position: absolute; left: 10px; opacity: 0.5; pointer-events: none; color: var(--pw-text-main); }
 .pw-search-input { width: 100%; padding-left: 32px !important; padding-right: 30px; border: none; background: transparent; color: var(--pw-text-main); box-sizing: border-box; }
@@ -291,20 +251,16 @@
 .pw-hist-action-btn:hover { opacity: 1; }
 .pw-hist-action-btn.del:hover { color: var(--pw-danger); }
 
-/* Pagination Controls */
 .pw-pagination { display: flex; justify-content: center; align-items: center; gap: 10px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--pw-border); }
 .pw-page-btn { padding: 4px 10px; background: rgba(128,128,128,0.1); border: 1px solid var(--pw-border); border-radius: 4px; cursor: pointer; color: var(--pw-text-main); font-size: 0.9em; }
 .pw-page-btn:disabled { opacity: 0.3; cursor: default; }
 .pw-page-info { font-size: 0.9em; opacity: 0.8; }
 
-/* Badges */
 .pw-badge { display: inline-block; padding: 2px 5px; border-radius: 3px; font-size: 0.7em; margin-right: 5px; font-weight: bold; text-transform: uppercase; vertical-align: middle; }
 .pw-badge.persona { background-color: rgba(65, 150, 255, 0.2); color: #88c0ff; border: 1px solid rgba(65, 150, 255, 0.4); }
 .pw-badge.template { background-color: rgba(255, 165, 0, 0.2); color: #ffbc42; border: 1px solid rgba(255, 165, 0, 0.4); }
 
-/* =========================================
-   Diff / Refine View
-========================================= */
+/* Diff / Refine View */
 .pw-diff-container { background: var(--pw-diff-bg); color: #fff; padding: 0; position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 2000; box-sizing: border-box; display: flex; flex-direction: column; }
 .pw-diff-tabs-bar { border-bottom: 1px solid #444; background: rgba(0,0,0,0.3); padding: 0; gap: 0; display: flex; }
 .pw-diff-tab { padding: 10px 20px; cursor: pointer; border: none; border-right: 1px solid #444; border-bottom: 1px solid #444; background: transparent; color: #aaa; opacity: 1; font-size: 0.9em; display: flex; flex-direction: column; align-items: center; justify-content: center; }
@@ -332,9 +288,7 @@
 .pw-diff-raw-view { display: none; height: 100%; }
 .pw-diff-raw-textarea { width: 100%; height: 100%; background: #111; color: #ddd; border: 1px solid #444; padding: 10px; font-family: monospace; resize: none; outline: none; font-size: 0.85em; line-height: 1.4; }
 
-/* =========================================
-   System & Footer
-========================================= */
+/* System & Footer */
 .pw-footer { margin-top: auto; padding: 8px; border-top: 1px solid var(--pw-border); display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-shrink: 0; background: rgba(128,128,128,0.1); }
 .pw-footer-group { display: flex; gap: 5px; align-items: center; }
 .pw-compact-btn { width: 32px; height: 32px; border-radius: 4px; border: 1px solid var(--pw-border); background: transparent; color: var(--pw-text-main); display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 1em; opacity: 0.7; transition: all 0.2s; }
@@ -355,7 +309,7 @@
 .swal2-actions { flex-wrap: nowrap !important; }
 .swal2-styled { white-space: nowrap !important; width: auto !important; max-width: none !important; flex-shrink: 0 !important; }
 
-/* Responsive */
+/* Responsive Layout */
 @media screen and (max-width: 600px) {
     .pw-row { flex-wrap: wrap; }
     .pw-row label { width: 100%; margin-bottom: 4px; text-align: left; display: block; }
