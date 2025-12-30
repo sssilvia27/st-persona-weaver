@@ -3,7 +3,7 @@ import { extension_settings, getContext } from "../../../extensions.js";
 import { saveSettingsDebounced, callPopup, getRequestHeaders, saveChat, reloadCurrentChat, saveCharacterDebounced } from "../../../../script.js";
 
 const extensionName = "st-persona-weaver";
-const CURRENT_VERSION = "2.1.1"; // Version Fix
+const CURRENT_VERSION = "2.1.2"; // Fix: Data Loading Rollback
 
 // Update URL
 const UPDATE_CHECK_URL = "https://raw.githubusercontent.com/sisisisilviaxie-star/st-persona-weaver/sisisisilviaxie-star-main-dev/manifest.json";
@@ -90,7 +90,7 @@ NSFW:
   性癖好:
   禁忌底线:`;
 
-// 1.1 默认 NPC 模版 (精简版)
+// 1.1 默认 NPC 模版
 const defaultNpcYamlTemplate = 
 `基本信息:
   姓名: 
@@ -235,7 +235,6 @@ let historyCache = [];
 let currentTemplate = defaultYamlTemplate;
 let currentNpcTemplate = defaultNpcYamlTemplate;
 
-// Prompt缓存
 let promptsCache = { 
     templateGen: defaultTemplateGenPrompt,
     personaGen: defaultPersonaGenPrompt,
@@ -254,26 +253,8 @@ let customThemes = {};
 let historyPage = 1; 
 
 // ============================================================================
-// 工具函数 - Context Help
+// 工具函数 - [回滚修复] 恢复原本的数据获取逻辑
 // ============================================================================
-// [重要修复] 获取当前角色ID，优先使用全局对象确保准确
-function getCurrentCharacterId() {
-    if (typeof SillyTavern !== 'undefined' && SillyTavern.characterId !== undefined) {
-        return SillyTavern.characterId;
-    }
-    const context = getContext();
-    return context ? context.characterId : undefined;
-}
-
-// [重要修复] 获取角色列表
-function getCharactersData() {
-    if (typeof SillyTavern !== 'undefined' && SillyTavern.characters) {
-        return SillyTavern.characters;
-    }
-    const context = getContext();
-    return context ? context.characters : [];
-}
-
 const yieldToBrowser = () => new Promise(resolve => requestAnimationFrame(resolve));
 const forcePaint = () => new Promise(resolve => setTimeout(resolve, 50));
 
@@ -291,6 +272,7 @@ ${content}
 """`;
 }
 
+// [已回滚] 使用原始逻辑获取角色信息
 function getCharacterInfoText() {
     if (window.TavernHelper && window.TavernHelper.getCharData) {
         const charData = window.TavernHelper.getCharData('current');
@@ -306,13 +288,12 @@ function getCharacterInfoText() {
         return text;
     }
 
-    // Fallback using robust getters
-    const charId = getCurrentCharacterId();
-    const characters = getCharactersData();
-    
-    if (charId === undefined || !characters[charId]) return "";
+    // Fallback: 原始的 getContext 逻辑
+    const context = getContext();
+    const charId = SillyTavern.getCurrentChatId ? SillyTavern.characterId : context.characterId; 
+    if (charId === undefined || !context.characters[charId]) return "";
 
-    const char = characters[charId];
+    const char = context.characters[charId];
     const data = char.data || char; 
 
     let text = "";
@@ -323,17 +304,13 @@ function getCharacterInfoText() {
     return text;
 }
 
-// [修复] 确保能正确读取开场白
+// [已回滚] 使用原始逻辑获取开场白
 function getCharacterGreetingsList() {
-    const charId = getCurrentCharacterId();
-    const characters = getCharactersData();
+    const context = getContext();
+    const charId = context.characterId;
+    if (charId === undefined || !context.characters[charId]) return [];
 
-    if (charId === undefined || !characters[charId]) {
-        console.warn("[PW] No character selected or data missing.");
-        return [];
-    }
-
-    const char = characters[charId];
+    const char = context.characters[charId];
     const data = char.data || char;
 
     const list = [];
@@ -352,6 +329,7 @@ function getCharacterGreetingsList() {
 async function detectCurrentGreetingIndex() {
     if (window.TavernHelper && window.TavernHelper.getChatMessages) {
         try {
+            // 获取第0楼 (开场白)
             const msgs = window.TavernHelper.getChatMessages(0, { include_swipes: true });
             if (msgs && msgs.length > 0) {
                 const msg0 = msgs[0];
@@ -985,28 +963,19 @@ async function loadAvailableWorldBooks() {
     availableWorldBooks = [...new Set(availableWorldBooks)].filter(x => x).sort();
 }
 
-// [修复] 优先使用 SillyTavern 全局对象获取 WorldBooks
+// [已回滚] 使用原始逻辑获取 WorldBooks
 async function getContextWorldBooks(extras = []) {
+    const context = getContext();
     const books = new Set(extras);
-    let charId = getCurrentCharacterId();
-    let characters = getCharactersData();
-    let context = getContext();
-
-    if (charId !== undefined && characters[charId]) {
-        const char = characters[charId];
+    const charId = context.characterId;
+    if (charId !== undefined && context.characters[charId]) {
+        const char = context.characters[charId];
         const data = char.data || char;
         if (data.character_book?.name) books.add(data.character_book.name);
         if (data.extensions?.world) books.add(data.extensions.world);
         if (data.world) books.add(data.world);
+        if (context.chatMetadata?.world_info) books.add(context.chatMetadata.world_info);
     }
-    
-    // Check Chat Metadata (Global Context fallback)
-    if (context && context.chatMetadata && context.chatMetadata.world_info) {
-        books.add(context.chatMetadata.world_info);
-    } else if (typeof SillyTavern !== 'undefined' && SillyTavern.chatMetadata && SillyTavern.chatMetadata.world_info) {
-        books.add(SillyTavern.chatMetadata.world_info);
-    }
-
     return Array.from(books).filter(Boolean);
 }
 
@@ -1064,10 +1033,7 @@ async function openCreatorPopup() {
         shouldShowResult = true;
     }
 
-    // Get Char Name safely
-    const charId = getCurrentCharacterId();
-    const chars = getCharactersData();
-    const charName = (chars && chars[charId]) ? (chars[charId].name || "None") : "None";
+    const charName = getContext().characters[getContext().characterId]?.name || "None";
     
     const newBadge = `<span id="pw-new-badge" title="点击查看更新" style="display:none; cursor:pointer; color:#ff4444; font-size:0.6em; font-weight:bold; vertical-align: super; margin-left: 2px;">NEW</span>`;
     const headerTitle = `${TEXT.PANEL_TITLE}${newBadge}<span class="pw-header-subtitle">User: ${currentName} & Char: ${charName}</span>`;
@@ -1780,7 +1746,6 @@ function bindEvents() {
         toastr.success("模版已更新并保存至记录");
     });
 
-    // Shortcuts (Omitted)
     $(document).on('click.pw', '.pw-shortcut-btn', function () {
         const key = $(this).data('key');
         const $text = $('#pw-template-text');
