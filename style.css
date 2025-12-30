@@ -72,61 +72,56 @@
 .pw-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; flex-wrap: wrap; }
 .pw-section-label { font-weight: bold; font-size: 1em; padding: 2px 4px; color: var(--pw-text-main); opacity: 0.9; }
 
-/* Info Display & Mode Switcher (NEW) */
+/* [Fix 1] Info Display & Mode Switcher Refactor */
 .pw-info-display {
     display: flex; align-items: center; gap: 10px; 
     background: rgba(128,128,128,0.1); padding: 5px; border-radius: 6px; 
     border: 1px solid var(--pw-border); margin-bottom: 5px;
+    justify-content: space-between; /* Space out items */
 }
-.pw-info-display.mode-switcher {
+
+/* Toggle Group Wrapper */
+.pw-mode-toggle-group {
+    display: flex; 
+    background: rgba(0,0,0,0.1); 
+    border-radius: 20px; 
     padding: 2px;
-    gap: 2px; 
-    justify-content: stretch;
+    gap: 2px;
+    align-items: center;
 }
 
-.pw-mode-btn {
-    flex: 1; 
-    display: flex; align-items: center; justify-content: center; gap: 8px;
-    padding: 10px; border-radius: 20px; 
+.pw-mode-item {
+    padding: 6px 14px; 
+    border-radius: 16px; /* Pill shape */
     cursor: pointer;
-    font-size: 0.9em; color: var(--pw-text-main); opacity: 0.5;
-    transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+    font-size: 0.9em; 
+    color: var(--pw-text-main); 
+    opacity: 0.5; /* Inactive state */
+    transition: all 0.2s ease;
     font-weight: bold;
-    background: transparent;
-    border: 1px solid transparent;
+    display: flex; align-items: center; gap: 6px;
 }
-.pw-mode-btn:hover { opacity: 0.8; background: rgba(128,128,128,0.05); }
 
-/* Active State: Grow and Highlight */
-.pw-mode-btn.pw-mode-active {
-    flex: 2; 
-    font-size: 1.05em;
+.pw-mode-item:hover { opacity: 0.8; }
+
+/* Active State */
+.pw-mode-item.active {
     background: var(--pw-paper-bg);
     opacity: 1;
-    box-shadow: 0 1px 4px rgba(0,0,0,0.15);
-    border-color: var(--pw-border);
+    box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+    color: var(--pw-text-main);
 }
 
 .pw-info-item { display: flex; align-items: center; gap: 6px; font-weight: bold; color: var(--pw-text-main); font-size: 1.05em; }
-#pw-display-name { text-decoration: underline; opacity: 0.9; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;}
+#pw-display-name { opacity: 0.9; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 120px;}
 
-/* [Fix 1] New Button Style: Pill Action Button */
-.pw-action-btn-pill {
-    font-size: 0.85em; 
-    background: rgba(128,128,128,0.15); 
-    border: 1px solid var(--pw-border);
-    padding: 6px 12px; border-radius: 20px; 
-    cursor: pointer; color: var(--pw-text-main);
-    opacity: 0.8; font-weight: bold; margin-left: auto; transition: all 0.2s;
+.pw-load-btn {
+    font-size: 0.85em; background: transparent; border: 1px solid currentColor;
+    padding: 4px 12px; border-radius: 4px; cursor: pointer; color: var(--pw-text-main);
+    opacity: 0.6; font-weight: normal; margin-left: auto; transition: all 0.2s;
     white-space: nowrap; flex-shrink: 0;
-    display: flex; align-items: center; gap: 6px;
 }
-.pw-action-btn-pill:hover { 
-    opacity: 1; 
-    background: var(--pw-paper-bg); 
-    transform: translateY(-1px);
-    box-shadow: 0 2px 5px rgba(0,0,0,0.1);
-}
+.pw-load-btn:hover { opacity: 1; background: rgba(128,128,128,0.2); }
 
 /* Inputs */
 .pw-input, .pw-textarea, .pw-select {
@@ -342,12 +337,10 @@
 .pw-page-btn:disabled { opacity: 0.3; cursor: default; }
 .pw-page-info { font-size: 0.9em; opacity: 0.8; }
 
-/* Badges [Fix 5] */
+/* Badges */
 .pw-badge { display: inline-block; padding: 2px 5px; border-radius: 3px; font-size: 0.7em; margin-right: 5px; font-weight: bold; text-transform: uppercase; vertical-align: middle; }
-.pw-badge.persona.user { background-color: rgba(65, 150, 255, 0.2); color: #88c0ff; border: 1px solid rgba(65, 150, 255, 0.4); }
-.pw-badge.persona.npc  { background-color: rgba(155, 89, 182, 0.2); color: #a569bd; border: 1px solid rgba(155, 89, 182, 0.4); }
-.pw-badge.template.user { background-color: rgba(0, 128, 128, 0.2); color: #40e0d0; border: 1px solid rgba(0, 128, 128, 0.4); }
-.pw-badge.template.npc  { background-color: rgba(255, 165, 0, 0.2); color: #ffbc42; border: 1px solid rgba(255, 165, 0, 0.4); }
+.pw-badge.persona { background-color: rgba(65, 150, 255, 0.2); color: #88c0ff; border: 1px solid rgba(65, 150, 255, 0.4); }
+.pw-badge.template { background-color: rgba(255, 165, 0, 0.2); color: #ffbc42; border: 1px solid rgba(255, 165, 0, 0.4); }
 
 /* =========================================
    Diff / Refine View
@@ -428,4 +421,4 @@
     .pw-diff-cards { flex-direction: column; }
     .pw-diff-card { width: 100%; }
     .pw-footer { flex-wrap: wrap; }
-
+}
