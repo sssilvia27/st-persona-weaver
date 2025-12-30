@@ -3,14 +3,14 @@ import { extension_settings, getContext } from "../../../extensions.js";
 import { saveSettingsDebounced, callPopup, getRequestHeaders, saveChat, reloadCurrentChat, saveCharacterDebounced } from "../../../../script.js";
 
 const extensionName = "st-persona-weaver";
-const CURRENT_VERSION = "2.1.0"; 
+const CURRENT_VERSION = "2.1.1"; // Version Fix
 
 // Update URL
 const UPDATE_CHECK_URL = "https://raw.githubusercontent.com/sisisisilviaxie-star/st-persona-weaver/sisisisilviaxie-star-main-dev/manifest.json";
 
 const STORAGE_KEY_HISTORY = 'pw_history_v29_new_template'; 
 const STORAGE_KEY_STATE = 'pw_state_v20';
-const STORAGE_KEY_TEMPLATE = 'pw_template_v8_npc_support'; // Key updated for separate storage support
+const STORAGE_KEY_TEMPLATE = 'pw_template_v8_npc_support'; 
 const STORAGE_KEY_PROMPTS = 'pw_prompts_v22_npc_support'; 
 const STORAGE_KEY_WI_STATE = 'pw_wi_selection_v1';
 const STORAGE_KEY_UI_STATE = 'pw_ui_state_v2'; 
@@ -168,7 +168,7 @@ const defaultPersonaGenPrompt =
 [Action]:
 Output ONLY the YAML data matching the schema.`;
 
-// 3.1 NPC 人设生成 Prompt (新增)
+// 3.1 NPC 人设生成 Prompt
 const defaultNpcGenPrompt =
 `[Task: Generate NPC Profile]
 [Context]: The user is currently interacting with "{{char}}".
@@ -254,8 +254,26 @@ let customThemes = {};
 let historyPage = 1; 
 
 // ============================================================================
-// 工具函数
+// 工具函数 - Context Help
 // ============================================================================
+// [重要修复] 获取当前角色ID，优先使用全局对象确保准确
+function getCurrentCharacterId() {
+    if (typeof SillyTavern !== 'undefined' && SillyTavern.characterId !== undefined) {
+        return SillyTavern.characterId;
+    }
+    const context = getContext();
+    return context ? context.characterId : undefined;
+}
+
+// [重要修复] 获取角色列表
+function getCharactersData() {
+    if (typeof SillyTavern !== 'undefined' && SillyTavern.characters) {
+        return SillyTavern.characters;
+    }
+    const context = getContext();
+    return context ? context.characters : [];
+}
+
 const yieldToBrowser = () => new Promise(resolve => requestAnimationFrame(resolve));
 const forcePaint = () => new Promise(resolve => setTimeout(resolve, 50));
 
@@ -288,12 +306,13 @@ function getCharacterInfoText() {
         return text;
     }
 
-    // Fallback
-    const context = getContext();
-    const charId = SillyTavern.getCurrentChatId ? SillyTavern.characterId : context.characterId; 
-    if (charId === undefined || !context.characters[charId]) return "";
+    // Fallback using robust getters
+    const charId = getCurrentCharacterId();
+    const characters = getCharactersData();
+    
+    if (charId === undefined || !characters[charId]) return "";
 
-    const char = context.characters[charId];
+    const char = characters[charId];
     const data = char.data || char; 
 
     let text = "";
@@ -304,12 +323,17 @@ function getCharacterInfoText() {
     return text;
 }
 
+// [修复] 确保能正确读取开场白
 function getCharacterGreetingsList() {
-    const context = getContext();
-    const charId = context.characterId;
-    if (charId === undefined || !context.characters[charId]) return [];
+    const charId = getCurrentCharacterId();
+    const characters = getCharactersData();
 
-    const char = context.characters[charId];
+    if (charId === undefined || !characters[charId]) {
+        console.warn("[PW] No character selected or data missing.");
+        return [];
+    }
+
+    const char = characters[charId];
     const data = char.data || char;
 
     const list = [];
@@ -328,7 +352,6 @@ function getCharacterGreetingsList() {
 async function detectCurrentGreetingIndex() {
     if (window.TavernHelper && window.TavernHelper.getChatMessages) {
         try {
-            // 获取第0楼 (开场白)
             const msgs = window.TavernHelper.getChatMessages(0, { include_swipes: true });
             if (msgs && msgs.length > 0) {
                 const msg0 = msgs[0];
@@ -791,10 +814,6 @@ function loadData() {
         }
     } catch { currentTemplate = defaultYamlTemplate; }
     
-    // Note: We don't save NPC template separately to disk in this version to keep it simple,
-    // or we can add a new key. Let's assume currentNpcTemplate resets to default or uses same key logic later if needed.
-    // For now, only prompts have explicit separate storage logic in `loadData`.
-
     try {
         const p = JSON.parse(localStorage.getItem(STORAGE_KEY_PROMPTS));
         promptsCache = {
@@ -966,18 +985,28 @@ async function loadAvailableWorldBooks() {
     availableWorldBooks = [...new Set(availableWorldBooks)].filter(x => x).sort();
 }
 
+// [修复] 优先使用 SillyTavern 全局对象获取 WorldBooks
 async function getContextWorldBooks(extras = []) {
-    const context = getContext();
     const books = new Set(extras);
-    const charId = context.characterId;
-    if (charId !== undefined && context.characters[charId]) {
-        const char = context.characters[charId];
+    let charId = getCurrentCharacterId();
+    let characters = getCharactersData();
+    let context = getContext();
+
+    if (charId !== undefined && characters[charId]) {
+        const char = characters[charId];
         const data = char.data || char;
         if (data.character_book?.name) books.add(data.character_book.name);
         if (data.extensions?.world) books.add(data.extensions.world);
         if (data.world) books.add(data.world);
-        if (context.chatMetadata?.world_info) books.add(context.chatMetadata.world_info);
     }
+    
+    // Check Chat Metadata (Global Context fallback)
+    if (context && context.chatMetadata && context.chatMetadata.world_info) {
+        books.add(context.chatMetadata.world_info);
+    } else if (typeof SillyTavern !== 'undefined' && SillyTavern.chatMetadata && SillyTavern.chatMetadata.world_info) {
+        books.add(SillyTavern.chatMetadata.world_info);
+    }
+
     return Array.from(books).filter(Boolean);
 }
 
@@ -1035,10 +1064,13 @@ async function openCreatorPopup() {
         shouldShowResult = true;
     }
 
-    const charName = getContext().characters[getContext().characterId]?.name || "None";
+    // Get Char Name safely
+    const charId = getCurrentCharacterId();
+    const chars = getCharactersData();
+    const charName = (chars && chars[charId]) ? (chars[charId].name || "None") : "None";
     
     const newBadge = `<span id="pw-new-badge" title="点击查看更新" style="display:none; cursor:pointer; color:#ff4444; font-size:0.6em; font-weight:bold; vertical-align: super; margin-left: 2px;">NEW</span>`;
-    const headerTitle = `${TEXT.PANEL_TITLE}${newBadge}<span class="pw-header-subtitle">Target: ${charName}</span>`;
+    const headerTitle = `${TEXT.PANEL_TITLE}${newBadge}<span class="pw-header-subtitle">User: ${currentName} & Char: ${charName}</span>`;
 
     const chipsDisplay = uiStateCache.templateExpanded ? 'flex' : 'none';
     const chipsIcon = uiStateCache.templateExpanded ? 'fa-angle-up' : 'fa-angle-down';
@@ -1380,7 +1412,7 @@ async function openCreatorPopup() {
     });
 
     // Populate History Filters
-    renderHistoryList(); // Initial render to populate dropdowns logic is inside
+    renderHistoryList(); 
 
     if (autoFilledResult) {
         $('#pw-result-text').val(autoFilledResult);
@@ -1748,6 +1780,7 @@ function bindEvents() {
         toastr.success("模版已更新并保存至记录");
     });
 
+    // Shortcuts (Omitted)
     $(document).on('click.pw', '.pw-shortcut-btn', function () {
         const key = $(this).data('key');
         const $text = $('#pw-template-text');
