@@ -1,19 +1,22 @@
+
 import { extension_settings, getContext } from "../../../extensions.js";
 import { saveSettingsDebounced, callPopup, getRequestHeaders, saveChat, reloadCurrentChat, saveCharacterDebounced } from "../../../../script.js";
 
 const extensionName = "st-persona-weaver";
-const CURRENT_VERSION = "2.7.0"; // Bump version
+const CURRENT_VERSION = "2.7.1"; // Hotfix version
 
 const UPDATE_CHECK_URL = "https://raw.githubusercontent.com/sisisisilviaxie-star/st-persona-weaver/sisisisilviaxie-star-main-dev/manifest.json";
 
 // Storage Keys
 const STORAGE_KEY_HISTORY = 'pw_history_v29_new_template'; 
+const STORAGE_KEY_STATE = 'pw_state_v20';
+const STORAGE_KEY_TEMPLATE = 'pw_template_v6_new_yaml'; 
 const STORAGE_KEY_PROMPTS = 'pw_prompts_v21_restore_edit'; 
 const STORAGE_KEY_WI_STATE = 'pw_wi_selection_v1';
-const STORAGE_KEY_UI_STATE = 'pw_ui_state_v3'; // Bump to v3 for mode isolation
+const STORAGE_KEY_UI_STATE = 'pw_ui_state_v3'; 
 const STORAGE_KEY_THEMES = 'pw_custom_themes_v1'; 
-const STORAGE_KEY_DATA_USER = 'pw_data_user_v1'; // New: User Context Data
-const STORAGE_KEY_DATA_NPC = 'pw_data_npc_v1';   // New: NPC Context Data
+const STORAGE_KEY_DATA_USER = 'pw_data_user_v1'; 
+const STORAGE_KEY_DATA_NPC = 'pw_data_npc_v1';   
 
 const BUTTON_ID = 'pw_persona_tool_btn';
 const HISTORY_PER_PAGE = 20;
@@ -90,7 +93,7 @@ NSFW:
   性癖好:
   禁忌底线:`;
 
-// 1.1 [Fix 4] NPC 模版 (更新字段)
+// 1.1 NPC 模版
 const defaultNpcTemplate = 
 `基本信息:
   姓名: 
@@ -251,8 +254,8 @@ const TEXT = {
     TOAST_QUOTA_ERROR: "浏览器存储空间不足 (Quota Exceeded)，请清理旧记录。"
 };
 
-// --- Global Variables ---
 let historyCache = [];
+let currentTemplate = defaultYamlTemplate;
 let promptsCache = { 
     templateGen: defaultTemplateGenPrompt,
     npcTemplateGen: defaultNpcTemplateGenPrompt,
@@ -271,11 +274,9 @@ let hasNewVersion = false;
 let customThemes = {}; 
 let historyPage = 1; 
 
-// [Fix 3] Context Data Objects
 let userContext = { template: defaultYamlTemplate, request: "", result: "", hasResult: false };
 let npcContext = { template: defaultNpcTemplate, request: "", result: "", hasResult: false };
 
-// Helper to get current active template based on mode
 const getCurrentTemplate = () => {
     return uiStateCache.generationMode === 'npc' ? npcContext.template : userContext.template;
 }
@@ -773,11 +774,10 @@ function loadData() {
     } catch { uiStateCache = { templateExpanded: true, theme: 'style.css', generationMode: 'user' }; }
     try { customThemes = JSON.parse(localStorage.getItem(STORAGE_KEY_THEMES)) || {}; } catch { customThemes = {}; }
 
-    // [Fix 3] Load Isolated Context Data
+    // Load Isolated Context Data
     try {
         const u = JSON.parse(localStorage.getItem(STORAGE_KEY_DATA_USER));
         userContext = u || { template: defaultYamlTemplate, request: "", result: "", hasResult: false };
-        // Fallback for old version template
         if(!u) {
             const oldT = localStorage.getItem(STORAGE_KEY_TEMPLATE);
             if(oldT && oldT.length > 50) userContext.template = oldT;
@@ -795,7 +795,6 @@ function saveData() {
     safeLocalStorageSet(STORAGE_KEY_PROMPTS, JSON.stringify(promptsCache));
     safeLocalStorageSet(STORAGE_KEY_UI_STATE, JSON.stringify(uiStateCache));
     safeLocalStorageSet(STORAGE_KEY_THEMES, JSON.stringify(customThemes));
-    // [Fix 3] Save Isolated Contexts
     safeLocalStorageSet(STORAGE_KEY_DATA_USER, JSON.stringify(userContext));
     safeLocalStorageSet(STORAGE_KEY_DATA_NPC, JSON.stringify(npcContext));
 }
@@ -1025,7 +1024,6 @@ async function openCreatorPopup() {
     if (!currentName) currentName = $('h5#your_name').text().trim();
     if (!currentName) currentName = context.powerUserSettings?.persona_selected || "User";
 
-    // Prepare Initial Display Data based on Mode
     const isNpc = uiStateCache.generationMode === 'npc';
     const activeData = isNpc ? npcContext : userContext;
     
@@ -1055,9 +1053,8 @@ async function openCreatorPopup() {
     <!-- Editor View -->
     <div id="pw-view-editor" class="pw-view active">
         <div class="pw-scroll-area">
-            <!-- [Fix 1] Mode Switcher UI Refactor (Separated & Styled) -->
-            <div class="pw-info-display">
-                <!-- Left: Toggle Group -->
+            <!-- Mode Switcher -->
+            <div class="pw-info-display mode-switcher">
                 <div class="pw-mode-toggle-group">
                     <div class="pw-mode-item ${!isNpc ? 'active' : ''}" data-mode="user" title="User 模式">
                         <i class="fa-solid fa-user"></i> ${currentName}
@@ -1066,7 +1063,6 @@ async function openCreatorPopup() {
                         <i class="fa-solid fa-user-secret"></i> NPC
                     </div>
                 </div>
-                <!-- Right: Action Button (Visibility Hidden when NPC to keep space) -->
                 <div class="pw-load-btn" id="pw-btn-load-current" style="${isNpc ? 'visibility:hidden;' : ''}">载入当前人设</div>
             </div>
 
@@ -1077,7 +1073,6 @@ async function openCreatorPopup() {
                         <i class="fa-solid ${chipsIcon}" style="margin-left:5px;" title="折叠/展开"></i>
                     </span>
                     <div class="pw-tags-actions">
-                        <!-- [Fix 4] "Use User Template" moved here -->
                         <span class="pw-tags-edit-toggle" id="pw-load-main-template" style="${isNpc ? '' : 'display:none;'} margin-right:10px;">使用User模版</span>
                         <span class="pw-tags-edit-toggle" id="pw-toggle-edit-template">编辑模版</span>
                     </div>
@@ -1092,7 +1087,6 @@ async function openCreatorPopup() {
                             <div class="pw-shortcut-btn" data-key="- "><span>列表</span><span class="code">-</span></div>
                             <div class="pw-shortcut-btn" data-key="\n"><span>换行</span><span class="code">Enter</span></div>
                         </div>
-                        <!-- [Fix 3] Reset Template Small Button (Icon Style) -->
                         <div class="pw-mini-btn" id="pw-reset-template-small" title="恢复为该模式的默认模版" style="margin-left:auto; padding:2px 8px; font-size:0.8em; border:none; background:transparent; opacity:0.6;"><i class="fa-solid fa-rotate-left"></i></div>
                     </div>
                     <textarea id="pw-template-text" class="pw-template-textarea">${activeData.template}</textarea>
@@ -1178,13 +1172,11 @@ async function openCreatorPopup() {
                         <option value="">(不使用开场白)</option>
                     </select>
                 </div>
-                <!-- [Fix 2] Min-height fix container -->
+                <!-- [Fix 5] Removed wrapper, direct textarea with min-height -->
                 <div id="pw-greetings-toggle-bar" class="pw-preview-toggle-bar" style="display:none;">
                     <i class="fa-solid fa-angle-up"></i> 收起预览
                 </div>
-                <div id="pw-greetings-wrapper" style="display:none;">
-                    <textarea id="pw-greetings-preview" style="min-height: 250px;"></textarea>
-                </div>
+                <textarea id="pw-greetings-preview" style="display:none; min-height: 200px; margin-top:5px;"></textarea>
             </div>
 
             <div class="pw-card-section">
@@ -1606,28 +1598,28 @@ function bindEvents() {
     $(document).on('change.pw', '#pw-greetings-select', function() {
         const idx = $(this).val();
         const $preview = $('#pw-greetings-preview');
-        const $container = $('#pw-greetings-wrapper');
+        const $toggleBtn = $('#pw-greetings-toggle-bar');
         
         if (idx === "") {
-            $container.slideUp(200);
-            $('#pw-greetings-toggle-bar').hide();
+            $preview.slideUp(200);
+            $toggleBtn.hide();
         } else if (currentGreetingsList[idx]) {
             $preview.val(currentGreetingsList[idx].content);
-            $container.slideDown(200);
-            $('#pw-greetings-toggle-bar').show().html('<i class="fa-solid fa-angle-up"></i> 收起预览');
+            $preview.slideDown(200); // Slide direct
+            $toggleBtn.show().html('<i class="fa-solid fa-angle-up"></i> 收起预览');
         }
     });
 
-    // [Fix 2] Simplified Toggle Logic
+    // [Fix 1] Greetings Toggle - Fixed JS for direct textarea
     $(document).on('click.pw', '#pw-greetings-toggle-bar', function() {
-        const $container = $('#pw-greetings-wrapper');
-        $container.stop(true, true).slideToggle(200, function() {
-            if ($container.is(':visible')) {
-                $('#pw-greetings-toggle-bar').html('<i class="fa-solid fa-angle-up"></i> 收起预览');
-            } else {
-                $('#pw-greetings-toggle-bar').html('<i class="fa-solid fa-angle-down"></i> 展开预览');
-            }
-        });
+        const $preview = $('#pw-greetings-preview');
+        if ($preview.is(':visible')) {
+            $preview.slideUp(200);
+            $(this).html('<i class="fa-solid fa-angle-down"></i> 展开预览');
+        } else {
+            $preview.slideDown(200);
+            $(this).html('<i class="fa-solid fa-angle-up"></i> 收起预览');
+        }
     });
 
     $(document).on('click.pw', '#pw-copy-persona', function() {
@@ -1885,7 +1877,9 @@ function bindEvents() {
     const saveCurrentState = () => {
         clearTimeout(saveTimeout);
         saveTimeout = setTimeout(() => {
-            // [Fix Auto-Save] Only save state vars, NOT template from input
+            // [Fix 2] CRITICAL: Guard Clause to prevent wiping on close
+            if ($('#pw-request').length === 0) return;
+
             const curReq = $('#pw-request').val();
             const curRes = $('#pw-result-text').val();
             const hasRes = $('#pw-result-area').is(':visible');
@@ -1900,20 +1894,23 @@ function bindEvents() {
                 userContext.hasResult = hasRes;
             }
 
-            saveData(); // Saves contexts to local storage
+            saveData(); 
             
-            saveState({ // Legacy support
-                localConfig: {
-                    apiSource: $('#pw-api-source').val(),
-                    indepApiUrl: $('#pw-api-url').val(),
-                    indepApiKey: $('#pw-api-key').val(),
-                    indepApiModel: $('#pw-api-model-select').val() || $('#pw-api-model').val(),
-                    extraBooks: window.pwExtraBooks || []
-                }
-            });
+            // Check if API settings exist before saving legacy
+            if ($('#pw-api-url').length > 0) {
+                saveState({ 
+                    localConfig: {
+                        apiSource: $('#pw-api-source').val(),
+                        indepApiUrl: $('#pw-api-url').val(),
+                        indepApiKey: $('#pw-api-key').val(),
+                        indepApiModel: $('#pw-api-model-select').val() || $('#pw-api-model').val(),
+                        extraBooks: window.pwExtraBooks || []
+                    }
+                });
+            }
         }, 500);
     };
-    // Removed #pw-template-text from listeners
+    
     $(document).on('input.pw change.pw', '#pw-request, #pw-result-text, #pw-wi-toggle, .pw-input, .pw-select', saveCurrentState);
 
     // --- Diff View Logic ---
@@ -2769,6 +2766,5 @@ jQuery(async () => {
     addPersonaButton(); 
     bindEvents(); 
     loadThemeCSS('style.css'); // Default theme
-    console.log("[PW] Persona Weaver Loaded (v2.7.0)");
+    console.log("[PW] Persona Weaver Loaded (v2.7.1 - Hotfix)");
 });
-
