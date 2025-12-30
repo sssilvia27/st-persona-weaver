@@ -2,7 +2,7 @@ import { extension_settings, getContext } from "../../../extensions.js";
 import { saveSettingsDebounced, callPopup, getRequestHeaders, saveChat, reloadCurrentChat, saveCharacterDebounced } from "../../../../script.js";
 
 const extensionName = "st-persona-weaver";
-const CURRENT_VERSION = "2.5.0"; // Bump version
+const CURRENT_VERSION = "2.6.0"; // Bump version
 
 const UPDATE_CHECK_URL = "https://raw.githubusercontent.com/sisisisilviaxie-star/st-persona-weaver/sisisisilviaxie-star-main-dev/manifest.json";
 
@@ -773,7 +773,7 @@ function saveData() {
     safeLocalStorageSet(STORAGE_KEY_THEMES, JSON.stringify(customThemes));
 }
 
-// [Fix 3] History Title Logic Update
+// [Fix 3] History Title Logic Update (@)
 function saveHistory(item) {
     const limit = 1000; 
     const mode = uiStateCache.generationMode; // 'user' or 'npc'
@@ -784,14 +784,13 @@ function saveHistory(item) {
         const charName = context.characters[context.characterId]?.name || "Char";
         
         if (item.data && item.data.type === 'template') {
-            // [Fix 3a] Template Titles
             item.title = mode === 'npc' ? `NPC模版 (${charName})` : `User模版 (${charName})`;
         } else {
-            // [Fix 3b] Persona Titles
             if (mode === 'npc') {
                 const nameMatch = item.data.resultText.match(/姓名:\s*(.*?)(\n|$)/);
                 const npcName = nameMatch ? nameMatch[1].trim() : "Unknown";
-                item.title = `NPC：${npcName}（${charName}）`;
+                // [Fix 3] Use @ for NPC
+                item.title = `NPC：${npcName} @ ${charName}`;
             } else {
                 item.title = `${userName} & ${charName}`;
             }
@@ -1040,14 +1039,18 @@ async function openCreatorPopup() {
     <!-- Editor View -->
     <div id="pw-view-editor" class="pw-view active">
         <div class="pw-scroll-area">
-            <!-- [Fix 1] Mode Switcher UI Refactor -->
+            <!-- [Fix 1] Mode Switcher UI Refactor (Separated & Styled) -->
             <div class="pw-info-display">
                 <!-- Left: Toggle Group -->
                 <div class="pw-mode-toggle-group">
-                    <div class="pw-mode-item ${!isNpc ? 'active' : ''}" data-mode="user" title="User 模式">User: ${currentName}</div>
-                    <div class="pw-mode-item ${isNpc ? 'active' : ''}" data-mode="npc" title="NPC 模式">NPC</div>
+                    <div class="pw-mode-item ${!isNpc ? 'active' : ''}" data-mode="user" title="User 模式">
+                        <i class="fa-solid fa-user"></i> User: ${currentName}
+                    </div>
+                    <div class="pw-mode-item ${isNpc ? 'active' : ''}" data-mode="npc" title="NPC 模式">
+                        <i class="fa-solid fa-user-secret"></i> NPC
+                    </div>
                 </div>
-                <!-- Right: Action Button (Visibility Hidden when NPC) -->
+                <!-- Right: Action Button (Visibility Hidden when NPC to keep space) -->
                 <div class="pw-load-btn" id="pw-btn-load-current" style="${isNpc ? 'visibility:hidden;' : ''}">载入当前人设</div>
             </div>
 
@@ -1058,6 +1061,8 @@ async function openCreatorPopup() {
                         <i class="fa-solid ${chipsIcon}" style="margin-left:5px;" title="折叠/展开"></i>
                     </span>
                     <div class="pw-tags-actions">
+                        <!-- [Fix 4] "Use User Template" moved here -->
+                        <span class="pw-tags-edit-toggle" id="pw-load-main-template" style="${isNpc ? '' : 'display:none;'} margin-right:10px;">使用User模版</span>
                         <span class="pw-tags-edit-toggle" id="pw-toggle-edit-template">编辑模版</span>
                     </div>
                 </div>
@@ -1071,14 +1076,12 @@ async function openCreatorPopup() {
                             <div class="pw-shortcut-btn" data-key="- "><span>列表</span><span class="code">-</span></div>
                             <div class="pw-shortcut-btn" data-key="\n"><span>换行</span><span class="code">Enter</span></div>
                         </div>
-                        <!-- [Fix 3] Reset Template Small Button -->
-                        <div class="pw-mini-btn" id="pw-reset-template-small" title="恢复为该模式的默认模版" style="margin-left:auto; padding:2px 8px; font-size:0.8em; border:none; background:transparent;"><i class="fa-solid fa-rotate-left"></i> 恢复默认</div>
+                        <!-- [Fix 3] Reset Template Small Button (Icon Style) -->
+                        <div class="pw-mini-btn" id="pw-reset-template-small" title="恢复为该模式的默认模版" style="margin-left:auto; padding:2px 8px; font-size:0.8em; border:none; background:transparent; opacity:0.6;"><i class="fa-solid fa-rotate-left"></i></div>
                     </div>
                     <textarea id="pw-template-text" class="pw-template-textarea">${currentTemplate}</textarea>
                     <div class="pw-template-footer">
                         <button class="pw-mini-btn" id="pw-gen-template-smart" title="根据当前世界书和设定，生成定制化模版">生成模板</button>
-                        <!-- [Fix 4] Rename Btn -->
-                        <button class="pw-mini-btn" id="pw-load-main-template" style="${isNpc ? '' : 'display:none;'}" title="使用默认User模版">使用User模版</button>
                         <button class="pw-mini-btn" id="pw-save-template">保存模版</button>
                     </div>
                 </div>
@@ -1159,11 +1162,11 @@ async function openCreatorPopup() {
                         <option value="">(不使用开场白)</option>
                     </select>
                 </div>
-                <!-- [Fix 2] Min-height fix -->
+                <!-- [Fix 2] Revert to simple slide logic + Fixed min-height -->
                 <div id="pw-greetings-toggle-bar" class="pw-preview-toggle-bar" style="display:none;">
                     <i class="fa-solid fa-angle-up"></i> 收起预览
                 </div>
-                <textarea id="pw-greetings-preview" style="min-height: 120px; display:none;"></textarea>
+                <textarea id="pw-greetings-preview" style="display:none;"></textarea>
             </div>
 
             <div class="pw-card-section">
@@ -1294,7 +1297,7 @@ async function openCreatorPopup() {
     <!-- History View with Pagination -->
     <div id="pw-view-history" class="pw-view">
         <div class="pw-scroll-area">
-            <!-- [Fix 3] History Filters -->
+            <!-- Detailed History Types -->
             <div class="pw-history-filters" style="display:flex; gap:5px; margin-bottom:8px;">
                 <select id="pw-hist-filter-type" class="pw-input" style="flex:1;">
                     <option value="all">所有类型</option>
@@ -1406,7 +1409,7 @@ function bindEvents() {
     }
     window.openPersonaWeaver = openCreatorPopup;
 
-    // --- [Fix 1] Mode Switcher (Pill Style) ---
+    // --- Mode Switcher ---
     $(document).on('click.pw', '.pw-mode-item', function() {
         const mode = $(this).data('mode');
         if (mode === uiStateCache.generationMode) return;
@@ -1417,11 +1420,9 @@ function bindEvents() {
         uiStateCache.generationMode = mode;
         saveData();
 
-        // Switch Template & Button Text & Button Visibility
         if (mode === 'npc') {
             $('#pw-btn-gen').text("生成 NPC 设定");
             $('#pw-btn-apply').hide();
-            // [Fix 1] Use visibility hidden to keep layout
             $('#pw-btn-load-current').css('visibility', 'hidden'); 
             $('#pw-load-main-template').show(); 
 
@@ -1606,24 +1607,22 @@ function bindEvents() {
         } else if (currentGreetingsList[idx]) {
             $preview.val(currentGreetingsList[idx].content).show();
             $toggleBtn.show().html('<i class="fa-solid fa-angle-up"></i> 收起预览');
-            // [Fix 2] Smooth toggle logic
-            requestAnimationFrame(() => {
-                $preview.height('auto');
-                $preview.height($preview[0].scrollHeight + 'px');
-            });
+            // [Fix 2] Remove requestAnimationFrame height adjustment for smoother manual slide
+            $preview.height('180px'); // Set initial height
         }
     });
 
-    // [Fix 2] Toggle Animation Logic
+    // [Fix 2] Simplified Toggle Logic
     $(document).on('click.pw', '#pw-greetings-toggle-bar', function() {
         const $preview = $('#pw-greetings-preview');
-        if ($preview.is(':visible')) {
-            $preview.slideUp();
-            $(this).html('<i class="fa-solid fa-angle-down"></i> 展开预览');
-        } else {
-            $preview.slideDown();
-            $(this).html('<i class="fa-solid fa-angle-up"></i> 收起预览');
-        }
+        // Standard jQuery slideToggle
+        $preview.stop(true, true).slideToggle(200, function() {
+            if ($preview.is(':visible')) {
+                $('#pw-greetings-toggle-bar').html('<i class="fa-solid fa-angle-up"></i> 收起预览');
+            } else {
+                $('#pw-greetings-toggle-bar').html('<i class="fa-solid fa-angle-down"></i> 展开预览');
+            }
+        });
     });
 
     $(document).on('click.pw', '#pw-copy-persona', function() {
@@ -2333,7 +2332,7 @@ const renderTemplateChips = () => {
     });
 };
 
-// [Fix 4] History Filter Logic & Tags & Click Switch
+// [Fix 7] History Filter Logic Update
 const renderHistoryList = () => {
     loadData();
     const $list = $('#pw-history-list').empty();
@@ -2344,14 +2343,20 @@ const renderHistoryList = () => {
     const chars = new Set();
     historyCache.forEach(item => {
         const title = item.title || "";
-        // Logic: Extract the part in parentheses or after last space for Char Name
-        // Format: "User模版 (Char)" or "NPC：Name（Char）"
+        // [Fix 7] Extract Char Name from new format
+        // Formats: "User模版 (Char)", "NPC：Name @ Char"
         let charName = "";
-        if (title.includes('（')) {
-            charName = title.split('（')[1].replace('）', '').trim();
-        } else if (title.includes('(')) {
-            charName = title.split('(')[1].replace(')', '').trim();
+        if (title.includes(' @ ')) {
+            const parts = title.split(' @ ');
+            if (parts.length > 1) charName = parts[1].trim();
+        } else if (title.includes('(') && title.endsWith(')')) {
+            const parts = title.split('(');
+            charName = parts[parts.length - 1].replace(')', '').trim();
+        } else if (title.includes('&')) { // Old format fallback
+            const parts = title.split('&');
+            if (parts.length > 1) charName = parts[1].trim();
         }
+        
         if(charName) chars.add(charName);
     });
     
@@ -2432,7 +2437,7 @@ const renderHistoryList = () => {
         $el.on('click', function (e) {
             if ($(e.target).closest('.pw-hist-action-btn, .pw-hist-title-input').length) return;
             
-            // [Fix 4] Auto Switch Mode Logic
+            // Auto Switch Mode Logic
             const targetMode = (type === 'npc_template' || type === 'npc_persona' || type === 'npc') ? 'npc' : 'user';
             const $modeBtn = $(`.pw-mode-item[data-mode="${targetMode}"]`);
             if (!$modeBtn.hasClass('active')) {
@@ -2732,5 +2737,6 @@ jQuery(async () => {
     addPersonaButton(); 
     bindEvents(); 
     loadThemeCSS('style.css'); // Default theme
-    console.log("[PW] Persona Weaver Loaded (v2.5.0)");
+    console.log("[PW] Persona Weaver Loaded (v2.6.0)");
 });
+
