@@ -10,9 +10,8 @@ const UPDATE_CHECK_URL = "https://raw.githubusercontent.com/sisisisilviaxie-star
 const STORAGE_KEY_HISTORY = 'pw_history_v29_new_template'; 
 const STORAGE_KEY_STATE = 'pw_state_v20';
 const STORAGE_KEY_TEMPLATE = 'pw_template_v6_new_yaml'; 
-// [MOD] NPC 模版单独存一个 Key
 const STORAGE_KEY_TEMPLATE_NPC = 'pw_template_npc_v1';
-const STORAGE_KEY_PROMPTS = 'pw_prompts_v21_restore_edit'; 
+const STORAGE_KEY_PROMPTS = 'pw_prompts_v22_chat_context'; // [MOD] Key updated
 const STORAGE_KEY_WI_STATE = 'pw_wi_selection_v1';
 const STORAGE_KEY_UI_STATE = 'pw_ui_state_v1';
 const STORAGE_KEY_THEMES = 'pw_custom_themes_v1'; 
@@ -91,7 +90,7 @@ NSFW:
   性癖好:
   禁忌底线:`;
 
-// [MOD] 2. 默认 NPC 模版 (基于 User 模版精简，修改了 System 提示)
+// 2. 默认 NPC 模版
 const defaultNpcTemplate = 
 `基本信息:
   姓名: 
@@ -148,7 +147,7 @@ const defaultTemplateGenPrompt =
 [Action]:
 Output the blank YAML template now. No explanations.`;
 
-// 4. 人设生成/润色专用 User Prompt
+// [MOD] 4. 人设生成/润色专用 User Prompt (Added chatHistory)
 const defaultPersonaGenPrompt =
 `[Task: Generate/Refine Profile]
 [Target Entity: "{{targetName}}"]
@@ -157,6 +156,9 @@ const defaultPersonaGenPrompt =
 <source_materials>
 {{charInfo}}
 {{greetings}}
+<recent_chat_context>
+{{chatHistory}}
+</recent_chat_context>
 </source_materials>
 
 <target_schema>
@@ -201,8 +203,7 @@ const TEXT = {
 
 let historyCache = [];
 let currentTemplate = defaultYamlTemplate;
-let currentNpcTemplate = defaultNpcTemplate; // [MOD]
-// Prompt缓存
+let currentNpcTemplate = defaultNpcTemplate; 
 let promptsCache = { 
     templateGen: defaultTemplateGenPrompt,
     personaGen: defaultPersonaGenPrompt,
@@ -214,7 +215,7 @@ let lastRawResponse = "";
 let isProcessing = false;
 let currentGreetingsList = []; 
 let wiSelectionCache = {};
-let uiStateCache = { templateExpanded: true, theme: 'style.css', editorMode: 'user' }; // [MOD] Added editorMode
+let uiStateCache = { templateExpanded: true, theme: 'style.css', editorMode: 'user' }; 
 let hasNewVersion = false;
 let customThemes = {}; 
 let historyPage = 1; 
@@ -268,6 +269,32 @@ function getCharacterInfoText() {
     if (data.scenario) text += `Scenario:\n${data.scenario}\n`;
     
     return text;
+}
+
+// [MOD] 获取最近聊天记录 (用于 NPC 上下文)
+function getRecentChatText(limit = 15) {
+    try {
+        let messages = [];
+        if (window.TavernHelper && typeof window.TavernHelper.getChatMessages === 'function') {
+            // 获取最近 N 条，包含当前正在进行的
+            messages = window.TavernHelper.getChatMessages(`-${limit}`);
+        } else if (SillyTavern && SillyTavern.chat) {
+            messages = SillyTavern.chat.slice(-limit);
+        }
+
+        if (!messages || messages.length === 0) return "";
+
+        return messages.map(msg => {
+            const role = msg.is_user ? 'User' : (msg.name || 'Char');
+            // 简单清洗 html 标签
+            let content = msg.mes || msg.message || "";
+            content = content.replace(/<[^>]*>?/gm, ''); 
+            return `${role}: ${content}`;
+        }).join('\n');
+    } catch (e) {
+        console.warn("[PW] Failed to fetch chat history:", e);
+        return "";
+    }
 }
 
 function getCharacterGreetingsList() {
@@ -536,9 +563,12 @@ async function runGeneration(data, apiConfig, isTemplateMode = false) {
     const rawCharInfo = getCharacterInfoText(); 
     const rawWi = data.wiText || ""; 
     const rawGreetings = data.greetingsText || "";
+    // [MOD] Fetch Chat History
+    const rawChatHistory = getRecentChatText(15); 
+
     const currentText = data.currentText || "";
     const requestText = data.request || "";
-    const activeTemplate = isTemplateMode ? "" : (data.mode === 'npc' ? currentNpcTemplate : currentTemplate); // [MOD] Select template
+    const activeTemplate = isTemplateMode ? "" : (data.mode === 'npc' ? currentNpcTemplate : currentTemplate); 
 
     const wrappedCharInfo = wrapAsXiTaReference(rawCharInfo, `Entity Profile: ${charName}`);
     const wrappedWi = wrapAsXiTaReference(rawWi, "Global State Variables"); 
@@ -568,14 +598,15 @@ async function runGeneration(data, apiConfig, isTemplateMode = false) {
             .replace(/{{char}}/g, charName);
     } else {
         let basePrompt = promptsCache.personaGen || defaultPersonaGenPrompt;
-        const roleType = data.mode === 'npc' ? "NPC/Side Character" : "User/Protagonist"; // [MOD]
+        const roleType = data.mode === 'npc' ? "NPC/Side Character" : "User/Protagonist"; 
         userMessageContent = basePrompt
-            .replace(/{{user}}/g, targetName) // Backwards compatible
-            .replace(/{{targetName}}/g, targetName) // [MOD]
-            .replace(/{{roleType}}/g, roleType) // [MOD]
+            .replace(/{{user}}/g, targetName) 
+            .replace(/{{targetName}}/g, targetName)
+            .replace(/{{roleType}}/g, roleType) 
             .replace(/{{char}}/g, charName)
             .replace(/{{charInfo}}/g, wrappedCharInfo)
             .replace(/{{greetings}}/g, wrappedGreetings)
+            .replace(/{{chatHistory}}/g, rawChatHistory) // [MOD] Inject Chat History
             .replace(/{{template}}/g, wrappedTags)
             .replace(/{{input}}/g, wrappedInput);
     }
@@ -661,15 +692,13 @@ async function runGeneration(data, apiConfig, isTemplateMode = false) {
     if (!responseContent) throw new Error("API 返回为空");
     lastRawResponse = responseContent;
 
-    // [MOD] 2. 优化 Markdown 清理逻辑 (去头去尾)
+    // 2. 优化 Markdown 清理逻辑 (去头去尾)
     const codeBlockRegex = /```(?:yaml|json)?\s*([\s\S]*?)\s*```/i;
     const match = responseContent.match(codeBlockRegex);
     if (match && match[1]) {
         responseContent = match[1].trim(); 
     } else {
-        // 如果没有成对的 ```，尝试手动清理前缀和后缀
         if (prefillContent && !responseContent.trim().startsWith("基本信息")) {
-             // 只有当开头看起来不像 YAML 时才拼接 Prefill (防止重复)
              if (!responseContent.trim().startsWith("```") && !responseContent.includes("姓名:")) {
                  responseContent = prefillContent + responseContent;
              }
@@ -706,7 +735,6 @@ function loadData() {
         else currentTemplate = t;
     } catch { currentTemplate = defaultYamlTemplate; }
     
-    // [MOD] Load NPC Template
     try {
         const tn = localStorage.getItem(STORAGE_KEY_TEMPLATE_NPC);
         if (!tn || tn.length < 20) currentNpcTemplate = defaultNpcTemplate;
@@ -740,7 +768,7 @@ function loadData() {
 
 function saveData() {
     safeLocalStorageSet(STORAGE_KEY_TEMPLATE, currentTemplate);
-    safeLocalStorageSet(STORAGE_KEY_TEMPLATE_NPC, currentNpcTemplate); // [MOD]
+    safeLocalStorageSet(STORAGE_KEY_TEMPLATE_NPC, currentNpcTemplate);
     safeLocalStorageSet(STORAGE_KEY_HISTORY, JSON.stringify(historyCache));
     safeLocalStorageSet(STORAGE_KEY_PROMPTS, JSON.stringify(promptsCache));
     safeLocalStorageSet(STORAGE_KEY_UI_STATE, JSON.stringify(uiStateCache));
@@ -752,7 +780,6 @@ function saveHistory(item) {
 
     if (!item.title || item.title === "未命名") {
         const context = getContext();
-        // [MOD] History Title Logic
         const charName = context.characters[context.characterId]?.name || "Char";
         
         if (item.data && item.data.type === 'template') {
@@ -764,7 +791,6 @@ function saveHistory(item) {
             item.title = `${userName} & ${charName}`;
         }
     }
-    // [MOD] Ensure mode is saved
     if (item.data && !item.data.mode) {
         item.data.mode = uiStateCache.editorMode;
     }
@@ -830,7 +856,6 @@ async function syncToWorldInfoViaHelper(targetName, content, isNpc = false) {
     if (!targetBook) return toastr.warning(TEXT.TOAST_WI_FAIL);
 
     const safeName = targetName || "Unknown";
-    // [MOD] Entry Title Logic
     const entryTitle = isNpc ? `NPC:${safeName}` : `USER:${safeName}`; 
 
     try {
@@ -916,6 +941,47 @@ async function getWorldBookEntries(bookName) {
 // 4. UI 渲染 logic
 // ============================================================================
 
+// [MOD] Render Greetings List with Auto-Match Logic
+const renderGreetingsList = () => {
+    const list = getCharacterGreetingsList();
+    currentGreetingsList = list;
+    const $select = $('#pw-greetings-select').empty();
+    $select.append('<option value="">(不使用开场白)</option>');
+    
+    // Auto-match logic
+    let firstMessage = null;
+    try {
+        if (window.TavernHelper && typeof window.TavernHelper.getChatMessages === 'function') {
+            const msgs = window.TavernHelper.getChatMessages('0');
+            if (msgs && msgs.length > 0) firstMessage = msgs[0].message;
+        } else if (SillyTavern && SillyTavern.chat && SillyTavern.chat.length > 0) {
+            firstMessage = SillyTavern.chat[0].mes;
+        }
+    } catch(e) {}
+
+    let matchedIndex = -1;
+
+    list.forEach((item, idx) => {
+        let label = item.label;
+        
+        // Check match
+        if (firstMessage && item.content) {
+            // Remove markdown images/formatting for comparison
+            const cleanA = item.content.replace(/<[^>]*>/g, '').trim();
+            const cleanB = firstMessage.replace(/<[^>]*>/g, '').trim();
+            if (cleanA.includes(cleanB) || cleanB.includes(cleanA)) { // Loose match
+                label += " (当前)";
+                if (matchedIndex === -1) matchedIndex = idx;
+            }
+        }
+        $select.append(`<option value="${idx}">${label}</option>`);
+    });
+
+    if (matchedIndex !== -1) {
+        $select.val(matchedIndex);
+    }
+};
+
 async function openCreatorPopup() {
     const context = getContext();
     loadData();
@@ -950,13 +1016,12 @@ async function openCreatorPopup() {
 
     const updateUiHtml = `<div id="pw-update-container"><div style="margin-top:10px; opacity:0.6; font-size:0.9em;"><i class="fas fa-spinner fa-spin"></i> 正在检查更新...</div></div>`;
 
-    // [MOD] Editor Mode Logic
     const isNpcMode = uiStateCache.editorMode === 'npc';
     const nameInputDisplay = isNpcMode ? 'block' : 'none';
     const nameLabelDisplay = isNpcMode ? 'none' : 'block';
-    const applyBtnDisplay = isNpcMode ? 'none' : 'block'; // Hide Apply button in NPC mode
+    const applyBtnDisplay = isNpcMode ? 'none' : 'block'; 
 
-    // [MOD] 4. User/NPC Switcher HTML
+    // [MOD] 1. Switcher HTML
     const modeSwitcherHtml = `
     <div class="pw-mode-switch-bar">
         <div class="pw-mode-btn ${!isNpcMode ? 'active' : ''}" data-mode="user"><i class="fa-solid fa-user"></i> 主角 (User)</div>
@@ -1193,6 +1258,7 @@ async function openCreatorPopup() {
                         <div class="pw-var-btn" data-ins="{{char}}"><span>Char名</span><span class="code">{{char}}</span></div>
                         <div class="pw-var-btn" data-ins="{{charInfo}}"><span>角色设定</span><span class="code">{{charInfo}}</span></div>
                         <div class="pw-var-btn" data-ins="{{greetings}}"><span>开场白</span><span class="code">{{greetings}}</span></div>
+                        <div class="pw-var-btn" data-ins="{{chatHistory}}"><span>聊天历史</span><span class="code">{{chatHistory}}</span></div>
                         <div class="pw-var-btn" data-ins="{{template}}"><span>模版内容</span><span class="code">{{template}}</span></div>
                         <div class="pw-var-btn" data-ins="{{input}}"><span>用户要求</span><span class="code">{{input}}</span></div>
                     </div>
@@ -1301,24 +1367,8 @@ async function openCreatorPopup() {
         $('#pw-wi-select').html(`<option value="">-- 添加参考/目标世界书 --</option>${options}`);
     });
     
+    // [MOD] 2. 调用修改后的 renderGreetingsList
     renderGreetingsList();
-    // [MOD] 1. Auto-bind Greetings Logic
-    setTimeout(() => {
-        if (currentGreetingsList.length > 0) {
-             const chat = SillyTavern.getContext().chat;
-             if (chat && chat.length > 0 && chat[0].mes) {
-                 const firstMsg = chat[0].mes.trim();
-                 let foundIdx = -1;
-                 currentGreetingsList.forEach((g, idx) => {
-                     if (foundIdx === -1 && g.content.trim() === firstMsg) foundIdx = idx;
-                 });
-                 if (foundIdx !== -1) {
-                     $('#pw-greetings-select').val(foundIdx).trigger('change');
-                     console.log(`[PW] Auto-bound greeting index: ${foundIdx}`);
-                 }
-             }
-        }
-    }, 100);
 
     renderThemeOptions(); 
     
@@ -1649,7 +1699,7 @@ function bindEvents() {
             const charInfoText = getCharacterInfoText(); 
             const hasCharInfo = charInfoText && charInfoText.length > 50; 
             const hasWi = contextData.wi && contextData.wi.length > 10;
-            const isNpc = uiStateCache.editorMode === 'npc'; // [MOD]
+            const isNpc = uiStateCache.editorMode === 'npc'; 
 
             if (!hasCharInfo && !hasWi) {
                 const wantGeneric = confirm("当前未检测到关联的角色卡或世界书信息。\n\n是否要生成通用模版？");
@@ -1682,7 +1732,7 @@ function bindEvents() {
                 indepApiUrl: $('#pw-api-url').val(),
                 indepApiKey: $('#pw-api-key').val(), 
                 indepApiModel: modelVal,
-                mode: isNpc ? 'npc' : 'user' // [MOD] Pass mode
+                mode: isNpc ? 'npc' : 'user'
             };
             
             const generatedTemplate = await runGeneration(config, config, true);
@@ -1874,7 +1924,7 @@ function bindEvents() {
                 indepApiUrl: $('#pw-api-url').val(),
                 indepApiKey: $('#pw-api-key').val(), 
                 indepApiModel: modelVal,
-                targetName: $('#pw-npc-name-input').val() // [MOD]
+                targetName: $('#pw-npc-name-input').val() 
             };
             const responseText = await runGeneration(config, config, false);
 
@@ -2024,7 +2074,7 @@ function bindEvents() {
             const contextData = await collectContextData();
             const modelVal = $('#pw-api-source').val() === 'independent' ? $('#pw-api-model-select').val() : null;
             const config = {
-                mode: isNpc ? 'npc' : 'initial', // [MOD]
+                mode: isNpc ? 'npc' : 'initial', 
                 request: req, 
                 wiText: contextData.wi,
                 greetingsText: contextData.greetings,
@@ -2032,11 +2082,11 @@ function bindEvents() {
                 indepApiUrl: $('#pw-api-url').val(),
                 indepApiKey: $('#pw-api-key').val(), 
                 indepApiModel: modelVal,
-                targetName: npcName // [MOD]
+                targetName: npcName 
             };
             const text = await runGeneration(config, config, false);
             
-            // [MOD] Auto-fill NPC Name if generated
+            // Auto-fill NPC Name if generated
             if (isNpc && !npcName) {
                  const nameMatch = text.match(/^姓名[:：]\s*(.+)$/m);
                  if (nameMatch && nameMatch[1]) {
@@ -2101,7 +2151,7 @@ function bindEvents() {
             $('#pw-request').val('').removeClass('minimized');
             $('#pw-result-area').hide();
             $('#pw-result-text').val('');
-            if(uiStateCache.editorMode === 'npc') $('#pw-npc-name-input').val(''); // [MOD]
+            if(uiStateCache.editorMode === 'npc') $('#pw-npc-name-input').val(''); 
             saveCurrentState();
         }
     });
@@ -2116,19 +2166,19 @@ function bindEvents() {
         saveHistory({ 
             request: req || "无", 
             timestamp: new Date().toLocaleString(), 
-            title: "", // Let helper handle it
+            title: "", 
             data: { 
                 name: "Persona", 
                 resultText: text || "(无)", 
                 type: 'persona',
-                mode: isNpc ? 'npc' : 'user', // [MOD]
+                mode: isNpc ? 'npc' : 'user', 
                 targetName: name
             } 
         });
         toastr.success(TEXT.TOAST_SNAPSHOT);
     });
 
-    // [Fix 1] History Edit Fix: Stop Propagation
+    // History Edit Fix: Stop Propagation
     $(document).on('click.pw', '.pw-hist-action-btn.edit', function (e) {
         e.stopPropagation();
         const $header = $(this).closest('.pw-hist-header');
@@ -2224,7 +2274,7 @@ function bindEvents() {
 
     $(document).on('click.pw', '#pw-wi-add', () => { const val = $('#pw-wi-select').val(); if (val && !window.pwExtraBooks.includes(val)) { window.pwExtraBooks.push(val); renderWiBooks(); } });
     
-    // [MOD] History Filter Listeners
+    // History Filter Listeners
     $(document).on('change.pw', '#pw-history-filter-type, #pw-history-filter-char', function() { historyPage = 1; renderHistoryList(); });
 
     $(document).on('input.pw', '#pw-history-search', function() { historyPage = 1; renderHistoryList(); });
@@ -2232,9 +2282,8 @@ function bindEvents() {
     $(document).on('click.pw', '#pw-history-clear-all', function () { if (confirm("清空?")) { historyCache = []; saveData(); renderHistoryList(); } });
 }
 
-// 动态加载外部 CSS 文件 (用于 style.css)
+// 动态加载外部 CSS 文件
 function loadThemeCSS(fileName) {
-    // [Fix 5] Clear custom style when loading file
     $('#pw-custom-style').remove();
 
     const versionQuery = `?v=${CURRENT_VERSION}`; 
@@ -2252,9 +2301,8 @@ function loadThemeCSS(fileName) {
     }
 }
 
-// 应用自定义 CSS 内容 (用于导入的主题)
+// 应用自定义 CSS 内容
 function applyCustomTheme(cssContent) {
-    // [Fix 5] Clear file link when loading custom
     $('#pw-style-link').remove(); 
     
     if ($('#pw-custom-style').length) $('#pw-custom-style').remove();
@@ -2296,7 +2344,6 @@ const renderHistoryList = () => {
     const $list = $('#pw-history-list').empty();
     const search = $('#pw-history-search').val().toLowerCase();
     
-    // [MOD] 3. Filter Logic
     const filterType = $('#pw-history-filter-type').val();
     const filterChar = $('#pw-history-filter-char').val();
 
@@ -2382,7 +2429,7 @@ const renderHistoryList = () => {
             } else {
                 $('#pw-request').val(item.request); $('#pw-result-text').val(previewText); $('#pw-result-area').show();
                 $('#pw-request').addClass('minimized');
-                // [MOD] Load NPC Mode
+                // Load NPC Mode
                 if (item.data.mode === 'npc') {
                     if (uiStateCache.editorMode !== 'npc') $('.pw-mode-btn[data-mode="npc"]').click();
                     if (item.data.targetName) $('#pw-npc-name-input').val(item.data.targetName);
@@ -2641,7 +2688,6 @@ const renderWiBooks = async () => {
 };
 
 const getPosAbbr = (pos) => {
-    // 简单的缩写映射，用于 UI 显示
     if (pos === 0 || pos === 'before_character_definition') return 'PreChar';
     if (pos === 1 || pos === 'after_character_definition') return 'PostChar';
     if (pos === 2 || pos === 'before_example_messages') return 'PreEx';
@@ -2651,16 +2697,6 @@ const getPosAbbr = (pos) => {
     if (pos === 6 || pos === 'at_depth_as_system') return '@Sys'; // 旧代码兼容
     if (String(pos).includes('at_depth')) return '@Depth';
     return '?';
-};
-
-const renderGreetingsList = () => {
-    const list = getCharacterGreetingsList();
-    currentGreetingsList = list;
-    const $select = $('#pw-greetings-select').empty();
-    $select.append('<option value="">(不使用开场白)</option>');
-    list.forEach((item, idx) => {
-        $select.append(`<option value="${idx}">${item.label}</option>`);
-    });
 };
 
 function addPersonaButton() {
@@ -2675,6 +2711,5 @@ jQuery(async () => {
     addPersonaButton(); 
     bindEvents(); 
     loadThemeCSS('style.css'); // Default theme
-    console.log("[PW] Persona Weaver Loaded (v2.1.0)");
-});
-
+    console.log("[PW] Persona Weaver Loaded (v2.2.0)");
+})
