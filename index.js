@@ -5,7 +5,7 @@ const extensionName = "st-persona-weaver";
 const CURRENT_VERSION = "2.0.0"; 
 
 // Update URL
-const UPDATE_CHECK_URL = "https://raw.githubusercontent.com/sisisisilviaxie-star/st-persona-weaver/sisisisilviaxie-star-main-dev/manifest.json";
+const UPDATE_CHECK_URL = "https://raw.githubusercontent.com/sisisisilviaxie-star/st-persona-weaver/main/manifest.json";
 
 const STORAGE_KEY_HISTORY = 'pw_history_v29_new_template'; 
 const STORAGE_KEY_STATE = 'pw_state_v20';
