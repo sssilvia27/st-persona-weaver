@@ -2,7 +2,7 @@ import { extension_settings, getContext } from "../../../extensions.js";
 import { saveSettingsDebounced, callPopup, getRequestHeaders, saveChat, reloadCurrentChat, saveCharacterDebounced } from "../../../../script.js";
 
 const extensionName = "st-persona-weaver";
-const CURRENT_VERSION = "2.4.0"; 
+const CURRENT_VERSION = "2.5.0"; // Bump version
 
 const UPDATE_CHECK_URL = "https://raw.githubusercontent.com/sisisisilviaxie-star/st-persona-weaver/sisisisilviaxie-star-main-dev/manifest.json";
 
@@ -89,7 +89,7 @@ NSFW:
   性癖好:
   禁忌底线:`;
 
-// 1.1 NPC 模版 (精简版)
+// 1.1 NPC 模版
 const defaultNpcTemplate = 
 `基本信息:
   姓名: 
@@ -125,7 +125,7 @@ NSFW:
   性相关特征:
   性癖好:`;
 
-// 2. User 模版生成专用 Prompt
+// 2. Prompt (User Template)
 const defaultTemplateGenPrompt = 
 `[TASK: DESIGN_USER_PROFILE_SCHEMA]
 [CONTEXT: The user is entering a simulation world defined by the database provided in System Context.]
@@ -147,7 +147,7 @@ const defaultTemplateGenPrompt =
 [Action]:
 Output the blank YAML template now. No explanations.`;
 
-// 2.1 NPC 模版生成专用 Prompt (补充世界观说明)
+// 2.1 Prompt (NPC Template)
 const defaultNpcTemplateGenPrompt = 
 `[TASK: DESIGN_NPC_PROFILE_SCHEMA]
 [CONTEXT: The user needs a supporting character for the simulation.]
@@ -169,7 +169,7 @@ const defaultNpcTemplateGenPrompt =
 [Action]:
 Output the blank YAML template now. No explanations.`;
 
-// 3. User 人设生成/润色 Prompt
+// 3. Prompt (User Persona)
 const defaultPersonaGenPrompt =
 `[Task: Generate/Refine Profile]
 [Target Entity: "{{user}}"]
@@ -190,7 +190,7 @@ const defaultPersonaGenPrompt =
 [Action]:
 Output ONLY the YAML data matching the schema.`;
 
-// 4. NPC 生成/润色 Prompt
+// 4. Prompt (NPC Persona)
 const defaultNpcGenPrompt = 
 `[Task: Generate NPC Profile]
 [Context: Create a new NPC relevant to the current story flow.]
@@ -267,7 +267,7 @@ let customThemes = {};
 let historyPage = 1; 
 
 // ============================================================================
-// 工具函数
+// 工具函数 (保持不变)
 // ============================================================================
 const yieldToBrowser = () => new Promise(resolve => requestAnimationFrame(resolve));
 const forcePaint = () => new Promise(resolve => setTimeout(resolve, 50));
@@ -773,6 +773,7 @@ function saveData() {
     safeLocalStorageSet(STORAGE_KEY_THEMES, JSON.stringify(customThemes));
 }
 
+// [Fix 3 & 4] History Naming Rules Update
 function saveHistory(item) {
     const limit = 1000; 
     const mode = uiStateCache.generationMode; // 'user' or 'npc'
@@ -783,14 +784,15 @@ function saveHistory(item) {
         const charName = context.characters[context.characterId]?.name || "Char";
         
         if (item.data && item.data.type === 'template') {
-            const typeLabel = mode === 'npc' ? 'NPC' : 'User';
-            item.title = `${typeLabel}模版 (${charName})`;
+            // [Fix 3] Template Naming
+            const typeStr = mode === 'npc' ? 'NPC' : 'User';
+            item.title = `${typeStr}模版 (${charName})`;
         } else {
             if (mode === 'npc') {
                 const nameMatch = item.data.resultText.match(/姓名:\s*(.*?)(\n|$)/);
                 const npcName = nameMatch ? nameMatch[1].trim() : "Unknown NPC";
-                // NPC: Name [CharName]
-                item.title = `NPC: ${npcName} [${charName}]`;
+                // [Fix 4] NPC Naming with @
+                item.title = `NPC: ${npcName} @ ${charName}`;
             } else {
                 item.title = `${userName} & ${charName}`;
             }
@@ -1039,20 +1041,20 @@ async function openCreatorPopup() {
     <!-- Editor View -->
     <div id="pw-view-editor" class="pw-view active">
         <div class="pw-scroll-area">
-            <!-- Mode Switcher -->
+            <!-- Mode Switcher & Load Button -->
             <div class="pw-info-display mode-switcher">
-                <div class="pw-switcher-group">
-                    <div class="pw-mode-btn ${!isNpc ? activeClass : ''}" data-mode="user" title="User 模式">
-                        <i class="fa-solid fa-user"></i>
-                        <span id="pw-display-name">${currentName}</span>
-                    </div>
-                    <div class="pw-mode-btn ${isNpc ? activeClass : ''}" data-mode="npc" title="NPC 模式">
-                        <i class="fa-solid fa-user-secret"></i>
-                        <span>NPC</span>
-                    </div>
+                <div class="pw-mode-btn ${!isNpc ? activeClass : ''}" data-mode="user" title="User 模式">
+                    <i class="fa-solid fa-user"></i>
+                    <span id="pw-display-name">${currentName}</span>
                 </div>
-                
-                <div class="pw-load-btn" id="pw-btn-load-current" style="${isNpc ? 'visibility:hidden;' : ''}" title="读取酒馆当前已填写的User人设">
+                <div class="pw-mode-btn ${isNpc ? activeClass : ''}" data-mode="npc" title="NPC 模式">
+                    <i class="fa-solid fa-user-secret"></i>
+                    <span>NPC</span>
+                </div>
+                <!-- [Fix 1] Visual Separator -->
+                <div style="width:1px; background:var(--pw-border); margin:0 5px; height:20px;"></div>
+                <!-- [Fix 1 & 2] Rename & Visually distinct -->
+                <div class="pw-load-btn pw-action-btn-pill" id="pw-btn-load-current" title="从酒馆读取当前 User 设定" style="${isNpc ? 'visibility:hidden;' : ''}">
                     <i class="fa-solid fa-file-import"></i> 载入当前人设
                 </div>
             </div>
@@ -1077,11 +1079,13 @@ async function openCreatorPopup() {
                             <div class="pw-shortcut-btn" data-key="- "><span>列表</span><span class="code">-</span></div>
                             <div class="pw-shortcut-btn" data-key="\n"><span>换行</span><span class="code">Enter</span></div>
                         </div>
+                        <!-- [Fix 3] Reset Template Small Button -->
                         <div class="pw-mini-btn" id="pw-reset-template-small" title="恢复为该模式的默认模版" style="margin-left:auto; padding:2px 8px; font-size:0.8em; border:none; background:transparent;"><i class="fa-solid fa-rotate-left"></i> 恢复默认</div>
                     </div>
                     <textarea id="pw-template-text" class="pw-template-textarea">${currentTemplate}</textarea>
                     <div class="pw-template-footer">
                         <button class="pw-mini-btn" id="pw-gen-template-smart" title="根据当前世界书和设定，生成定制化模版">生成模板</button>
+                        <!-- [Fix 4] Rename Btn -->
                         <button class="pw-mini-btn" id="pw-load-main-template" style="${isNpc ? '' : 'display:none;'}" title="使用默认User模版">使用User模版</button>
                         <button class="pw-mini-btn" id="pw-save-template">保存模版</button>
                     </div>
@@ -1166,7 +1170,8 @@ async function openCreatorPopup() {
                 <div id="pw-greetings-toggle-bar" class="pw-preview-toggle-bar" style="display:none;">
                     <i class="fa-solid fa-angle-up"></i> 收起预览
                 </div>
-                <textarea id="pw-greetings-preview" style="min-height: 200px;"></textarea>
+                <!-- [Fix 2] Min-height increased to 180px -->
+                <textarea id="pw-greetings-preview" style="min-height: 180px;"></textarea>
             </div>
 
             <div class="pw-card-section">
@@ -1297,6 +1302,7 @@ async function openCreatorPopup() {
     <!-- History View with Pagination -->
     <div id="pw-view-history" class="pw-view">
         <div class="pw-scroll-area">
+            <!-- Detailed History Types -->
             <div class="pw-history-filters" style="display:flex; gap:5px; margin-bottom:8px;">
                 <select id="pw-hist-filter-type" class="pw-input" style="flex:1;">
                     <option value="all">所有类型</option>
@@ -1422,6 +1428,7 @@ function bindEvents() {
         // Switch Template & Button Text & Button Visibility
         if (mode === 'npc') {
             $('#pw-btn-gen').text("生成 NPC 设定");
+            // [Fix 1] Visibility Hidden instead of Display None
             $('#pw-btn-apply').hide();
             $('#pw-btn-load-current').css('visibility', 'hidden'); 
             $('#pw-load-main-template').show(); 
@@ -1686,7 +1693,7 @@ function bindEvents() {
         }
     });
 
-    // Reset Template Small Button
+    // [Fix 3] Reset Template Small Button
     $(document).on('click.pw', '#pw-reset-template-small', function() {
         const isNpc = uiStateCache.generationMode === 'npc';
         const targetName = isNpc ? "NPC" : "User";
@@ -2333,7 +2340,7 @@ const renderTemplateChips = () => {
     });
 };
 
-// [Fix 7] History Filter Logic Update
+// [Fix 5] History Filter Logic Update
 const renderHistoryList = () => {
     loadData();
     const $list = $('#pw-history-list').empty();
@@ -2344,24 +2351,24 @@ const renderHistoryList = () => {
     const chars = new Set();
     historyCache.forEach(item => {
         const title = item.title || "";
-        // Extract Char Name logic: "NPC: Name [Char]" or "User & Char"
-        // We look for [CharName] at the end OR & CharName
-        const npcMatch = title.match(/\[(.*?)\]$/);
-        if (npcMatch) {
-            chars.add(npcMatch[1].trim());
+        // Extract Char Name logic
+        // "NPC: Name @ Char" or "User & Char"
+        // @ has highest priority
+        if (title.includes('@')) {
+            const parts = title.split('@');
+            if (parts.length > 1) {
+                const charName = parts[parts.length - 1].trim();
+                if(charName) chars.add(charName);
+            }
         } else if (title.includes('&')) {
             const parts = title.split('&');
             if (parts.length > 1) {
                 const charName = parts[parts.length - 1].trim();
                 if(charName) chars.add(charName);
             }
-        } else if (title.includes('(') && title.includes(')')) {
-             const tmplMatch = title.match(/\((.*?)\)$/);
-             if (tmplMatch) chars.add(tmplMatch[1].trim());
         }
     });
     
-    // Repopulate Dropdown
     if ($filterChar.children().length <= 1) {
         Array.from(chars).sort().forEach(c => $filterChar.append(`<option value="${c}">${c}</option>`));
         $filterChar.val(currentCharFilter || 'all');
@@ -2374,6 +2381,7 @@ const renderHistoryList = () => {
     let filtered = historyCache.filter(item => {
         if (item.data && item.data.type === 'opening') return false; 
         
+        // Accurate Type Filtering
         const type = item.data.genType || item.data.type;
         if (filterType !== 'all') {
             if (filterType === 'user_persona' && type !== 'user_persona' && type !== 'persona') return false;
@@ -2409,15 +2417,15 @@ const renderHistoryList = () => {
         const type = item.data.genType || item.data.type;
 
         let badgeHtml = '';
-        // [Fix 5] Badges Shortened
+        // [Fix 5] Simple Colored Badges
         if (type === 'npc_template') {
-            badgeHtml = '<span class="pw-badge template" style="background:rgba(255, 165, 0, 0.2); color:#ffbc42;">模版(N)</span>';
+            badgeHtml = '<span class="pw-badge template npc">NPC模版</span>';
         } else if (type === 'user_template' || type === 'template') {
-            badgeHtml = '<span class="pw-badge template">模版(U)</span>';
+            badgeHtml = '<span class="pw-badge template user">User模版</span>';
         } else if (type === 'npc_persona' || type === 'npc') {
-            badgeHtml = '<span class="pw-badge npc" style="background:rgba(155, 89, 182, 0.2); color:#a569bd; border:1px solid rgba(155, 89, 182, 0.4);">NPC</span>';
+            badgeHtml = '<span class="pw-badge persona npc">NPC</span>';
         } else {
-            badgeHtml = '<span class="pw-badge persona">User</span>';
+            badgeHtml = '<span class="pw-badge persona user">User</span>';
         }
 
         const $el = $(`
@@ -2466,6 +2474,259 @@ const renderHistoryList = () => {
     });
 };
 
+window.pwExtraBooks = [];
+const renderWiBooks = async () => {
+    const container = $('#pw-wi-container').empty();
+    const baseBooks = await getContextWorldBooks();
+    const allBooks = [...new Set([...baseBooks, ...(window.pwExtraBooks || [])])];
+    
+    if (allBooks.length === 0) { 
+        container.html('<div style="opacity:0.6; padding:10px; text-align:center;">此角色未绑定世界书，请在“世界书”标签页手动添加或在酒馆主界面绑定。</div>'); 
+        return; 
+    }
+
+    for (const book of allBooks) {
+        const isBound = baseBooks.includes(book);
+        
+        const $el = $(`
+        <div class="pw-wi-book">
+            <div class="pw-wi-header" style="display:flex; align-items:center;">
+                <input type="checkbox" class="pw-wi-header-checkbox pw-wi-select-all" title="全选/全不选 (仅选中当前可见条目)">
+                <span class="pw-wi-book-title">
+                    ${book} ${isBound ? '<span class="pw-bound-status">(已绑定)</span>' : ''}
+                </span>
+                <div class="pw-wi-header-actions">
+                    <div class="pw-wi-filter-toggle" title="展开/收起筛选"><i class="fa-solid fa-filter"></i></div>
+                    ${!isBound ? '<i class="fa-solid fa-times remove-book pw-remove-book-icon" title="移除"></i>' : ''}
+                    <i class="fa-solid fa-chevron-down arrow"></i>
+                </div>
+            </div>
+            <div class="pw-wi-list" data-book="${book}"></div>
+        </div>`);
+        
+        $el.find('.pw-wi-select-all').on('click', async function(e) {
+            e.stopPropagation();
+            const checked = $(this).prop('checked');
+            const $list = $el.find('.pw-wi-list');
+            
+            const doCheck = () => {
+                $list.find('.pw-wi-item:visible .pw-wi-check').prop('checked', checked);
+                const checkedUids = [];
+                $list.find('.pw-wi-check:checked').each(function() { checkedUids.push($(this).val()); });
+                saveWiSelection(book, checkedUids);
+            };
+
+            if (!$list.is(':visible') && !$list.data('loaded')) {
+                $el.find('.pw-wi-header').click(); 
+                setTimeout(doCheck, 150);
+            } else {
+                doCheck();
+            }
+        });
+
+        $el.find('.remove-book').on('click', (e) => { e.stopPropagation(); window.pwExtraBooks = window.pwExtraBooks.filter(b => b !== book); renderWiBooks(); });
+        
+        $el.find('.pw-wi-filter-toggle').on('click', function(e) {
+            e.stopPropagation();
+            const $list = $el.find('.pw-wi-list');
+            if (!$list.is(':visible')) {
+                $el.find('.pw-wi-header').click();
+            }
+            setTimeout(() => {
+                const $tools = $list.find('.pw-wi-depth-tools');
+                if($tools.length) {
+                    $tools.slideToggle();
+                }
+            }, 50);
+        });
+
+        $el.find('.pw-wi-header').on('click', async function (e) {
+            if ($(e.target).hasClass('pw-wi-header-checkbox') || $(e.target).closest('.pw-wi-filter-toggle').length || $(e.target).closest('.pw-remove-book-icon').length) return; 
+
+            const $list = $el.find('.pw-wi-list');
+            const $arrow = $(this).find('.arrow');
+            
+            if ($list.is(':visible')) { 
+                $list.slideUp(); 
+                $arrow.removeClass('fa-flip-vertical'); 
+            } else {
+                $list.slideDown(); 
+                $arrow.addClass('fa-flip-vertical');
+                
+                if (!$list.data('loaded')) {
+                    $list.html('<div style="padding:10px;text-align:center;"><i class="fas fa-spinner fa-spin"></i></div>');
+                    
+                    const entries = await getWorldBookEntries(book);
+                    $list.empty();
+                    
+                    if (entries.length === 0) {
+                        $list.html('<div style="padding:10px;opacity:0.5;">无条目</div>');
+                    } else {
+                        const $tools = $(`
+                        <div class="pw-wi-depth-tools">
+                            <div class="pw-wi-filter-row">
+                                <input type="text" class="pw-keyword-input" id="keyword" placeholder="关键词查找...">
+                            </div>
+                            <div class="pw-wi-filter-row">
+                                <select id="p-select" class="pw-pos-select">
+                                    <option value="unknown">全部位置</option>
+                                    <option value="before_character_definition">角色前</option>
+                                    <option value="after_character_definition">角色后</option>
+                                    <option value="before_author_note">AN前</option>
+                                    <option value="after_author_note">AN后</option>
+                                    <option value="before_example_messages">样例前</option>
+                                    <option value="after_example_messages">样例后</option>
+                                    <option value="at_depth_as_system">@深度(系统)</option>
+                                    <option value="at_depth_as_assistant">@深度(助手)</option>
+                                    <option value="at_depth_as_user">@深度(用户)</option>
+                                </select>
+                                <input type="number" class="pw-depth-input" id="d-min" placeholder="0" title="最小深度">
+                                <span>-</span>
+                                <input type="number" class="pw-depth-input" id="d-max" placeholder="Max" title="最大深度">
+                            </div>
+                            <div class="pw-wi-filter-row">
+                                <button class="pw-depth-btn" id="d-filter-toggle" title="启用/取消筛选">筛选</button>
+                                <button class="pw-depth-btn" id="d-clear-search">清空内容</button>
+                                <button class="pw-depth-btn" id="d-reset" title="恢复为世界书原始状态">重置状态</button>
+                            </div>
+                        </div>`);
+                        
+                        let isFiltering = false;
+
+                        const applyFilter = () => {
+                            if (!isFiltering) {
+                                $list.find('.pw-wi-item').show();
+                                $tools.find('#d-filter-toggle').removeClass('active').text('筛选');
+                                return;
+                            }
+                            $tools.find('#d-filter-toggle').addClass('active').text('取消筛选');
+                            const keyword = $tools.find('#keyword').val().toLowerCase();
+                            const pVal = $tools.find('#p-select').val();
+                            const dMin = parseInt($tools.find('#d-min').val()) || 0;
+                            const dMaxStr = $tools.find('#d-max').val();
+                            const dMax = dMaxStr === "" ? 99999 : parseInt(dMaxStr);
+
+                            $list.find('.pw-wi-item').each(function() {
+                                const $row = $(this);
+                                const d = $row.data('depth');
+                                const code = $row.data('code'); 
+                                const content = decodeURIComponent($row.find('.pw-wi-check').data('content')).toLowerCase();
+                                const title = $row.find('.pw-wi-title-text').text().toLowerCase();
+                                let matches = true;
+                                if (keyword && !title.includes(keyword) && !content.includes(keyword)) matches = false;
+                                if (matches && pVal !== 'unknown' && code !== pVal) matches = false;
+                                if (matches && (d < dMin || d > dMax)) matches = false;
+                                if (matches) $row.show(); else $row.hide();
+                            });
+                        };
+
+                        $tools.find('#d-filter-toggle').on('click', function() {
+                            isFiltering = !isFiltering;
+                            applyFilter();
+                        });
+
+                        $tools.find('#keyword').on('keyup', function(e) {
+                            if (e.key === 'Enter') {
+                                isFiltering = true;
+                                applyFilter();
+                            }
+                        });
+
+                        $tools.find('#d-clear-search').on('click', function() {
+                            $tools.find('#keyword').val('');
+                            if(isFiltering) applyFilter();
+                        });
+
+                        $tools.find('#d-reset').on('click', function() {
+                             $list.find('.pw-wi-item').each(function() {
+                                 const originalEnabled = $(this).data('original-enabled');
+                                 $(this).find('.pw-wi-check').prop('checked', originalEnabled).trigger('change');
+                             });
+                             toastr.info("已重置为世界书原始状态");
+                        });
+
+                        $list.append($tools);
+
+                        const savedSelection = loadWiSelection(book);
+
+                        entries.forEach(entry => {
+                            let isChecked = false;
+                            if (savedSelection) {
+                                isChecked = savedSelection.includes(String(entry.uid));
+                            } else {
+                                isChecked = entry.enabled;
+                            }
+                            
+                            const checkedAttr = isChecked ? 'checked' : '';
+                            const posAbbr = getPosAbbr(entry.position);
+                            const infoLabel = `<span class="pw-wi-info-badge" title="位置:深度">[${posAbbr}:${entry.depth}]</span>`;
+
+                            const $item = $(`
+                            <div class="pw-wi-item" data-depth="${entry.depth}" data-code="${getPosFilterCode(entry.position)}" data-original-enabled="${entry.enabled}">
+                                <div class="pw-wi-item-row">
+                                    <input type="checkbox" class="pw-wi-check" value="${entry.uid}" ${checkedAttr} data-content="${encodeURIComponent(entry.content)}">
+                                    <div class="pw-wi-title-text">
+                                        ${infoLabel} ${entry.displayName}
+                                    </div>
+                                    <i class="fa-solid fa-eye pw-wi-toggle-icon"></i>
+                                </div>
+                                <div class="pw-wi-desc">
+                                    ${entry.content}
+                                    <div class="pw-wi-close-bar"><i class="fa-solid fa-angle-up"></i> 收起</div>
+                                </div>
+                            </div>`);
+                            
+                            $item.find('.pw-wi-check').on('change', function() {
+                                const checkedUids = [];
+                                $list.find('.pw-wi-check:checked').each(function() { checkedUids.push($(this).val()); });
+                                saveWiSelection(book, checkedUids);
+                            });
+
+                            $item.find('.pw-wi-toggle-icon').on('click', function (e) {
+                                e.stopPropagation();
+                                const $desc = $(this).closest('.pw-wi-item').find('.pw-wi-desc');
+                                if ($desc.is(':visible')) { $desc.slideUp(); $(this).removeClass('active'); } else { $desc.slideDown(); $(this).addClass('active'); }
+                            });
+                            
+                            $item.find('.pw-wi-close-bar').on('click', function () { 
+                                const $desc = $(this).parent();
+                                $desc.stop(true, true).slideUp(); 
+                                $item.find('.pw-wi-toggle-icon').removeClass('active'); 
+                            });
+                            
+                            $list.append($item);
+                        });
+                    }
+                    $list.data('loaded', true);
+                }
+            }
+        });
+        container.append($el);
+    }
+};
+
+const getPosAbbr = (pos) => {
+    if (pos === 0 || pos === 'before_character_definition') return 'PreChar';
+    if (pos === 1 || pos === 'after_character_definition') return 'PostChar';
+    if (pos === 2 || pos === 'before_example_messages') return 'PreEx';
+    if (pos === 3 || pos === 'after_example_messages') return 'PostEx';
+    if (pos === 4 || pos === 'before_author_note') return 'PreAN';
+    if (pos === 5 || pos === 'after_author_note') return 'PostAN';
+    if (pos === 6 || pos === 'at_depth_as_system') return '@Sys'; // 旧代码兼容
+    if (String(pos).includes('at_depth')) return '@Depth';
+    return '?';
+};
+
+const renderGreetingsList = () => {
+    const list = getCharacterGreetingsList();
+    currentGreetingsList = list;
+    const $select = $('#pw-greetings-select').empty();
+    $select.append('<option value="">(不使用开场白)</option>');
+    list.forEach((item, idx) => {
+        $select.append(`<option value="${idx}">${item.label}</option>`);
+    });
+};
+
 function addPersonaButton() {
     const container = $('.persona_controls_buttons_block');
     if (container.length === 0 || $(`#${BUTTON_ID}`).length > 0) return;
@@ -2478,6 +2739,5 @@ jQuery(async () => {
     addPersonaButton(); 
     bindEvents(); 
     loadThemeCSS('style.css'); // Default theme
-    console.log("[PW] Persona Weaver Loaded (v2.4.0)");
+    console.log("[PW] Persona Weaver Loaded (v2.5.0)");
 });
-
