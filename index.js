@@ -1,11 +1,10 @@
-
 import { extension_settings, getContext } from "../../../extensions.js";
 import { saveSettingsDebounced, callPopup, getRequestHeaders, saveChat, reloadCurrentChat, saveCharacterDebounced } from "../../../../script.js";
 
 const extensionName = "st-persona-weaver";
-const CURRENT_VERSION = "2.7.1"; // Hotfix version
+const CURRENT_VERSION = "2.1.0"; // Hotfix version
 
-const UPDATE_CHECK_URL = "https://raw.githubusercontent.com/sisisisilviaxie-star/st-persona-weaver/sisisisilviaxie-star-main-dev/manifest.json";
+const UPDATE_CHECK_URL = "https://raw.githubusercontent.com/sisisisilviaxie-star/st-persona-weaver/main/manifest.json";
 
 // Storage Keys
 const STORAGE_KEY_HISTORY = 'pw_history_v29_new_template'; 
@@ -1172,11 +1171,11 @@ async function openCreatorPopup() {
                         <option value="">(不使用开场白)</option>
                     </select>
                 </div>
-                <!-- [Fix 5] Removed wrapper, direct textarea with min-height -->
+                <!-- [Fix 1] Restored original textarea with larger height -->
                 <div id="pw-greetings-toggle-bar" class="pw-preview-toggle-bar" style="display:none;">
                     <i class="fa-solid fa-angle-up"></i> 收起预览
                 </div>
-                <textarea id="pw-greetings-preview" style="display:none; min-height: 200px; margin-top:5px;"></textarea>
+                <textarea id="pw-greetings-preview" style="display:none; min-height: 300px; margin-top:5px;"></textarea>
             </div>
 
             <div class="pw-card-section">
@@ -1685,7 +1684,7 @@ function bindEvents() {
         }
     });
 
-    // [Fix 3] Reset Template Small Button
+    // Reset Template Small Button
     $(document).on('click.pw', '#pw-reset-template-small', function() {
         const isNpc = uiStateCache.generationMode === 'npc';
         const targetName = isNpc ? "NPC" : "User";
@@ -2766,5 +2765,6 @@ jQuery(async () => {
     addPersonaButton(); 
     bindEvents(); 
     loadThemeCSS('style.css'); // Default theme
-    console.log("[PW] Persona Weaver Loaded (v2.7.1 - Hotfix)");
+    console.log("[PW] Persona Weaver Loaded (v2.7.2 - Hotfix)");
 });
+
