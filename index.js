@@ -2,9 +2,8 @@ import { extension_settings, getContext } from "../../../extensions.js";
 import { saveSettingsDebounced, callPopup, getRequestHeaders, saveChat, reloadCurrentChat, saveCharacterDebounced } from "../../../../script.js";
 
 const extensionName = "st-persona-weaver";
-const CURRENT_VERSION = "2.1.0"; 
+const CURRENT_VERSION = "2.1.0"; // Hotfix version
 
-// Update URL (Changed to main branch)
 const UPDATE_CHECK_URL = "https://raw.githubusercontent.com/sisisisilviaxie-star/st-persona-weaver/main/manifest.json";
 
 // Storage Keys
@@ -995,7 +994,14 @@ function autoBindGreetings() {
                 const swipeId = msgs[0].swipe_id; 
                 if (swipeId !== undefined && swipeId !== null) {
                     if ($(`#pw-greetings-select option[value="${swipeId}"]`).length > 0) {
-                        $('#pw-greetings-select').val(swipeId).trigger('change');
+                        $('#pw-greetings-select').val(swipeId);
+                        
+                        // [Fix 8] Set value but keep collapsed by default
+                        if (currentGreetingsList[swipeId]) {
+                            $('#pw-greetings-preview').val(currentGreetingsList[swipeId].content).hide();
+                            $('#pw-greetings-toggle-bar').show().html('<i class="fa-solid fa-angle-down"></i> 展开预览');
+                        }
+                        
                         console.log(`[PW] Auto-bound greetings to Swipe #${swipeId}`);
                     }
                 }
@@ -1172,7 +1178,7 @@ async function openCreatorPopup() {
                         <option value="">(不使用开场白)</option>
                     </select>
                 </div>
-                <!-- [Fix] Greetings Preview Area with increased min-height -->
+                <!-- [Fix 1] Restored original textarea with larger height -->
                 <div id="pw-greetings-toggle-bar" class="pw-preview-toggle-bar" style="display:none;">
                     <i class="fa-solid fa-angle-up"></i> 收起预览
                 </div>
@@ -2767,4 +2773,4 @@ jQuery(async () => {
     bindEvents(); 
     loadThemeCSS('style.css'); // Default theme
     console.log("[PW] Persona Weaver Loaded (v2.7.2 - Hotfix)");
-});
+})
