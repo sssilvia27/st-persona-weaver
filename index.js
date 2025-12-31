@@ -2,23 +2,25 @@ import { extension_settings, getContext } from "../../../extensions.js";
 import { saveSettingsDebounced, callPopup, getRequestHeaders, saveChat, reloadCurrentChat, saveCharacterDebounced } from "../../../../script.js";
 
 const extensionName = "st-persona-weaver";
-const CURRENT_VERSION = "2.0.0"; 
+const CURRENT_VERSION = "2.1.0"; // Hotfix version
 
-// Update URL
 const UPDATE_CHECK_URL = "https://raw.githubusercontent.com/sisisisilviaxie-star/st-persona-weaver/main/manifest.json";
 
+// Storage Keys
 const STORAGE_KEY_HISTORY = 'pw_history_v29_new_template'; 
 const STORAGE_KEY_STATE = 'pw_state_v20';
 const STORAGE_KEY_TEMPLATE = 'pw_template_v6_new_yaml'; 
 const STORAGE_KEY_PROMPTS = 'pw_prompts_v21_restore_edit'; 
 const STORAGE_KEY_WI_STATE = 'pw_wi_selection_v1';
-const STORAGE_KEY_UI_STATE = 'pw_ui_state_v1';
+const STORAGE_KEY_UI_STATE = 'pw_ui_state_v3'; 
 const STORAGE_KEY_THEMES = 'pw_custom_themes_v1'; 
-const BUTTON_ID = 'pw_persona_tool_btn';
+const STORAGE_KEY_DATA_USER = 'pw_data_user_v1'; 
+const STORAGE_KEY_DATA_NPC = 'pw_data_npc_v1';   
 
+const BUTTON_ID = 'pw_persona_tool_btn';
 const HISTORY_PER_PAGE = 20;
 
-// 1. 默认 User 模版
+// 1. 默认 User 模版 (主模版)
 const defaultYamlTemplate =
 `基本信息: 
   姓名: {{user}}
@@ -90,28 +92,91 @@ NSFW:
   性癖好:
   禁忌底线:`;
 
-// 2. 模版生成专用 User Prompt
+// 1.1 NPC 模版
+const defaultNpcTemplate = 
+`基本信息:
+  姓名: 
+  年龄: 
+  性别: 
+  身高: 
+  身份: 
+
+家庭背景:
+  出身:
+  成员:
+
+外貌特征:
+  发型: 
+  眼睛: 
+  体型: 
+  衣着风格: 
+
+性格特质:
+  核心性格:
+  说话风格:
+  行为模式:
+
+背景故事:
+  过往经历: 
+  当前目标: 
+
+人际关系:
+  与主角关系: 
+  与其他角色关系: 
+
+喜好厌恶:
+  喜欢:
+  讨厌:
+
+NSFW:
+  性相关特征:
+  性癖好:`;
+
+// 2. User 模版生成专用 Prompt
 const defaultTemplateGenPrompt = 
 `[TASK: DESIGN_USER_PROFILE_SCHEMA]
 [CONTEXT: The user is entering a simulation world defined by the database provided in System Context.]
-[GOAL: Create a comprehensive YAML template (Schema Only) for the **User Avatar**.]
+[GOAL: Create a comprehensive YAML template (Schema Only) for the **User Avatar (Protagonist)**.]
 
 <requirements>
 1. Language: **Simplified Chinese (简体中文)** keys.
-2. Structure: YAML keys only. Leave values empty (e.g., "等级: " or "义体型号: ").
+2. Structure: YAML keys only. Leave values empty.
 3. **World Consistency**: The fields MUST reflect the specific logic of the provided World Setting.
    - If the world is Xianxia, include keys like "根骨", "境界", "灵根".
    - If the world is ABO, include "第二性别", "信息素气味".
    - If the world is Modern, use standard sociological attributes.
-4. Scope: Biological, Sociological, Psychological, and Special Abilities.
+4. Scope: Biological, Sociological, Psychological, Special Abilities.
+5. Detail Level: High. This is for the main character.
 </requirements>
 
-[Constraint]: Do NOT include any "Little Theater", "Small Theater", scene descriptions, internal monologues, or CoT status bars. STRICTLY YAML DATA ONLY.
+[Constraint]: Do NOT include any "Little Theater", scene descriptions, or values. STRICTLY YAML KEYS ONLY.
 
 [Action]:
-Output the blank YAML template for the User now. No explanations.`;
+Output the blank YAML template now. No explanations.`;
 
-// 3. 人设生成/润色专用 User Prompt (Added Constraints)
+// 2.1 NPC 模版生成专用 Prompt
+const defaultNpcTemplateGenPrompt = 
+`[TASK: DESIGN_NPC_PROFILE_SCHEMA]
+[CONTEXT: The user needs a supporting character for the simulation.]
+[GOAL: Create a concise YAML template (Schema Only) for a **Non-Player Character (NPC)**.]
+
+<requirements>
+1. Language: **Simplified Chinese (简体中文)** keys.
+2. Structure: YAML keys only. Leave values empty.
+3. **World Consistency**: The fields MUST reflect the specific logic of the provided World Setting.
+   - If the world is Xianxia, include keys like "根骨", "境界", "宗门".
+   - If the world is ABO, include "第二性别", "信息素".
+   - If the world is Cyberpunk, include "义体化程度", "所属公司".
+4. Scope: Functional (Role/Faction), Visual (Appearance), Relational (Connection to MC).
+5. Detail Level: Moderate. Focus on identifiable traits and narrative function. Remove excessive introspection fields.
+</requirements>
+
+[Constraint]: Do NOT include any "Little Theater", scene descriptions, or values. STRICTLY YAML KEYS ONLY.
+
+[Action]:
+Output the blank YAML template now. No explanations.`;
+
+// 3. User 人设生成/润色 Prompt
 const defaultPersonaGenPrompt =
 `[Task: Generate/Refine Profile]
 [Target Entity: "{{user}}"]
@@ -132,10 +197,37 @@ const defaultPersonaGenPrompt =
 [Action]:
 Output ONLY the YAML data matching the schema.`;
 
-// 后备 System Prompt
+// 4. NPC 生成/润色 Prompt
+const defaultNpcGenPrompt = 
+`[Task: Generate NPC Profile]
+[Context: Create a new NPC relevant to the current story flow.]
+
+<story_context>
+{{charInfo}}
+{{userPersona}}
+{{chatHistory}}
+</story_context>
+
+<target_schema>
+{{template}}
+</target_schema>
+
+{{input}}
+
+[Requirements]
+1. The NPC should fit naturally into the current story context and world setting.
+2. Relationship with {{user}} and {{char}} should be defined based on the chat history.
+3. Strictly follow the YAML schema provided.
+
+[Constraint]: Do NOT include any "Little Theater", "Small Theater", scene descriptions, internal monologues, or CoT status bars. STRICTLY YAML DATA ONLY.
+
+[Action]:
+Output ONLY the YAML data matching the schema.`;
+
+
 const fallbackSystemPrompt =
 `[TASK: DATABASE_RECOVERY_OPERATION]
-[TARGET: User Profile "{{user}}"]
+[TARGET: Entity Profile]
 [CONTEXT: The narrative simulation requires a fully detailed profile to maintain logic continuity.]
 1. Analyze the Source Material.
 2. Complete the Target Schema.
@@ -153,20 +245,21 @@ const TEXT = {
     PANEL_TITLE: `<span class="pw-title-icon"><i class="fa-solid fa-wand-magic-sparkles"></i></span>User人设生成器`,
     BTN_TITLE: "打开设定生成器",
     TOAST_SAVE_SUCCESS: (name) => `Persona "${name}" 已保存并覆盖！`,
-    TOAST_WI_SUCCESS: (book) => `已写入世界书: ${book}`,
+    TOAST_WI_SUCCESS: (book, name) => `已写入世界书: ${book} (条目: ${name})`,
     TOAST_WI_FAIL: "当前角色未绑定世界书，无法写入",
     TOAST_WI_ERROR: "TavernHelper API 未加载，无法操作世界书",
     TOAST_SNAPSHOT: "已保存至记录", 
-    TOAST_LOAD_CURRENT: "已读取当前酒馆人设内容",
+    TOAST_LOAD_CURRENT: "已读取当前内容",
     TOAST_QUOTA_ERROR: "浏览器存储空间不足 (Quota Exceeded)，请清理旧记录。"
 };
 
 let historyCache = [];
 let currentTemplate = defaultYamlTemplate;
-// Prompt缓存
 let promptsCache = { 
     templateGen: defaultTemplateGenPrompt,
+    npcTemplateGen: defaultNpcTemplateGenPrompt,
     personaGen: defaultPersonaGenPrompt,
+    npcGen: defaultNpcGenPrompt, 
     initial: fallbackSystemPrompt 
 };
 let availableWorldBooks = [];
@@ -175,13 +268,20 @@ let lastRawResponse = "";
 let isProcessing = false;
 let currentGreetingsList = []; 
 let wiSelectionCache = {};
-let uiStateCache = { templateExpanded: true, theme: 'style.css' };
+let uiStateCache = { templateExpanded: true, theme: 'style.css', generationMode: 'user' }; 
 let hasNewVersion = false;
 let customThemes = {}; 
 let historyPage = 1; 
 
+let userContext = { template: defaultYamlTemplate, request: "", result: "", hasResult: false };
+let npcContext = { template: defaultNpcTemplate, request: "", result: "", hasResult: false };
+
+const getCurrentTemplate = () => {
+    return uiStateCache.generationMode === 'npc' ? npcContext.template : userContext.template;
+}
+
 // ============================================================================
-// 工具函数
+// 工具函数 (保持不变)
 // ============================================================================
 const yieldToBrowser = () => new Promise(resolve => requestAnimationFrame(resolve));
 const forcePaint = () => new Promise(resolve => setTimeout(resolve, 50));
@@ -204,30 +304,22 @@ function getCharacterInfoText() {
     if (window.TavernHelper && window.TavernHelper.getCharData) {
         const charData = window.TavernHelper.getCharData('current');
         if (!charData) return "";
-
         let text = "";
         const MAX_FIELD_LENGTH = 1000000; 
-        
         if (charData.description) text += `Description:\n${charData.description.substring(0, MAX_FIELD_LENGTH)}\n`;
         if (charData.personality) text += `Personality:\n${charData.personality.substring(0, MAX_FIELD_LENGTH)}\n`;
         if (charData.scenario) text += `Scenario:\n${charData.scenario.substring(0, MAX_FIELD_LENGTH)}\n`;
-        
         return text;
     }
-
-    // Fallback
     const context = getContext();
     const charId = SillyTavern.getCurrentChatId ? SillyTavern.characterId : context.characterId; 
     if (charId === undefined || !context.characters[charId]) return "";
-
     const char = context.characters[charId];
     const data = char.data || char; 
-
     let text = "";
     if (data.description) text += `Description:\n${data.description}\n`;
     if (data.personality) text += `Personality:\n${data.personality}\n`;
     if (data.scenario) text += `Scenario:\n${data.scenario}\n`;
-    
     return text;
 }
 
@@ -235,10 +327,8 @@ function getCharacterGreetingsList() {
     const context = getContext();
     const charId = context.characterId;
     if (charId === undefined || !context.characters[charId]) return [];
-
     const char = context.characters[charId];
     const data = char.data || char;
-
     const list = [];
     if (data.first_mes) {
         list.push({ label: "开场白 #0", content: data.first_mes });
@@ -251,25 +341,36 @@ function getCharacterGreetingsList() {
     return list;
 }
 
-// ============================================================================
-// 版本更新检查
-// ============================================================================
+async function getChatHistoryText(limit = 15) {
+    if (window.TavernHelper && window.TavernHelper.getChatMessages) {
+        try {
+            const messages = window.TavernHelper.getChatMessages(`-${limit}-{{lastMessageId}}`);
+            if (!Array.isArray(messages)) return "";
+            return messages.map(msg => {
+                const role = msg.is_user ? 'User' : (msg.name || 'Char');
+                const content = msg.message.replace(/<[^>]*>/g, ''); 
+                return `${role}: ${content}`;
+            }).join('\n');
+        } catch (e) {
+            console.warn("[PW] Failed to fetch chat history:", e);
+        }
+    }
+    return "";
+}
+
 async function checkForUpdates() {
     try {
         const res = await fetch(UPDATE_CHECK_URL, { cache: "no-cache" });
         if (!res.ok) return null;
         const manifest = await res.json();
-        
         const v1 = CURRENT_VERSION.split('.').map(Number);
         const v2 = (manifest.version || "0.0.0").split('.').map(Number);
-        
         for (let i = 0; i < 3; i++) {
             if (v2[i] > v1[i]) return manifest;
             if (v2[i] < v1[i]) return null;
         }
         return null;
     } catch (e) {
-        console.warn("[PW] Update check failed:", e);
         return null;
     }
 }
@@ -458,7 +559,6 @@ function getRealSystemPrompt() {
                     .join('\n\n');
 
                 if (systemParts && systemParts.trim().length > 0) {
-                    console.log("[PW] 成功从当前预设获取 System Prompt");
                     return systemParts;
                 }
             }
@@ -492,17 +592,27 @@ async function runGeneration(data, apiConfig, isTemplateMode = false) {
     const rawGreetings = data.greetingsText || "";
     const currentText = data.currentText || "";
     const requestText = data.request || "";
+    
+    const isNpcMode = uiStateCache.generationMode === 'npc';
+    let rawUserPersona = "";
+    let rawChatHistory = "";
+    if (isNpcMode && !isTemplateMode) {
+        rawUserPersona = getActivePersonaDescription();
+        rawChatHistory = await getChatHistoryText(20); 
+    }
 
     const wrappedCharInfo = wrapAsXiTaReference(rawCharInfo, `Entity Profile: ${charName}`);
     const wrappedWi = wrapAsXiTaReference(rawWi, "Global State Variables"); 
     const wrappedGreetings = wrapAsXiTaReference(rawGreetings, "Init Sequence");
-    const wrappedTags = wrapAsXiTaReference(currentTemplate, "Schema Definition");
+    const wrappedTags = wrapAsXiTaReference(getCurrentTemplate(), "Schema Definition");
     const wrappedInput = wrapInputForSafety(requestText, currentText, data.mode === 'refine');
+    
+    const wrappedUserPersona = isNpcMode ? wrapAsXiTaReference(rawUserPersona, `User Profile: ${currentName}`) : "";
+    const wrappedChatHistory = isNpcMode ? wrapAsXiTaReference(rawChatHistory, `Recent Chat History`) : "";
 
     let activeSystemPrompt = getRealSystemPrompt();
 
     if (!activeSystemPrompt) {
-        console.log("[PW] 警告：未能读取到酒馆预设，使用内置 Fallback");
         activeSystemPrompt = fallbackSystemPrompt.replace(/{{user}}/g, currentName);
     } else {
         activeSystemPrompt = activeSystemPrompt
@@ -514,24 +624,35 @@ async function runGeneration(data, apiConfig, isTemplateMode = false) {
     let prefillContent = "```yaml\n基本信息:"; 
 
     if (isTemplateMode) {
-        let basePrompt = promptsCache.templateGen || defaultTemplateGenPrompt;
-        userMessageContent = basePrompt
-            .replace(/{{user}}/g, currentName)
-            .replace(/{{char}}/g, charName);
+        if (isNpcMode) {
+            let basePrompt = promptsCache.npcTemplateGen || defaultNpcTemplateGenPrompt;
+            userMessageContent = basePrompt
+                .replace(/{{user}}/g, currentName)
+                .replace(/{{char}}/g, charName);
+        } else {
+            let basePrompt = promptsCache.templateGen || defaultTemplateGenPrompt;
+            userMessageContent = basePrompt
+                .replace(/{{user}}/g, currentName)
+                .replace(/{{char}}/g, charName);
+        }
     } else {
-        let basePrompt = promptsCache.personaGen || defaultPersonaGenPrompt;
+        let basePrompt = isNpcMode ? (promptsCache.npcGen || defaultNpcGenPrompt) : (promptsCache.personaGen || defaultPersonaGenPrompt);
+        
         userMessageContent = basePrompt
             .replace(/{{user}}/g, currentName)
             .replace(/{{char}}/g, charName)
             .replace(/{{charInfo}}/g, wrappedCharInfo)
             .replace(/{{greetings}}/g, wrappedGreetings)
             .replace(/{{template}}/g, wrappedTags)
-            .replace(/{{input}}/g, wrappedInput);
+            .replace(/{{input}}/g, wrappedInput)
+            .replace(/{{userPersona}}/g, wrappedUserPersona)
+            .replace(/{{chatHistory}}/g, wrappedChatHistory);
     }
 
     const updateDebugView = (messages) => {
         let debugText = `=== 发送时间: ${new Date().toLocaleTimeString()} ===\n`;
-        debugText += `=== 模式: ${isTemplateMode ? '模版生成' : (data.mode === 'refine' ? '润色' : '人设生成')} ===\n\n`;
+        const modeStr = isNpcMode ? 'NPC' : 'User';
+        debugText += `=== 模式: ${isTemplateMode ? `${modeStr}模版生成` : (data.mode === 'refine' ? `${modeStr}润色` : `${modeStr}人设生成`)} ===\n\n`;
         messages.forEach((msg, idx) => {
             debugText += `[BLOCK ${idx + 1}: ${msg.role.toUpperCase()}]\n`;
             debugText += `--- START ---\n${msg.content}\n--- END ---\n\n`;
@@ -540,7 +661,7 @@ async function runGeneration(data, apiConfig, isTemplateMode = false) {
         if ($debugArea.length) $debugArea.val(debugText);
     };
 
-    console.log(`[PW] Sending Prompt...`);
+    console.log(`[PW] Sending Prompt... Mode: ${isNpcMode ? 'NPC' : 'User'}`);
     
     let responseContent = "";
     const controller = new AbortController();
@@ -548,18 +669,10 @@ async function runGeneration(data, apiConfig, isTemplateMode = false) {
 
     try {
         const promptArray = [];
-        
         promptArray.push({ role: 'system', content: activeSystemPrompt });
-
-        if (wrappedWi && wrappedWi.trim().length > 0) {
-            promptArray.push({ role: 'system', content: wrappedWi });
-        }
-
+        if (wrappedWi && wrappedWi.trim().length > 0) promptArray.push({ role: 'system', content: wrappedWi });
         promptArray.push({ role: 'user', content: userMessageContent });
-        
-        if (prefillContent) {
-            promptArray.push({ role: 'assistant', content: prefillContent });
-        }
+        if (prefillContent) promptArray.push({ role: 'assistant', content: prefillContent });
 
         updateDebugView(promptArray);
 
@@ -584,17 +697,11 @@ async function runGeneration(data, apiConfig, isTemplateMode = false) {
                     user_input: '', 
                     ordered_prompts: promptArray,
                     overrides: { 
-                        world_info_before: '', 
-                        world_info_after: '',
-                        persona_description: '', 
-                        char_description: '',
-                        char_personality: '',
-                        scenario: '',
-                        dialogue_examples: '',
+                        world_info_before: '', world_info_after: '', persona_description: '', 
+                        char_description: '', char_personality: '', scenario: '', dialogue_examples: '',
                         chat_history: { prompts: [], with_depth_entries: false, author_note: '' }
                     },
-                    injects: [], 
-                    max_chat_history: 0
+                    injects: [], max_chat_history: 0
                 });
             } else {
                 throw new Error("ST版本过旧或未安装 TavernHelper");
@@ -612,6 +719,7 @@ async function runGeneration(data, apiConfig, isTemplateMode = false) {
 
     const yamlRegex = /```(?:yaml)?\n([\s\S]*?)```/i;
     const match = responseContent.match(yamlRegex);
+    
     if (match && match[1]) {
         responseContent = match[1].trim(); 
     } else {
@@ -621,7 +729,7 @@ async function runGeneration(data, apiConfig, isTemplateMode = false) {
                  responseContent = prefillContent + responseContent;
             }
         }
-        responseContent = responseContent.replace(/```[a-z]*\n?/g, '').replace(/```/g, '').trim();
+        responseContent = responseContent.replace(/^```[a-z]*\s*/i, '').replace(/\s*```$/, '').trim();
     }
 
     return responseContent;
@@ -637,7 +745,6 @@ function safeLocalStorageSet(key, value) {
     } catch (e) {
         if (e.name === 'QuotaExceededError' || e.name === 'NS_ERROR_DOM_QUOTA_REACHED') {
             toastr.error(TEXT.TOAST_QUOTA_ERROR);
-            console.error("[PW] Storage quota exceeded.");
         }
     }
 }
@@ -645,45 +752,55 @@ function safeLocalStorageSet(key, value) {
 function loadData() {
     try { historyCache = JSON.parse(localStorage.getItem(STORAGE_KEY_HISTORY)) || []; } catch { historyCache = []; }
     try {
-        const t = localStorage.getItem(STORAGE_KEY_TEMPLATE);
-        if (!t || t.length < 50) currentTemplate = defaultYamlTemplate;
-        else currentTemplate = t;
-    } catch { currentTemplate = defaultYamlTemplate; }
-    try {
         const p = JSON.parse(localStorage.getItem(STORAGE_KEY_PROMPTS));
         promptsCache = {
             templateGen: (p && p.templateGen) ? p.templateGen : defaultTemplateGenPrompt,
+            npcTemplateGen: (p && p.npcTemplateGen) ? p.npcTemplateGen : defaultNpcTemplateGenPrompt, 
             personaGen: (p && p.personaGen) ? p.personaGen : defaultPersonaGenPrompt,
+            npcGen: (p && p.npcGen) ? p.npcGen : defaultNpcGenPrompt, 
             initial: (p && p.initial) ? p.initial : fallbackSystemPrompt 
         };
     } catch { 
         promptsCache = { 
-            templateGen: defaultTemplateGenPrompt,
-            personaGen: defaultPersonaGenPrompt,
+            templateGen: defaultTemplateGenPrompt, npcTemplateGen: defaultNpcTemplateGenPrompt,
+            personaGen: defaultPersonaGenPrompt, npcGen: defaultNpcGenPrompt, 
             initial: fallbackSystemPrompt 
         }; 
     }
+    try { wiSelectionCache = JSON.parse(localStorage.getItem(STORAGE_KEY_WI_STATE)) || {}; } catch { wiSelectionCache = {}; }
     try {
-        wiSelectionCache = JSON.parse(localStorage.getItem(STORAGE_KEY_WI_STATE)) || {};
-    } catch { wiSelectionCache = {}; }
+        uiStateCache = JSON.parse(localStorage.getItem(STORAGE_KEY_UI_STATE)) || { templateExpanded: true, theme: 'style.css', generationMode: 'user' };
+    } catch { uiStateCache = { templateExpanded: true, theme: 'style.css', generationMode: 'user' }; }
+    try { customThemes = JSON.parse(localStorage.getItem(STORAGE_KEY_THEMES)) || {}; } catch { customThemes = {}; }
+
+    // Load Isolated Context Data
     try {
-        uiStateCache = JSON.parse(localStorage.getItem(STORAGE_KEY_UI_STATE)) || { templateExpanded: true, theme: 'style.css' };
-    } catch { uiStateCache = { templateExpanded: true, theme: 'style.css' }; }
+        const u = JSON.parse(localStorage.getItem(STORAGE_KEY_DATA_USER));
+        userContext = u || { template: defaultYamlTemplate, request: "", result: "", hasResult: false };
+        if(!u) {
+            const oldT = localStorage.getItem(STORAGE_KEY_TEMPLATE);
+            if(oldT && oldT.length > 50) userContext.template = oldT;
+        }
+    } catch { userContext = { template: defaultYamlTemplate, request: "", result: "", hasResult: false }; }
+
     try {
-        customThemes = JSON.parse(localStorage.getItem(STORAGE_KEY_THEMES)) || {};
-    } catch { customThemes = {}; }
+        const n = JSON.parse(localStorage.getItem(STORAGE_KEY_DATA_NPC));
+        npcContext = n || { template: defaultNpcTemplate, request: "", result: "", hasResult: false };
+    } catch { npcContext = { template: defaultNpcTemplate, request: "", result: "", hasResult: false }; }
 }
 
 function saveData() {
-    safeLocalStorageSet(STORAGE_KEY_TEMPLATE, currentTemplate);
     safeLocalStorageSet(STORAGE_KEY_HISTORY, JSON.stringify(historyCache));
     safeLocalStorageSet(STORAGE_KEY_PROMPTS, JSON.stringify(promptsCache));
     safeLocalStorageSet(STORAGE_KEY_UI_STATE, JSON.stringify(uiStateCache));
     safeLocalStorageSet(STORAGE_KEY_THEMES, JSON.stringify(customThemes));
+    safeLocalStorageSet(STORAGE_KEY_DATA_USER, JSON.stringify(userContext));
+    safeLocalStorageSet(STORAGE_KEY_DATA_NPC, JSON.stringify(npcContext));
 }
 
 function saveHistory(item) {
     const limit = 1000; 
+    const mode = uiStateCache.generationMode; // 'user' or 'npc'
 
     if (!item.title || item.title === "未命名") {
         const context = getContext();
@@ -691,11 +808,26 @@ function saveHistory(item) {
         const charName = context.characters[context.characterId]?.name || "Char";
         
         if (item.data && item.data.type === 'template') {
-            item.title = `模版备份 (${charName})`;
+            item.title = mode === 'npc' ? `NPC模版 (${charName})` : `User模版 (${charName})`;
         } else {
-            item.title = `${userName} & ${charName}`;
+            if (mode === 'npc') {
+                const nameMatch = item.data.resultText.match(/姓名:\s*(.*?)(\n|$)/);
+                const npcName = nameMatch ? nameMatch[1].trim() : "Unknown";
+                item.title = `NPC：${npcName} @ ${charName}`;
+            } else {
+                item.title = `${userName} & ${charName}`;
+            }
         }
     }
+    
+    if (!item.data.genType) {
+        if (item.data.type === 'template') {
+            item.data.genType = mode === 'npc' ? 'npc_template' : 'user_template';
+        } else {
+            item.data.genType = mode === 'npc' ? 'npc_persona' : 'user_persona';
+        }
+    }
+
     historyCache.unshift(item);
     if (historyCache.length > limit) historyCache = historyCache.slice(0, limit);
     saveData();
@@ -756,8 +888,24 @@ async function syncToWorldInfoViaHelper(userName, content) {
     
     if (!targetBook) return toastr.warning(TEXT.TOAST_WI_FAIL);
 
-    const safeUserName = userName || "User";
-    const entryTitle = `USER:${safeUserName}`; 
+    let entryTitle = "";
+    let entryKeys = [];
+    const isNpc = uiStateCache.generationMode === 'npc';
+
+    if (isNpc) {
+        const nameMatch = content.match(/姓名:\s*(.*?)(\n|$)/);
+        let npcName = nameMatch ? nameMatch[1].trim() : "";
+        if (!npcName) {
+            npcName = prompt("无法自动识别 NPC 姓名，请输入：", "路人甲");
+            if (!npcName) return; 
+        }
+        entryTitle = `NPC:${npcName}`;
+        entryKeys = [npcName, `NPC:${npcName}`];
+    } else {
+        const safeUserName = userName || "User";
+        entryTitle = `USER:${safeUserName}`; 
+        entryKeys = [safeUserName, "User"];
+    }
 
     try {
         const entries = await window.TavernHelper.getLorebookEntries(targetBook);
@@ -772,7 +920,7 @@ async function syncToWorldInfoViaHelper(userName, content) {
         } else {
             const newEntry = { 
                 comment: entryTitle, 
-                keys: [safeUserName, "User"], 
+                keys: entryKeys, 
                 content: content, 
                 enabled: true, 
                 selective: true, 
@@ -781,7 +929,7 @@ async function syncToWorldInfoViaHelper(userName, content) {
             };
             await window.TavernHelper.createLorebookEntries(targetBook, [newEntry]);
         }
-        toastr.success(TEXT.TOAST_WI_SUCCESS(targetBook));
+        toastr.success(TEXT.TOAST_WI_SUCCESS(targetBook, entryTitle));
     } catch (e) { 
         console.error("[PW] World Info Sync Error:", e);
         toastr.error("写入世界书失败: " + e.message); 
@@ -838,6 +986,32 @@ async function getWorldBookEntries(bookName) {
     return [];
 }
 
+function autoBindGreetings() {
+    if (window.TavernHelper && window.TavernHelper.getChatMessages) {
+        try {
+            const msgs = window.TavernHelper.getChatMessages(0, { include_swipes: true });
+            if (msgs && msgs.length > 0) {
+                const swipeId = msgs[0].swipe_id; 
+                if (swipeId !== undefined && swipeId !== null) {
+                    if ($(`#pw-greetings-select option[value="${swipeId}"]`).length > 0) {
+                        $('#pw-greetings-select').val(swipeId);
+                        
+                        // [Fix 8] Set value but keep collapsed by default
+                        if (currentGreetingsList[swipeId]) {
+                            $('#pw-greetings-preview').val(currentGreetingsList[swipeId].content).hide();
+                            $('#pw-greetings-toggle-bar').show().html('<i class="fa-solid fa-angle-down"></i> 展开预览');
+                        }
+                        
+                        console.log(`[PW] Auto-bound greetings to Swipe #${swipeId}`);
+                    }
+                }
+            }
+        } catch (e) {
+            console.warn("[PW] Auto-bind greetings failed:", e);
+        }
+    }
+}
+
 // ============================================================================
 // 4. UI 渲染 logic
 // ============================================================================
@@ -856,16 +1030,9 @@ async function openCreatorPopup() {
     if (!currentName) currentName = $('h5#your_name').text().trim();
     if (!currentName) currentName = context.powerUserSettings?.persona_selected || "User";
 
-    const activePersonaContent = getActivePersonaDescription();
+    const isNpc = uiStateCache.generationMode === 'npc';
+    const activeData = isNpc ? npcContext : userContext;
     
-    let autoFilledResult = savedState.resultText || "";
-    let shouldShowResult = savedState.hasResult || false;
-
-    if (!autoFilledResult && activePersonaContent && activePersonaContent.trim()) {
-        autoFilledResult = activePersonaContent;
-        shouldShowResult = true;
-    }
-
     const charName = getContext().characters[getContext().characterId]?.name || "None";
     
     const newBadge = `<span id="pw-new-badge" title="点击查看更新" style="display:none; cursor:pointer; color:#ff4444; font-size:0.6em; font-weight:bold; vertical-align: super; margin-left: 2px;">NEW</span>`;
@@ -892,9 +1059,17 @@ async function openCreatorPopup() {
     <!-- Editor View -->
     <div id="pw-view-editor" class="pw-view active">
         <div class="pw-scroll-area">
-            <div class="pw-info-display">
-                <div class="pw-info-item"><i class="fa-solid fa-user"></i><span id="pw-display-name">${currentName}</span></div>
-                <div class="pw-load-btn" id="pw-btn-load-current">载入当前人设</div>
+            <!-- Mode Switcher -->
+            <div class="pw-info-display mode-switcher">
+                <div class="pw-mode-toggle-group">
+                    <div class="pw-mode-item ${!isNpc ? 'active' : ''}" data-mode="user" title="User 模式">
+                        <i class="fa-solid fa-user"></i> ${currentName}
+                    </div>
+                    <div class="pw-mode-item ${isNpc ? 'active' : ''}" data-mode="npc" title="NPC 模式">
+                        <i class="fa-solid fa-user-secret"></i> NPC
+                    </div>
+                </div>
+                <div class="pw-load-btn" id="pw-btn-load-current" style="${isNpc ? 'visibility:hidden;' : ''}">载入当前人设</div>
             </div>
 
             <div>
@@ -904,6 +1079,7 @@ async function openCreatorPopup() {
                         <i class="fa-solid ${chipsIcon}" style="margin-left:5px;" title="折叠/展开"></i>
                     </span>
                     <div class="pw-tags-actions">
+                        <span class="pw-tags-edit-toggle" id="pw-load-main-template" style="${isNpc ? '' : 'display:none;'} margin-right:10px;">使用User模版</span>
                         <span class="pw-tags-edit-toggle" id="pw-toggle-edit-template">编辑模版</span>
                     </div>
                 </div>
@@ -917,8 +1093,9 @@ async function openCreatorPopup() {
                             <div class="pw-shortcut-btn" data-key="- "><span>列表</span><span class="code">-</span></div>
                             <div class="pw-shortcut-btn" data-key="\n"><span>换行</span><span class="code">Enter</span></div>
                         </div>
+                        <div class="pw-mini-btn" id="pw-reset-template-small" title="恢复为该模式的默认模版" style="margin-left:auto; padding:2px 8px; font-size:0.8em; border:none; background:transparent; opacity:0.6;"><i class="fa-solid fa-rotate-left"></i></div>
                     </div>
-                    <textarea id="pw-template-text" class="pw-template-textarea">${currentTemplate}</textarea>
+                    <textarea id="pw-template-text" class="pw-template-textarea">${activeData.template}</textarea>
                     <div class="pw-template-footer">
                         <button class="pw-mini-btn" id="pw-gen-template-smart" title="根据当前世界书和设定，生成定制化模版">生成模板</button>
                         <button class="pw-mini-btn" id="pw-save-template">保存模版</button>
@@ -926,13 +1103,12 @@ async function openCreatorPopup() {
                 </div>
             </div>
 
-            <!-- [Modified Prompt Text] -->
-            <textarea id="pw-request" class="pw-textarea pw-auto-height" placeholder="在此输入要求，或点击上方模版块插入参考结构（无需全部填满）...">${savedState.request || ''}</textarea>
-            <button id="pw-btn-gen" class="pw-btn gen">生成设定</button>
+            <textarea id="pw-request" class="pw-textarea pw-auto-height" placeholder="在此输入要求，或点击上方模版块插入参考结构（无需全部填满）...">${activeData.request}</textarea>
+            <button id="pw-btn-gen" class="pw-btn gen">${isNpc ? '生成 NPC 设定' : '生成 User 设定'}</button>
 
-            <div id="pw-result-area" style="display:none; margin-top:15px;">
+            <div id="pw-result-area" style="display:${activeData.hasResult ? 'block' : 'none'}; margin-top:15px;">
                 <div class="pw-relative-container">
-                    <textarea id="pw-result-text" class="pw-result-textarea pw-auto-height" placeholder="生成的结果将显示在这里..." style="min-height: 200px;"></textarea>
+                    <textarea id="pw-result-text" class="pw-result-textarea pw-auto-height" placeholder="生成的结果将显示在这里..." style="min-height: 200px;">${activeData.result}</textarea>
                 </div>
                 
                 <div class="pw-refine-toolbar">
@@ -953,7 +1129,7 @@ async function openCreatorPopup() {
             </div>
             <div class="pw-footer-group" style="flex:1; justify-content:flex-end; gap: 8px;">
                 <button class="pw-btn wi" id="pw-btn-save-wi">保存至世界书</button>
-                <button class="pw-btn save" id="pw-btn-apply">覆盖当前人设</button>
+                <button class="pw-btn save" id="pw-btn-apply" style="${isNpc ? 'display:none;' : ''}">覆盖当前人设</button>
             </div>
         </div>
     </div>
@@ -1002,10 +1178,11 @@ async function openCreatorPopup() {
                         <option value="">(不使用开场白)</option>
                     </select>
                 </div>
+                <!-- [Fix 1] Restored original textarea with larger height -->
                 <div id="pw-greetings-toggle-bar" class="pw-preview-toggle-bar" style="display:none;">
                     <i class="fa-solid fa-angle-up"></i> 收起预览
                 </div>
-                <textarea id="pw-greetings-preview"></textarea>
+                <textarea id="pw-greetings-preview" style="display:none; min-height: 300px; margin-top:5px;"></textarea>
             </div>
 
             <div class="pw-card-section">
@@ -1084,8 +1261,10 @@ async function openCreatorPopup() {
                     <div class="pw-row" style="margin-bottom:8px;">
                         <label>编辑目标</label>
                         <select id="pw-prompt-type" class="pw-input" style="flex:1;">
-                            <option value="personaGen">人设生成/润色指令</option>
-                            <option value="templateGen">模版生成指令</option>
+                            <option value="personaGen">User人设生成/润色指令</option>
+                            <option value="npcGen">NPC人设生成/润色指令</option>
+                            <option value="templateGen">User模版生成指令</option>
+                            <option value="npcTemplateGen">NPC模版生成指令</option>
                         </select>
                     </div>
                     <div class="pw-var-btns">
@@ -1095,6 +1274,9 @@ async function openCreatorPopup() {
                         <div class="pw-var-btn" data-ins="{{greetings}}"><span>开场白</span><span class="code">{{greetings}}</span></div>
                         <div class="pw-var-btn" data-ins="{{template}}"><span>模版内容</span><span class="code">{{template}}</span></div>
                         <div class="pw-var-btn" data-ins="{{input}}"><span>用户要求</span><span class="code">{{input}}</span></div>
+                        <!-- NPC Specific -->
+                        <div class="pw-var-btn" data-ins="{{userPersona}}"><span>User设定</span><span class="code">{{userPersona}}</span></div>
+                        <div class="pw-var-btn" data-ins="{{chatHistory}}"><span>聊天记录</span><span class="code">{{chatHistory}}</span></div>
                     </div>
                     <textarea id="pw-prompt-editor" class="pw-textarea pw-auto-height" style="min-height:150px; font-size:0.85em;"></textarea>
                     
@@ -1131,6 +1313,21 @@ async function openCreatorPopup() {
     <!-- History View with Pagination -->
     <div id="pw-view-history" class="pw-view">
         <div class="pw-scroll-area">
+            <!-- Detailed History Types -->
+            <div class="pw-history-filters" style="display:flex; gap:5px; margin-bottom:8px;">
+                <select id="pw-hist-filter-type" class="pw-input" style="flex:1;">
+                    <option value="all">所有类型</option>
+                    <option value="user_persona">User人设</option>
+                    <option value="npc_persona">NPC人设</option>
+                    <option value="user_template">User模板</option>
+                    <option value="npc_template">NPC模板</option>
+                </select>
+                <select id="pw-hist-filter-char" class="pw-input" style="flex:1;">
+                    <option value="all">所有角色</option>
+                    <!-- Populated via JS -->
+                </select>
+            </div>
+
             <div class="pw-search-box">
                 <i class="fa-solid fa-search pw-search-icon"></i>
                 <input type="text" id="pw-history-search" class="pw-input pw-search-input" placeholder="搜索历史...">
@@ -1151,17 +1348,15 @@ async function openCreatorPopup() {
 </div>
 `;
 
-    // 确认关闭按钮为 "Close"
     callPopup(html, 'text', '', { wide: true, large: true, okButton: "Close" });
 
-    // Handle Async Update Result
     updatePromise.then(updateInfo => {
         hasNewVersion = !!updateInfo;
         const $container = $('#pw-update-container');
         const $badge = $('#pw-new-badge');
 
         if (hasNewVersion) {
-            $badge.show(); // Show Header NEW
+            $badge.show(); 
             const html = `
                 <div id="pw-new-version-box" style="margin-top:10px; padding:15px; background:rgba(0,0,0,0.2); border: 1px solid var(--SmartThemeQuoteColor); border-radius: 6px;">
                     <div style="font-weight:bold; color:var(--SmartThemeQuoteColor); margin-bottom:8px;">
@@ -1176,21 +1371,18 @@ async function openCreatorPopup() {
         }
     });
 
-    // 初始化
     $('#pw-prompt-editor').val(promptsCache.personaGen);
     renderTemplateChips();
-    // [Performance Fix] Run this Async
     loadAvailableWorldBooks().then(() => {
         renderWiBooks();
-        // Update WI Select placeholder
         const options = availableWorldBooks.length > 0 ? availableWorldBooks.map(b => `<option value="${b}">${b}</option>`).join('') : `<option disabled>未找到世界书</option>`;
         $('#pw-wi-select').html(`<option value="">-- 添加参考/目标世界书 --</option>${options}`);
     });
     
     renderGreetingsList();
+    autoBindGreetings(); 
     renderThemeOptions(); 
     
-    // 初始化主题
     const savedTheme = uiStateCache.theme || 'style.css';
     if (savedTheme === 'style.css') {
         loadThemeCSS('style.css');
@@ -1207,12 +1399,8 @@ async function openCreatorPopup() {
         this.style.height = (this.scrollHeight) + 'px';
     });
 
-    if (autoFilledResult) {
-        $('#pw-result-text').val(autoFilledResult);
-        if (shouldShowResult) {
-            $('#pw-result-area').show();
-            $('#pw-request').addClass('minimized');
-        }
+    if (activeData.hasResult) {
+        $('#pw-request').addClass('minimized');
     }
 }
 
@@ -1233,6 +1421,61 @@ function bindEvents() {
     }
     window.openPersonaWeaver = openCreatorPopup;
 
+    // --- Mode Switcher (Pill Style - Isolated Data) ---
+    $(document).on('click.pw', '.pw-mode-item', function() {
+        const mode = $(this).data('mode');
+        if (mode === uiStateCache.generationMode) return;
+        
+        // 1. Save current data to context object
+        const curReq = $('#pw-request').val();
+        const curRes = $('#pw-result-text').val();
+        const curTmpl = $('#pw-template-text').val();
+        const hasRes = $('#pw-result-area').is(':visible');
+
+        if (uiStateCache.generationMode === 'npc') {
+            npcContext = { template: curTmpl, request: curReq, result: curRes, hasResult: hasRes };
+        } else {
+            userContext = { template: curTmpl, request: curReq, result: curRes, hasResult: hasRes };
+        }
+        
+        // 2. Switch Mode
+        $('.pw-mode-item').removeClass('active');
+        $(this).addClass('active');
+        uiStateCache.generationMode = mode;
+        saveData();
+
+        // 3. Load target data
+        const targetData = mode === 'npc' ? npcContext : userContext;
+        $('#pw-request').val(targetData.request);
+        $('#pw-result-text').val(targetData.result);
+        $('#pw-template-text').val(targetData.template);
+        
+        if (targetData.hasResult) {
+            $('#pw-result-area').show();
+            $('#pw-request').addClass('minimized');
+        } else {
+            $('#pw-result-area').hide();
+            $('#pw-request').removeClass('minimized');
+        }
+
+        renderTemplateChips(); // Re-render chips for new template
+
+        // 4. Update UI Buttons
+        if (mode === 'npc') {
+            $('#pw-btn-gen').text("生成 NPC 设定");
+            $('#pw-btn-apply').hide();
+            $('#pw-btn-load-current').css('visibility', 'hidden'); 
+            $('#pw-load-main-template').show(); 
+            toastr.info("已切换至 NPC 模式");
+        } else {
+            $('#pw-btn-gen').text("生成 User 设定");
+            $('#pw-btn-apply').show();
+            $('#pw-btn-load-current').css('visibility', 'visible');
+            $('#pw-load-main-template').hide();
+            toastr.info("已切换至 User 模式");
+        }
+    });
+
     // --- Header Toggles (Prompt) ---
     $(document).on('click.pw', '#pw-prompt-header', function() {
         const $body = $('#pw-prompt-container');
@@ -1245,13 +1488,8 @@ function bindEvents() {
     $(document).on('click.pw', '#pw-toggle-debug-btn', function() {
         const $wrapper = $('#pw-debug-wrapper');
         const $btn = $(this);
-        
         $wrapper.slideToggle(200, function() {
-            if ($wrapper.is(':visible')) {
-                $btn.addClass('active');
-            } else {
-                $btn.removeClass('active');
-            }
+            if ($wrapper.is(':visible')) { $btn.addClass('active'); } else { $btn.removeClass('active'); }
         });
     });
 
@@ -1263,11 +1501,10 @@ function bindEvents() {
     // --- Prompt Editor Type Switch ---
     $(document).on('change.pw', '#pw-prompt-type', function() {
         const type = $(this).val();
-        if (type === 'templateGen') {
-            $('#pw-prompt-editor').val(promptsCache.templateGen);
-        } else {
-            $('#pw-prompt-editor').val(promptsCache.personaGen);
-        }
+        if (type === 'templateGen') { $('#pw-prompt-editor').val(promptsCache.templateGen); } 
+        else if (type === 'npcTemplateGen') { $('#pw-prompt-editor').val(promptsCache.npcTemplateGen); } 
+        else if (type === 'npcGen') { $('#pw-prompt-editor').val(promptsCache.npcGen); } 
+        else { $('#pw-prompt-editor').val(promptsCache.personaGen); }
     });
 
     // --- Update Button Logic ---
@@ -1279,7 +1516,6 @@ function bindEvents() {
         toastr.info("正在更新...");
         window.TavernHelper.updateExtension(extensionName).then(res => {
             if (res.ok) {
-                // [修改] 更新提示语
                 toastr.success("更新成功！正在刷新页面...");
                 setTimeout(() => window.location.reload(), 1500);
             } else {
@@ -1307,65 +1543,47 @@ function bindEvents() {
         $(this).val('');
     });
 
-    // --- Delete Theme Logic ---
     $(document).on('click.pw', '#pw-btn-delete-theme', function() {
         const current = $('#pw-theme-select').val();
         if (current === 'style.css') return; 
-        
         if (confirm(`确定要删除主题 "${current}" 吗？`)) {
             delete customThemes[current];
             saveData();
-            
             uiStateCache.theme = 'style.css';
             saveData();
             loadThemeCSS('style.css');
-            
             renderThemeOptions();
             $('#pw-theme-select').val('style.css');
             toastr.success("主题已删除");
         }
     });
 
-    // --- [New] Dynamic Download Theme Button ---
     $(document).on('click.pw', '#pw-btn-download-template', async function() {
         const currentThemeName = $('#pw-theme-select').val();
         let cssContent = "";
         let fileName = currentThemeName;
-
         if (currentThemeName === 'style.css') {
-            // Try fetching default style
             try {
                 const res = await fetch(`scripts/extensions/third-party/${extensionName}/style.css?v=${CURRENT_VERSION}`);
                 if (!res.ok) throw new Error("Fetch failed");
                 cssContent = await res.text();
             } catch (e) {
-                // Fallback content if fetch fails
                 cssContent = `/* Native Style v${CURRENT_VERSION} */\n.pw-wrapper { --pw-text-main: var(--smart-theme-body-color); ... }`;
             }
-        } else {
-            // Get custom theme content
-            cssContent = customThemes[currentThemeName];
-        }
-
+        } else { cssContent = customThemes[currentThemeName]; }
         if (!cssContent) return toastr.error("无法获取主题内容");
-
         const blob = new Blob([cssContent], { type: "text/css" });
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
-        a.href = url;
-        a.download = fileName;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
+        a.href = url; a.download = fileName;
+        document.body.appendChild(a); a.click(); document.body.removeChild(a);
         URL.revokeObjectURL(url);
     });
 
-    // --- Theme Selector Logic ---
     $(document).on('change.pw', '#pw-theme-select', function() {
         const theme = $(this).val();
         uiStateCache.theme = theme;
         saveData();
-        
         if (theme === 'style.css') {
             loadThemeCSS(theme);
             $('#pw-btn-delete-theme').hide();
@@ -1375,36 +1593,37 @@ function bindEvents() {
         }
     });
 
-    // --- History Pagination ---
     $(document).on('click.pw', '#pw-hist-prev', () => { if (historyPage > 1) { historyPage--; renderHistoryList(); } });
     $(document).on('click.pw', '#pw-hist-next', () => { historyPage++; renderHistoryList(); });
 
-    // --- Greetings Select Handling ---
+    $(document).on('change.pw', '#pw-hist-filter-type, #pw-hist-filter-char', function() {
+        historyPage = 1;
+        renderHistoryList();
+    });
+
     $(document).on('change.pw', '#pw-greetings-select', function() {
         const idx = $(this).val();
         const $preview = $('#pw-greetings-preview');
         const $toggleBtn = $('#pw-greetings-toggle-bar');
         
         if (idx === "") {
-            $preview.hide();
+            $preview.slideUp(200);
             $toggleBtn.hide();
         } else if (currentGreetingsList[idx]) {
-            $preview.val(currentGreetingsList[idx].content).show();
+            $preview.val(currentGreetingsList[idx].content);
+            $preview.slideDown(200); // Slide direct
             $toggleBtn.show().html('<i class="fa-solid fa-angle-up"></i> 收起预览');
-            requestAnimationFrame(() => {
-                $preview.height('auto');
-                $preview.height($preview[0].scrollHeight + 'px');
-            });
         }
     });
 
+    // [Fix 1] Greetings Toggle - Fixed JS for direct textarea
     $(document).on('click.pw', '#pw-greetings-toggle-bar', function() {
         const $preview = $('#pw-greetings-preview');
         if ($preview.is(':visible')) {
-            $preview.slideUp();
+            $preview.slideUp(200);
             $(this).html('<i class="fa-solid fa-angle-down"></i> 展开预览');
         } else {
-            $preview.slideDown();
+            $preview.slideDown(200);
             $(this).html('<i class="fa-solid fa-angle-up"></i> 收起预览');
         }
     });
@@ -1416,7 +1635,6 @@ function bindEvents() {
         toastr.success("人设已复制");
     });
 
-    // --- Tabs ---
     $(document).on('click.pw', '.pw-tab', function () {
         $('.pw-tab').removeClass('active'); $(this).addClass('active');
         $('.pw-view').removeClass('active');
@@ -1427,11 +1645,12 @@ function bindEvents() {
         }
     });
 
-    // --- Template Editing ---
     $(document).on('click.pw', '#pw-toggle-edit-template', () => {
         isEditingTemplate = !isEditingTemplate;
+        const tmpl = getCurrentTemplate(); // Get from context
+        
         if (isEditingTemplate) {
-            $('#pw-template-text').val(currentTemplate);
+            $('#pw-template-text').val(tmpl);
             $('#pw-template-chips').hide();
             $('#pw-template-editor').css('display', 'flex');
             $('#pw-toggle-edit-template').text("取消编辑").addClass('editing');
@@ -1444,9 +1663,8 @@ function bindEvents() {
         }
     });
 
-    // [Fix] Click text block to toggle
     $(document).on('click.pw', '#pw-template-block-header', function() {
-        if (isEditingTemplate) return; // Don't toggle if editing
+        if (isEditingTemplate) return; 
         const $chips = $('#pw-template-chips');
         const $icon = $(this).find('i');
         if ($chips.is(':visible')) {
@@ -1459,6 +1677,33 @@ function bindEvents() {
             uiStateCache.templateExpanded = true;
         }
         saveData(); 
+    });
+
+    // Load Main Template logic
+    $(document).on('click.pw', '#pw-load-main-template', function() {
+        if(confirm("确定要使用默认的 User 主模版吗？这将覆盖当前编辑器内容。")) {
+            $('#pw-template-text').val(defaultYamlTemplate);
+            if (uiStateCache.generationMode === 'npc') npcContext.template = defaultYamlTemplate;
+            else userContext.template = defaultYamlTemplate;
+            saveData();
+            if(!isEditingTemplate) renderTemplateChips();
+            toastr.success("已载入 User 主模版");
+        }
+    });
+
+    // Reset Template Small Button
+    $(document).on('click.pw', '#pw-reset-template-small', function() {
+        const isNpc = uiStateCache.generationMode === 'npc';
+        const targetName = isNpc ? "NPC" : "User";
+        if(confirm(`确定要恢复为默认的 ${targetName} 模版吗？`)) {
+            const fallbackT = isNpc ? defaultNpcTemplate : defaultYamlTemplate;
+            $('#pw-template-text').val(fallbackT);
+            if (isNpc) npcContext.template = fallbackT;
+            else userContext.template = fallbackT;
+            saveData();
+            if(!isEditingTemplate) renderTemplateChips();
+            toastr.success(`已恢复默认 ${targetName} 模版`);
+        }
     });
 
     // 智能生成模版事件
@@ -1487,10 +1732,15 @@ function bindEvents() {
                 const useDefault = confirm("请选择模版来源：\n\n点击【确定】使用内置默认模版（推荐）\n点击【取消】生成全新的通用模版");
 
                 if (useDefault) {
-                    $('#pw-template-text').val(defaultYamlTemplate);
-                    currentTemplate = defaultYamlTemplate;
+                    const isNpc = uiStateCache.generationMode === 'npc';
+                    const fallbackT = isNpc ? defaultNpcTemplate : defaultYamlTemplate;
+                    
+                    $('#pw-template-text').val(fallbackT);
+                    if (isNpc) npcContext.template = fallbackT;
+                    else userContext.template = fallbackT;
+                    saveData();
                     renderTemplateChips();
-                    toastr.success("已恢复默认内置模板");
+                    toastr.success(`已恢复默认${isNpc ? 'NPC' : 'User'}模板`);
                     
                     isProcessing = false;
                     $btn.html(originalText);
@@ -1511,7 +1761,11 @@ function bindEvents() {
             
             if (generatedTemplate) {
                 $('#pw-template-text').val(generatedTemplate);
-                currentTemplate = generatedTemplate; 
+                
+                if (uiStateCache.generationMode === 'npc') npcContext.template = generatedTemplate;
+                else userContext.template = generatedTemplate;
+                saveData();
+
                 renderTemplateChips();
                 
                 if (!isEditingTemplate) {
@@ -1530,8 +1784,9 @@ function bindEvents() {
 
     $(document).on('click.pw', '#pw-save-template', () => {
         const val = $('#pw-template-text').val();
-        currentTemplate = val;
         
+        if (uiStateCache.generationMode === 'npc') npcContext.template = val;
+        else userContext.template = val;
         saveData();
         
         saveHistory({ 
@@ -1628,20 +1883,40 @@ function bindEvents() {
     const saveCurrentState = () => {
         clearTimeout(saveTimeout);
         saveTimeout = setTimeout(() => {
-            saveState({
-                request: $('#pw-request').val(),
-                resultText: $('#pw-result-text').val(),
-                hasResult: $('#pw-result-area').is(':visible'),
-                localConfig: {
-                    apiSource: $('#pw-api-source').val(),
-                    indepApiUrl: $('#pw-api-url').val(),
-                    indepApiKey: $('#pw-api-key').val(),
-                    indepApiModel: $('#pw-api-model-select').val() || $('#pw-api-model').val(),
-                    extraBooks: window.pwExtraBooks || []
-                }
-            });
+            // [Fix 2] CRITICAL: Guard Clause to prevent wiping on close
+            if ($('#pw-request').length === 0) return;
+
+            const curReq = $('#pw-request').val();
+            const curRes = $('#pw-result-text').val();
+            const hasRes = $('#pw-result-area').is(':visible');
+
+            if (uiStateCache.generationMode === 'npc') {
+                npcContext.request = curReq;
+                npcContext.result = curRes;
+                npcContext.hasResult = hasRes;
+            } else {
+                userContext.request = curReq;
+                userContext.result = curRes;
+                userContext.hasResult = hasRes;
+            }
+
+            saveData(); 
+            
+            // Check if API settings exist before saving legacy
+            if ($('#pw-api-url').length > 0) {
+                saveState({ 
+                    localConfig: {
+                        apiSource: $('#pw-api-source').val(),
+                        indepApiUrl: $('#pw-api-url').val(),
+                        indepApiKey: $('#pw-api-key').val(),
+                        indepApiModel: $('#pw-api-model-select').val() || $('#pw-api-model').val(),
+                        extraBooks: window.pwExtraBooks || []
+                    }
+                });
+            }
         }, 500);
     };
+    
     $(document).on('input.pw change.pw', '#pw-request, #pw-result-text, #pw-wi-toggle, .pw-input, .pw-select', saveCurrentState);
 
     // --- Diff View Logic ---
@@ -1699,7 +1974,7 @@ function bindEvents() {
             };
             const responseText = await runGeneration(config, config, false);
 
-            $('#pw-diff-raw-textarea').val(lastRawResponse);
+            $('#pw-diff-raw-textarea').val(responseText);
             $('#pw-diff-old-raw-textarea').val(oldText);
 
             const oldMap = parseYamlToBlocks(oldText);
@@ -1861,7 +2136,8 @@ function bindEvents() {
             console.error(e);
             toastr.error(e.message); 
         } finally { 
-            $btn.prop('disabled', false).html('生成设定'); 
+            const isNpc = uiStateCache.generationMode === 'npc';
+            $btn.prop('disabled', false).html(isNpc ? '生成 NPC 设定' : '生成 User 设定'); 
             isProcessing = false;
         }
     });
@@ -1940,7 +2216,6 @@ function bindEvents() {
             $(document).off('click.pw-hist-blur');
         };
         
-        // Prevent click inside input from bubbling
         $input.on('click', function(ev) { ev.stopPropagation(); });
 
         $input.one('blur keyup', function (ev) { 
@@ -2000,6 +2275,10 @@ function bindEvents() {
         const type = $('#pw-prompt-type').val();
         if (type === 'templateGen') {
             promptsCache.templateGen = $('#pw-prompt-editor').val();
+        } else if (type === 'npcTemplateGen') {
+            promptsCache.npcTemplateGen = $('#pw-prompt-editor').val();
+        } else if (type === 'npcGen') {
+            promptsCache.npcGen = $('#pw-prompt-editor').val();
         } else {
             promptsCache.personaGen = $('#pw-prompt-editor').val();
         }
@@ -2012,6 +2291,10 @@ function bindEvents() {
         const type = $('#pw-prompt-type').val();
         if (type === 'templateGen') {
             $('#pw-prompt-editor').val(defaultTemplateGenPrompt);
+        } else if (type === 'npcTemplateGen') {
+            $('#pw-prompt-editor').val(defaultNpcTemplateGenPrompt);
+        } else if (type === 'npcGen') {
+            $('#pw-prompt-editor').val(defaultNpcGenPrompt);
         } else {
             $('#pw-prompt-editor').val(defaultPersonaGenPrompt);
         }
@@ -2063,7 +2346,7 @@ function renderThemeOptions() {
 
 const renderTemplateChips = () => {
     const $container = $('#pw-template-chips').empty();
-    const blocks = parseYamlToBlocks(currentTemplate);
+    const blocks = parseYamlToBlocks(getCurrentTemplate());
     blocks.forEach((content, key) => {
         const $chip = $(`<div class="pw-tag-chip"><i class="fa-solid fa-cube" style="opacity:0.5; margin-right:4px;"></i><span>${key}</span></div>`);
         $chip.on('click', () => {
@@ -2082,14 +2365,60 @@ const renderTemplateChips = () => {
     });
 };
 
+// [Fix 7] History Filter Logic Update
 const renderHistoryList = () => {
     loadData();
     const $list = $('#pw-history-list').empty();
+    
+    const $filterChar = $('#pw-hist-filter-char');
+    const currentCharFilter = $filterChar.val();
+    
+    const chars = new Set();
+    historyCache.forEach(item => {
+        const title = item.title || "";
+        // [Fix 3] New title format parsing
+        // NPC: "NPC：Name @ Char"
+        // User: "User & Char" or "User模版 (Char)"
+        let charName = "";
+        if (title.includes(' @ ')) {
+            const parts = title.split(' @ ');
+            if (parts.length > 1) charName = parts[1].trim();
+        } else if (title.includes(' (')) {
+            const parts = title.split(' (');
+            charName = parts[parts.length - 1].replace(')', '').trim();
+        } else if (title.includes('&')) {
+            const parts = title.split('&');
+            if (parts.length > 1) charName = parts[1].trim();
+        }
+        
+        if(charName) chars.add(charName);
+    });
+    
+    if ($filterChar.children().length <= 1) {
+        Array.from(chars).sort().forEach(c => $filterChar.append(`<option value="${c}">${c}</option>`));
+        $filterChar.val(currentCharFilter || 'all');
+    }
+
+    const filterType = $('#pw-hist-filter-type').val();
+    const filterChar = $('#pw-hist-filter-char').val();
     const search = $('#pw-history-search').val().toLowerCase();
     
     let filtered = historyCache.filter(item => {
         if (item.data && item.data.type === 'opening') return false; 
         
+        // Accurate Type Filtering
+        const type = item.data.genType || item.data.type;
+        if (filterType !== 'all') {
+            if (filterType === 'user_persona' && type !== 'user_persona' && type !== 'persona') return false;
+            if (filterType === 'npc_persona' && type !== 'npc_persona' && type !== 'npc') return false;
+            if (filterType === 'user_template' && type !== 'user_template' && type !== 'template') return false;
+            if (filterType === 'npc_template' && type !== 'npc_template') return false;
+        }
+
+        if (filterChar !== 'all') {
+            if (!item.title.includes(filterChar)) return false;
+        }
+
         if (!search) return true;
         const content = (item.data.resultText || "").toLowerCase();
         const title = (item.title || "").toLowerCase();
@@ -2110,12 +2439,17 @@ const renderHistoryList = () => {
     paginated.forEach((item, index) => {
         const previewText = item.data.resultText || '无内容';
         const displayTitle = item.title || "User & Char";
+        const type = item.data.genType || item.data.type;
 
         let badgeHtml = '';
-        if (item.data && item.data.type === 'template') {
-            badgeHtml = '<span class="pw-badge template">模版</span>';
-        } else if (item.data && item.data.type === 'persona') {
-            badgeHtml = '<span class="pw-badge persona">人设</span>';
+        if (type === 'npc_template') {
+            badgeHtml = '<span class="pw-badge template" style="background:rgba(255, 165, 0, 0.2); color:#ffbc42;">模版(N)</span>';
+        } else if (type === 'user_template' || type === 'template') {
+            badgeHtml = '<span class="pw-badge template">模版(U)</span>';
+        } else if (type === 'npc_persona' || type === 'npc') {
+            badgeHtml = '<span class="pw-badge npc" style="background:rgba(155, 89, 182, 0.2); color:#a569bd; border:1px solid rgba(155, 89, 182, 0.4);">NPC</span>';
+        } else {
+            badgeHtml = '<span class="pw-badge persona">User</span>';
         }
 
         const $el = $(`
@@ -2136,9 +2470,18 @@ const renderHistoryList = () => {
     `);
         $el.on('click', function (e) {
             if ($(e.target).closest('.pw-hist-action-btn, .pw-hist-title-input').length) return;
-            if (item.data && item.data.type === 'template') {
+            
+            // Auto Switch Mode Logic
+            const targetMode = (type === 'npc_template' || type === 'npc_persona' || type === 'npc') ? 'npc' : 'user';
+            const $modeBtn = $(`.pw-mode-item[data-mode="${targetMode}"]`);
+            if (!$modeBtn.hasClass('active')) {
+                $modeBtn.click(); // Trigger click to switch UI
+            }
+
+            if (type.includes('template')) {
                 $('#pw-template-text').val(previewText);
-                currentTemplate = previewText;
+                if(targetMode==='npc') npcContext.template = previewText;
+                else userContext.template = previewText;
                 saveData();
                 renderTemplateChips();
                 $('.pw-tab[data-tab="editor"]').click();
@@ -2252,14 +2595,11 @@ const renderWiBooks = async () => {
                     if (entries.length === 0) {
                         $list.html('<div style="padding:10px;opacity:0.5;">无条目</div>');
                     } else {
-                        // [Layout Fix] 3 Rows Structure
                         const $tools = $(`
                         <div class="pw-wi-depth-tools">
-                            <!-- Row 1: Keyword -->
                             <div class="pw-wi-filter-row">
                                 <input type="text" class="pw-keyword-input" id="keyword" placeholder="关键词查找...">
                             </div>
-                            <!-- Row 2: Position & Depth -->
                             <div class="pw-wi-filter-row">
                                 <select id="p-select" class="pw-pos-select">
                                     <option value="unknown">全部位置</option>
@@ -2277,7 +2617,6 @@ const renderWiBooks = async () => {
                                 <span>-</span>
                                 <input type="number" class="pw-depth-input" id="d-max" placeholder="Max" title="最大深度">
                             </div>
-                            <!-- Row 3: Buttons -->
                             <div class="pw-wi-filter-row">
                                 <button class="pw-depth-btn" id="d-filter-toggle" title="启用/取消筛选">筛选</button>
                                 <button class="pw-depth-btn" id="d-clear-search">清空内容</button>
@@ -2382,7 +2721,6 @@ const renderWiBooks = async () => {
                                 if ($desc.is(':visible')) { $desc.slideUp(); $(this).removeClass('active'); } else { $desc.slideDown(); $(this).addClass('active'); }
                             });
                             
-                            // [Fix 2] Better Collapse Animation Logic
                             $item.find('.pw-wi-close-bar').on('click', function () { 
                                 const $desc = $(this).parent();
                                 $desc.stop(true, true).slideUp(); 
@@ -2401,7 +2739,6 @@ const renderWiBooks = async () => {
 };
 
 const getPosAbbr = (pos) => {
-    // 简单的缩写映射，用于 UI 显示
     if (pos === 0 || pos === 'before_character_definition') return 'PreChar';
     if (pos === 1 || pos === 'after_character_definition') return 'PostChar';
     if (pos === 2 || pos === 'before_example_messages') return 'PreEx';
@@ -2435,5 +2772,5 @@ jQuery(async () => {
     addPersonaButton(); 
     bindEvents(); 
     loadThemeCSS('style.css'); // Default theme
-    console.log("[PW] Persona Weaver Loaded (v1.5.4 - Fix Pack)");
+    console.log("[PW] Persona Weaver Loaded (v2.7.2 - Hotfix)");
 });
