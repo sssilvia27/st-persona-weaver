@@ -1,22 +1,17 @@
-
 /* =========================================
    File: style.css
-   Version: 2.1.0 (Native Default)
+   Version: 2.1.0 (Hotfix Mode Switcher)
    Description: Persona Weaver Core Styles
 ========================================= */
 
 /* --- Main Wrapper --- */
 .pw-wrapper {
-    /* Core Variables (Mapped from SillyTavern) */
     --pw-text-main: var(--smart-theme-body-color); 
     --pw-border: var(--SmartThemeBorderColor);
     --pw-paper-bg: var(--smart-theme-input-bg, rgba(0, 0, 0, 0.05)); 
     --pw-danger: #ff6b6b;
-    
-    /* Diff View Hardcoded Colors */
-    --pw-diff-green: #83c168;
-    --pw-diff-red: #ff6b6b;
-    --pw-diff-bg: #1a1a1a; 
+    --pw-toggle-bg: rgba(0, 0, 0, 0.1);
+    --pw-toggle-active: var(--pw-paper-bg);
 
     display: flex; flex-direction: column; height: 100%; max-height: 90vh;
     font-size: 14px; 
@@ -72,50 +67,97 @@
 .pw-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; flex-wrap: wrap; }
 .pw-section-label { font-weight: bold; font-size: 1em; padding: 2px 4px; color: var(--pw-text-main); opacity: 0.9; }
 
-/* Info Display & Mode Switcher (NEW) */
+/* [Fixed] Info Display & Mode Switcher */
 .pw-info-display {
-    display: flex; align-items: center; gap: 10px; 
-    background: rgba(128,128,128,0.1); padding: 5px; border-radius: 6px; 
-    border: 1px solid var(--pw-border); margin-bottom: 5px;
-    justify-content: space-between; /* Space out items */
-}
-.pw-info-display.mode-switcher {
-    padding: 2px;
-    gap: 2px; 
-    justify-content: stretch;
+    display: flex; 
+    align-items: center; 
+    gap: 8px; /* 适度间距 */
+    background: rgba(128,128,128,0.1); 
+    padding: 4px; 
+    border-radius: 6px; 
+    border: 1px solid var(--pw-border); 
+    margin-bottom: 5px;
+    justify-content: space-between;
+    flex-wrap: nowrap; /* 强制不换行 */
 }
 
-.pw-mode-btn {
-    flex: 1; 
-    display: flex; align-items: center; justify-content: center; gap: 8px;
-    padding: 10px; border-radius: 20px;
+/* Toggle Group Wrapper (The Capsule) */
+.pw-mode-toggle-group {
+    display: flex;
+    flex-direction: row !important; /* 强制横排 */
+    flex-wrap: nowrap !important;
+    align-items: center;
+    background: var(--pw-toggle-bg); 
+    border-radius: 20px; /* 胶囊圆角 */
+    padding: 3px;
+    gap: 0; /* 紧贴 */
+    flex: 1; /* 占据剩余空间 */
+    max-width: 70%; /* 限制宽度给右侧按钮 */
+    box-shadow: inset 0 1px 3px rgba(0,0,0,0.1); /* 内阴影增加槽感 */
+    overflow: hidden; /* 防止溢出 */
+}
+
+/* Individual Mode Items */
+.pw-mode-item {
+    flex-grow: 1; /* 默认均分 */
+    flex-shrink: 1;
+    display: flex; 
+    align-items: center; 
+    justify-content: center; 
+    gap: 6px;
+    padding: 6px 12px; 
+    border-radius: 18px; /* 内部圆角略小于外部 */
     cursor: pointer;
-    font-size: 0.9em; color: var(--pw-text-main); opacity: 0.5;
+    font-size: 0.9em; 
+    color: var(--pw-text-main); 
+    opacity: 0.6; 
     transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
     font-weight: bold;
     background: transparent;
     border: 1px solid transparent;
+    white-space: nowrap; /* 名字不换行 */
+    overflow: hidden;
 }
-.pw-mode-btn:hover { opacity: 0.8; background: rgba(128,128,128,0.05); }
 
-/* Active State: Grow and Highlight */
-.pw-mode-btn.pw-mode-active {
-    flex: 2; /* Grow bigger */
-    font-size: 1.05em;
-    background: var(--pw-paper-bg);
+.pw-mode-item:hover { opacity: 0.9; }
+
+/* Active Mode State */
+.pw-mode-item.active {
+    flex-grow: 2; /* 选中时放大 */
+    background: var(--pw-toggle-active);
     opacity: 1;
-    box-shadow: 0 1px 4px rgba(0,0,0,0.15);
+    box-shadow: 0 1px 3px rgba(0,0,0,0.2);
     border-color: var(--pw-border);
+    color: var(--pw-text-main);
+    z-index: 1;
 }
 
 .pw-info-item { display: flex; align-items: center; gap: 6px; font-weight: bold; color: var(--pw-text-main); font-size: 1.05em; }
-#pw-display-name { opacity: 0.9; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 120px;}
 
+/* Text Truncation for User Name */
+#pw-display-name { 
+    opacity: 0.9; 
+    white-space: nowrap; 
+    overflow: hidden; 
+    text-overflow: ellipsis; 
+    max-width: 100px; /* 限制名字最大宽度 */
+}
+
+/* Right Side Load Button */
 .pw-load-btn {
-    font-size: 0.85em; background: transparent; border: 1px solid currentColor;
-    padding: 4px 12px; border-radius: 4px; cursor: pointer; color: var(--pw-text-main);
-    opacity: 0.6; font-weight: normal; margin-left: auto; transition: all 0.2s;
-    white-space: nowrap; flex-shrink: 0;
+    font-size: 0.85em; 
+    background: transparent; 
+    border: 1px solid currentColor;
+    padding: 5px 12px; 
+    border-radius: 4px; 
+    cursor: pointer; 
+    color: var(--pw-text-main);
+    opacity: 0.7; 
+    font-weight: normal; 
+    margin-left: auto; /* 靠右对齐 */
+    transition: all 0.2s;
+    white-space: nowrap; /* 强制不换行 */
+    flex-shrink: 0; /* 防止被压缩 */
 }
 .pw-load-btn:hover { opacity: 1; background: rgba(128,128,128,0.2); }
 
@@ -136,11 +178,11 @@
 /* Buttons */
 .pw-btn {
     display: flex; align-items: center; justify-content: center; gap: 6px;
-    padding: 6px 8px; /* [Fix 2] Reduced padding */
+    padding: 6px 8px; /* Compact padding */
     border-radius: 6px; border: 1px solid var(--pw-border);
     background: rgba(128,128,128,0.1); color: var(--pw-text-main);
     cursor: pointer; font-weight: bold; width: auto; transition: all 0.2s; font-size: 0.95em;
-    white-space: nowrap; /* [Fix 2] Force single line */
+    white-space: nowrap;
 }
 .pw-btn:hover { background: rgba(128,128,128,0.25); filter: brightness(1.1); }
 .pw-btn.gen { background: var(--pw-text-main); color: var(--smart-theme-bg, #000); border: none; width: 100%; margin-top: 5px; }
@@ -373,7 +415,7 @@
 /* =========================================
    System & Footer
 ========================================= */
-/* [Fix 2] Tighter Footer Layout */
+/* [Fix] Tighter Footer Layout */
 .pw-footer { 
     margin-top: auto; 
     padding: 8px 4px; 
