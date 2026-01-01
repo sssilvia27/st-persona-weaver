@@ -1,16 +1,17 @@
 /* =========================================
    File: style.css
-   Version: 2.1.0 (Hotfix Diff UI)
+   Version: 2.2.0 (Carousel Fixed)
    Description: Persona Weaver Core Styles
 ========================================= */
 
 /* --- Main Wrapper --- */
 .pw-wrapper {
-    /* Core Variables */
+    /* 核心变量定义 */
     --pw-text-main: var(--smart-theme-body-color); 
     --pw-border: var(--SmartThemeBorderColor);
     --pw-paper-bg: var(--smart-theme-input-bg, rgba(0, 0, 0, 0.05)); 
     --pw-danger: #ff6b6b;
+    --pw-gold: #e0af68;
     
     /* Toggle Switch Colors */
     --pw-toggle-bg: rgba(0, 0, 0, 0.1);
@@ -135,30 +136,25 @@
 }
 
 .pw-info-item { display: flex; align-items: center; gap: 6px; font-weight: bold; color: var(--pw-text-main); font-size: 1.05em; }
-#pw-display-name { 
-    opacity: 0.9; 
-    white-space: nowrap; 
-    overflow: hidden; 
-    text-overflow: ellipsis; 
-    max-width: 100px;
-}
+#pw-display-name { opacity: 0.9; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100px; }
 
 .pw-load-btn {
     font-size: 0.85em; 
-    background: transparent; 
-    border: 1px solid currentColor;
-    padding: 5px 12px; 
+    background: linear-gradient(135deg, rgba(224, 175, 104, 0.2), rgba(224, 175, 104, 0.1)); 
+    border: 1px solid var(--pw-gold);
+    padding: 4px 12px; 
     border-radius: 4px; 
     cursor: pointer; 
-    color: var(--pw-text-main);
-    opacity: 0.7; 
-    font-weight: normal; 
-    margin-left: auto;
-    transition: all 0.2s;
-    white-space: nowrap; 
+    color: var(--pw-gold); 
+    font-weight: bold; 
+    margin-left: auto; 
+    display: inline-flex; align-items: center; 
+    transition: all 0.2s; 
+    box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+    white-space: nowrap;
     flex-shrink: 0;
 }
-.pw-load-btn:hover { opacity: 1; background: rgba(128,128,128,0.2); }
+.pw-load-btn:hover { background: rgba(224, 175, 104, 0.3); transform: translateY(-1px); box-shadow: 0 4px 8px rgba(0,0,0,0.3); color: #fff; }
 
 /* Inputs */
 .pw-input, .pw-textarea, .pw-select {
@@ -337,12 +333,14 @@
 .pw-badge { display: inline-block; padding: 2px 5px; border-radius: 3px; font-size: 0.7em; margin-right: 5px; font-weight: bold; text-transform: uppercase; vertical-align: middle; }
 .pw-badge.persona { background-color: rgba(65, 150, 255, 0.2); color: #88c0ff; border: 1px solid rgba(65, 150, 255, 0.4); }
 .pw-badge.template { background-color: rgba(255, 165, 0, 0.2); color: #ffbc42; border: 1px solid rgba(255, 165, 0, 0.4); }
+.pw-badge.npc { background:rgba(155, 89, 182, 0.2); color:#a569bd; border:1px solid rgba(155, 89, 182, 0.4); }
+.pw-badge.opening { background:rgba(100, 200, 200, 0.2); color:#64e6e6; border:1px solid rgba(100, 200, 200, 0.4); }
 
 /* =========================================
-   Diff / Refine View (REWRITTEN & FIXED)
+   Diff / Refine View
 ========================================= */
 .pw-diff-container {
-    background-color: #1a1a1a !important; /* Force solid dark background */
+    background-color: #1a1a1a !important; 
     color: #eee;
     padding: 0;
     position: absolute;
@@ -355,7 +353,7 @@
 }
 
 .pw-diff-tabs-bar {
-    background-color: #111 !important; /* Force solid background for header */
+    background-color: #111 !important; 
     border-bottom: 1px solid #444;
     padding: 0;
     gap: 0;
@@ -381,7 +379,7 @@
 .pw-diff-tab.active {
     background-color: #222 !important;
     color: #fff !important;
-    border-bottom: 1px solid #222; /* Matches content bg */
+    border-bottom: 1px solid #222;
 }
 
 .pw-tab-sub { font-size: 0.75em; opacity: 0.7; font-weight: normal; margin-top: 2px; }
@@ -390,7 +388,7 @@
     flex: 1;
     overflow: hidden;
     padding: 15px;
-    background-color: #222 !important; /* Force solid content bg */
+    background-color: #222 !important;
 }
 
 .pw-diff-list-view { overflow-y: auto; height: 100%; padding-right: 5px; }
@@ -437,9 +435,8 @@
 
 .pw-diff-card:hover { opacity: 0.9; }
 
-/* Highlight Selected Card */
 .pw-diff-card.selected {
-    border: 2px solid #83c168 !important; /* Hardcoded Green */
+    border: 2px solid #83c168 !important;
     opacity: 1 !important;
     box-shadow: 0 0 10px rgba(131, 193, 104, 0.2);
 }
@@ -518,6 +515,131 @@
 .swal2-styled { white-space: nowrap !important; width: auto !important; max-width: none !important; flex-shrink: 0 !important; }
 
 /* =========================================
+   [NEW] Carousel & Opening Card Styles
+========================================= */
+.pw-input-label { 
+    font-size: 1.0em; 
+    font-weight: bold; 
+    color: var(--pw-gold);
+    margin-bottom: 5px; 
+    margin-top: 5px;
+    text-align: left; 
+    width: 100%;
+    display: block;
+}
+
+.pw-carousel-container { 
+    position: relative; 
+    width: 100%; 
+    overflow: hidden; 
+    margin-top: 10px; 
+    padding-bottom: 5px; 
+}
+
+/* 修复关键：让 Track 成为 Flex 容器，实现水平排列 */
+.pw-carousel-track { 
+    display: flex; 
+    transition: transform 0.3s ease-in-out; 
+    width: 100%;
+}
+
+/* 修复关键：让每个卡片宽度占满容器，实现单页显示 */
+.pw-opening-card { 
+    flex: 0 0 100%; 
+    width: 100%; 
+    box-sizing: border-box; 
+    background: rgba(128, 128, 128, 0.1); 
+    border: 1px solid var(--pw-border); 
+    border-radius: 8px; 
+    padding: 15px; 
+    display: flex; 
+    flex-direction: column; 
+    gap: 10px; 
+}
+
+.pw-opening-header { 
+    font-weight: bold; 
+    color: var(--pw-gold); 
+    font-size: 1.1em; 
+    display: flex; 
+    justify-content: space-between; 
+    align-items: center; 
+}
+
+.pw-opening-textarea { 
+    width: 100%; 
+    min-height: 250px; /* Reduced for mobile fitting */
+    background: rgba(0, 0, 0, 0.2); 
+    border: 1px solid var(--pw-border); 
+    border-radius: 6px; 
+    color: var(--pw-text-main); 
+    padding: 10px; 
+    font-family: inherit; 
+    font-size: 1.0em; 
+    line-height: 1.6; 
+    resize: vertical; 
+    outline: none; 
+    box-sizing: border-box; 
+    white-space: pre-wrap; 
+}
+
+/* 润色框样式优化 */
+.pw-card-refine-box { 
+    display: none; 
+    flex-direction: column; 
+    gap: 8px; 
+    background: rgba(0,0,0,0.3); /* Darker background */
+    padding: 10px; 
+    border-radius: 6px; 
+    border: 1px dashed var(--pw-border); 
+    margin-top: 5px; 
+}
+
+.pw-card-refine-input { 
+    width: 100%; 
+    background: rgba(255,255,255,0.05); 
+    border: 1px solid var(--pw-border); 
+    color: #ddd; 
+    padding: 8px; 
+    border-radius: 4px; 
+    resize: vertical; 
+    min-height: 60px; 
+}
+
+.pw-opening-actions { 
+    display: flex; 
+    gap: 10px; 
+    justify-content: flex-end; 
+    align-items: center; 
+    margin-top: 5px; 
+    flex-wrap: wrap; /* Prevent button overflow on mobile */
+}
+
+.pw-carousel-nav { 
+    display: flex; 
+    align-items: center; 
+    justify-content: center; 
+    gap: 15px; 
+    margin-top: 15px; 
+    padding-top: 10px; 
+    border-top: 1px dashed var(--pw-border); 
+}
+
+.pw-nav-btn { 
+    background: rgba(0,0,0,0.3); 
+    border: 1px solid var(--pw-border); 
+    color: #ccc; 
+    width: 36px; height: 36px; 
+    border-radius: 50%; 
+    display: flex; align-items: center; justify-content: center; 
+    cursor: pointer; 
+    transition: all 0.2s; 
+}
+.pw-nav-btn:hover { background: rgba(255,255,255,0.1); color: #fff; border-color: var(--pw-gold); }
+.pw-nav-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+.pw-slide-indicator { font-weight: bold; font-family: monospace; color: var(--pw-gold); }
+
+/* =========================================
    Responsive Layout
 ========================================= */
 @media screen and (max-width: 600px) {
@@ -533,7 +655,13 @@
     .pw-depth-input { flex: 1; min-width: 0; padding: 4px 2px; text-align: center; font-size: 0.8em; }
     .pw-wi-filter-row span { font-size: 0.8em; align-self: center; }
     #d-reset { margin-left: 2px; padding: 4px 6px; font-size: 0.8em; white-space: nowrap; }
+    
     .pw-diff-cards { flex-direction: column; }
     .pw-diff-card { width: 100%; }
     .pw-footer { flex-wrap: wrap; }
+    
+    /* Mobile adjustments for Opening Card */
+    .pw-opening-textarea { min-height: 200px; font-size: 0.95em; }
+    .pw-opening-actions { justify-content: center; gap: 5px; }
+    .pw-opening-actions button { flex: 1; text-align: center; justify-content: center; padding: 8px 5px; }
 }
