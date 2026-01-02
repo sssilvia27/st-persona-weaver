@@ -1,8 +1,9 @@
+
 import { extension_settings, getContext } from "../../../extensions.js";
 import { saveSettingsDebounced, callPopup, getRequestHeaders, saveChat, reloadCurrentChat, saveCharacterDebounced } from "../../../../script.js";
 
 const extensionName = "st-persona-weaver";
-const CURRENT_VERSION = "2.1.0"; // Hotfix version
+const CURRENT_VERSION = "2.1.1"; // Smart Keywords for All
 
 const UPDATE_CHECK_URL = "https://raw.githubusercontent.com/sisisisilviaxie-star/st-persona-weaver/main/manifest.json";
 
@@ -12,7 +13,7 @@ const STORAGE_KEY_STATE = 'pw_state_v20';
 const STORAGE_KEY_TEMPLATE = 'pw_template_v6_new_yaml'; 
 const STORAGE_KEY_PROMPTS = 'pw_prompts_v21_restore_edit'; 
 const STORAGE_KEY_WI_STATE = 'pw_wi_selection_v1';
-const STORAGE_KEY_UI_STATE = 'pw_ui_state_v3'; 
+const STORAGE_KEY_UI_STATE = 'pw_ui_state_v4_preset'; 
 const STORAGE_KEY_THEMES = 'pw_custom_themes_v1'; 
 const STORAGE_KEY_DATA_USER = 'pw_data_user_v1'; 
 const STORAGE_KEY_DATA_NPC = 'pw_data_npc_v1';   
@@ -268,7 +269,7 @@ let lastRawResponse = "";
 let isProcessing = false;
 let currentGreetingsList = []; 
 let wiSelectionCache = {};
-let uiStateCache = { templateExpanded: true, theme: 'style.css', generationMode: 'user' }; 
+let uiStateCache = { templateExpanded: true, theme: 'style.css', generationMode: 'user', generationPreset: 'current' }; 
 let hasNewVersion = false;
 let customThemes = {}; 
 let historyPage = 1; 
@@ -281,7 +282,7 @@ const getCurrentTemplate = () => {
 }
 
 // ============================================================================
-// 工具函数 (保持不变)
+// 工具函数
 // ============================================================================
 const yieldToBrowser = () => new Promise(resolve => requestAnimationFrame(resolve));
 const forcePaint = () => new Promise(resolve => setTimeout(resolve, 50));
@@ -545,7 +546,35 @@ Treat this as a rigid logical constraint for the simulation database.
     }
 }
 
-function getRealSystemPrompt() {
+// [Fix 10 & Update] New Logic for System Prompt Retrieval based on Selection
+function getRealSystemPrompt(selectedPreset) {
+    // 1. Pure Mode: Force return empty string (No Main, No JB)
+    if (selectedPreset === 'pure') {
+        return ""; 
+    }
+
+    // 2. Specific Preset Mode
+    if (selectedPreset && selectedPreset !== 'current') {
+        if (window.TavernHelper && typeof window.TavernHelper.getPreset === 'function') {
+            try {
+                const preset = window.TavernHelper.getPreset(selectedPreset);
+                if (preset && preset.prompts) {
+                    const systemParts = preset.prompts
+                        .filter(p => p.enabled && (
+                            p.role === 'system' || 
+                            ['main', 'jailbreak', 'nsfw', 'jailbreak_prompt', 'main_prompt'].includes(p.id)
+                        ))
+                        .map(p => p.content)
+                        .join('\n\n');
+                    return systemParts || "";
+                }
+            } catch (e) { 
+                console.warn(`[PW] Failed to load specific preset '${selectedPreset}':`, e);
+            }
+        }
+    }
+
+    // 3. Fallback / Current Mode (Original Logic)
     if (window.TavernHelper && typeof window.TavernHelper.getPreset === 'function') {
         try {
             const preset = window.TavernHelper.getPreset('in_use');
@@ -564,6 +593,8 @@ function getRealSystemPrompt() {
             }
         } catch (e) { console.warn("[PW] 从预设获取 System Prompt 失败:", e); }
     }
+    
+    // Last resort fallback
     if (SillyTavern.chatCompletionSettings) {
         const settings = SillyTavern.chatCompletionSettings;
         const main = settings.main_prompt || "";
@@ -571,6 +602,17 @@ function getRealSystemPrompt() {
         if (main || jb) return `${main}\n\n${jb}`;
     }
     return null;
+}
+
+// [Fix 14] Dynamic Preset Hint Logic
+function getPresetHintText(val) {
+    if (val === 'pure') {
+        return "纯净模式可避免受预设风格影响或剧情续写，但无破限功能。如遇拒答，请尝试切换至其他包含破限的预设。";
+    }
+    if (val === 'current') {
+        return "将使用酒馆当前激活的预设（Main + Jailbreak）。如果当前预设包含强烈的剧情续写指令，可能会影响生成结果。";
+    }
+    return `将强制使用指定预设 "${val}" 的 System Prompt 进行生成。`;
 }
 
 // ============================================================================
@@ -610,14 +652,22 @@ async function runGeneration(data, apiConfig, isTemplateMode = false) {
     const wrappedUserPersona = isNpcMode ? wrapAsXiTaReference(rawUserPersona, `User Profile: ${currentName}`) : "";
     const wrappedChatHistory = isNpcMode ? wrapAsXiTaReference(rawChatHistory, `Recent Chat History`) : "";
 
-    let activeSystemPrompt = getRealSystemPrompt();
+    // [Fix 10] Use selected preset logic
+    let activeSystemPrompt = getRealSystemPrompt(uiStateCache.generationPreset);
 
-    if (!activeSystemPrompt) {
+    if (!activeSystemPrompt && uiStateCache.generationPreset !== 'pure') {
         activeSystemPrompt = fallbackSystemPrompt.replace(/{{user}}/g, currentName);
-    } else {
+    } else if (activeSystemPrompt) {
+        // [Fix 9] Prevent WI duplication by stripping macros from fetched system prompt
         activeSystemPrompt = activeSystemPrompt
             .replace(/{{user}}/g, currentName)
-            .replace(/{{char}}/g, charName);
+            .replace(/{{char}}/g, charName)
+            .replace(/{{world_info}}/gi, '')
+            .replace(/{{wInfo}}/gi, '')
+            .replace(/{{worldInfo}}/gi, '');
+    } else {
+        // Pure mode returns empty string
+        activeSystemPrompt = ""; 
     }
 
     let userMessageContent = "";
@@ -652,7 +702,8 @@ async function runGeneration(data, apiConfig, isTemplateMode = false) {
     const updateDebugView = (messages) => {
         let debugText = `=== 发送时间: ${new Date().toLocaleTimeString()} ===\n`;
         const modeStr = isNpcMode ? 'NPC' : 'User';
-        debugText += `=== 模式: ${isTemplateMode ? `${modeStr}模版生成` : (data.mode === 'refine' ? `${modeStr}润色` : `${modeStr}人设生成`)} ===\n\n`;
+        debugText += `=== 模式: ${isTemplateMode ? `${modeStr}模版生成` : (data.mode === 'refine' ? `${modeStr}润色` : `${modeStr}人设生成`)} ===\n`;
+        debugText += `=== 预设策略: ${uiStateCache.generationPreset === 'pure' ? '✨ 纯净模式 (Pure Mode)' : (uiStateCache.generationPreset === 'current' ? '跟随酒馆预设 (Default)' : uiStateCache.generationPreset)} ===\n\n`;
         messages.forEach((msg, idx) => {
             debugText += `[BLOCK ${idx + 1}: ${msg.role.toUpperCase()}]\n`;
             debugText += `--- START ---\n${msg.content}\n--- END ---\n\n`;
@@ -669,44 +720,80 @@ async function runGeneration(data, apiConfig, isTemplateMode = false) {
 
     try {
         const promptArray = [];
-        promptArray.push({ role: 'system', content: activeSystemPrompt });
+        if (activeSystemPrompt) {
+            promptArray.push({ role: 'system', content: activeSystemPrompt });
+        }
         if (wrappedWi && wrappedWi.trim().length > 0) promptArray.push({ role: 'system', content: wrappedWi });
         promptArray.push({ role: 'user', content: userMessageContent });
+        
+        const promptArrayNoPrefill = JSON.parse(JSON.stringify(promptArray));
+
         if (prefillContent) promptArray.push({ role: 'assistant', content: prefillContent });
 
         updateDebugView(promptArray);
 
-        if (apiConfig.apiSource === 'independent') {
-            let baseUrl = apiConfig.indepApiUrl.replace(/\/$/, '');
-            if (baseUrl.endsWith('/chat/completions')) baseUrl = baseUrl.replace(/\/chat\/completions$/, '');
-            const url = `${baseUrl}/chat/completions`;
-            
-            const res = await fetch(url, {
-                method: 'POST', 
-                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiConfig.indepApiKey}` },
-                body: JSON.stringify({ model: apiConfig.indepApiModel, messages: promptArray, temperature: 0.85 }),
-                signal: controller.signal
-            });
-            if (!res.ok) throw new Error(`API Error: ${res.status}`);
-            const json = await res.json();
-            responseContent = json.choices[0].message.content;
-
-        } else {
-            if (window.TavernHelper && typeof window.TavernHelper.generateRaw === 'function') {
-                responseContent = await window.TavernHelper.generateRaw({
-                    user_input: '', 
-                    ordered_prompts: promptArray,
-                    overrides: { 
-                        world_info_before: '', world_info_after: '', persona_description: '', 
-                        char_description: '', char_personality: '', scenario: '', dialogue_examples: '',
-                        chat_history: { prompts: [], with_depth_entries: false, author_note: '' }
-                    },
-                    injects: [], max_chat_history: 0
+        const doRequest = async (messages) => {
+            if (apiConfig.apiSource === 'independent') {
+                let baseUrl = apiConfig.indepApiUrl.replace(/\/$/, '');
+                if (baseUrl.endsWith('/chat/completions')) baseUrl = baseUrl.replace(/\/chat\/completions$/, '');
+                const url = `${baseUrl}/chat/completions`;
+                
+                const res = await fetch(url, {
+                    method: 'POST', 
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiConfig.indepApiKey}` },
+                    body: JSON.stringify({ model: apiConfig.indepApiModel, messages: messages, temperature: 0.85 }),
+                    signal: controller.signal
                 });
+                
+                // [Fix 11] Improved Error Handling
+                if (!res.ok) {
+                    let errText = await res.text();
+                    try {
+                        const errJson = JSON.parse(errText);
+                        if (errJson.error && errJson.error.message) errText = errJson.error.message;
+                    } catch (e) {
+                        // ignore json parse error, use raw text
+                    }
+                    if (errText.length > 200) errText = errText.substring(0, 200) + "...";
+                    throw new Error(`API Error (${res.status}): ${errText}`);
+                }
+                
+                const json = await res.json();
+                return json.choices[0].message.content;
             } else {
-                throw new Error("ST版本过旧或未安装 TavernHelper");
+                if (window.TavernHelper && typeof window.TavernHelper.generateRaw === 'function') {
+                    return await window.TavernHelper.generateRaw({
+                        user_input: '', 
+                        ordered_prompts: messages,
+                        overrides: { 
+                            world_info_before: '', world_info_after: '', persona_description: '', 
+                            char_description: '', char_personality: '', scenario: '', dialogue_examples: '',
+                            chat_history: { prompts: [], with_depth_entries: false, author_note: '' }
+                        },
+                        injects: [], max_chat_history: 0
+                    });
+                } else {
+                    throw new Error("ST版本过旧或未安装 TavernHelper");
+                }
+            }
+        };
+
+        try {
+            responseContent = await doRequest(promptArray);
+        } catch (err) {
+            // [Fix 12] Catch 400 errors specifically for provider constraints
+            const errStr = err.toString().toLowerCase();
+            const isBadRequest = errStr.includes('400') || errStr.includes('bad request') || errStr.includes('invalid');
+            
+            if (prefillContent && isBadRequest) {
+                console.warn("[PW] Generation failed (400/Bad Request), retrying without prefill...", err);
+                toastr.info("API 返回 400 错误 (可能是 Gemini 等模型不支持 Prefill)，正在尝试兼容模式重试...");
+                responseContent = await doRequest(promptArrayNoPrefill);
+            } else {
+                throw err;
             }
         }
+
     } catch (e) {
         console.error("[PW] 生成错误:", e);
         throw e;
@@ -714,7 +801,7 @@ async function runGeneration(data, apiConfig, isTemplateMode = false) {
         clearTimeout(timeoutId); 
     }
     
-    if (!responseContent) throw new Error("API 返回为空");
+    if (!responseContent) throw new Error("API 返回为空 (Empty Response)");
     lastRawResponse = responseContent;
 
     const yamlRegex = /```(?:yaml)?\n([\s\S]*?)```/i;
@@ -768,9 +855,12 @@ function loadData() {
         }; 
     }
     try { wiSelectionCache = JSON.parse(localStorage.getItem(STORAGE_KEY_WI_STATE)) || {}; } catch { wiSelectionCache = {}; }
+    
+    // [Updated] Load UI State with Preset info
     try {
-        uiStateCache = JSON.parse(localStorage.getItem(STORAGE_KEY_UI_STATE)) || { templateExpanded: true, theme: 'style.css', generationMode: 'user' };
-    } catch { uiStateCache = { templateExpanded: true, theme: 'style.css', generationMode: 'user' }; }
+        uiStateCache = JSON.parse(localStorage.getItem(STORAGE_KEY_UI_STATE)) || { templateExpanded: true, theme: 'style.css', generationMode: 'user', generationPreset: 'current' };
+    } catch { uiStateCache = { templateExpanded: true, theme: 'style.css', generationMode: 'user', generationPreset: 'current' }; }
+    
     try { customThemes = JSON.parse(localStorage.getItem(STORAGE_KEY_THEMES)) || {}; } catch { customThemes = {}; }
 
     // Load Isolated Context Data
@@ -871,6 +961,32 @@ async function forceSavePersona(name, description) {
     return true;
 }
 
+// [Fix 15] Universal Smart Keyword Logic
+function generateSmartKeywords(name, content, staticTags = []) {
+    let rawKeys = [name, ...staticTags];
+
+    // 1. 尝试从内容中提取 "别名/昵称/Alias"
+    const aliasMatch = content.match(/(?:别名|昵称|Alias)[:：]\s*(.*?)(\n|$)/i);
+    if (aliasMatch) {
+        // 支持中文逗号、英文逗号、顿号分隔
+        const aliases = aliasMatch[1].split(/[,，、]/).map(s => s.trim()).filter(s => s);
+        rawKeys.push(...aliases);
+    }
+
+    // 2. 智能拆分 (针对翻译名或西文名)
+    if (name.includes('·')) {
+        // 如 "希尔薇·波拉" -> 添加 "希尔薇"
+        rawKeys.push(name.split('·')[0].trim());
+    } else if (name.includes(' ')) {
+        // 如 "John Doe" -> 添加 "John" (防止单字母触发)
+        const firstName = name.split(' ')[0].trim();
+        if (firstName.length > 1) rawKeys.push(firstName);
+    }
+
+    // 3. 去重、过滤短词(长度<=1)、移除空值
+    return [...new Set(rawKeys)].filter(k => k && k.length > 1);
+}
+
 async function syncToWorldInfoViaHelper(userName, content) {
     if (!window.TavernHelper) return toastr.error(TEXT.TOAST_WI_ERROR);
 
@@ -892,19 +1008,22 @@ async function syncToWorldInfoViaHelper(userName, content) {
     let entryKeys = [];
     const isNpc = uiStateCache.generationMode === 'npc';
 
+    // 尝试从 YAML 内容中优先读取姓名，如果没写则用传入的 fallback
+    const nameMatch = content.match(/姓名:\s*(.*?)(\n|$)/);
+    
     if (isNpc) {
-        const nameMatch = content.match(/姓名:\s*(.*?)(\n|$)/);
         let npcName = nameMatch ? nameMatch[1].trim() : "";
         if (!npcName) {
             npcName = prompt("无法自动识别 NPC 姓名，请输入：", "路人甲");
             if (!npcName) return; 
         }
         entryTitle = `NPC:${npcName}`;
-        entryKeys = [npcName, `NPC:${npcName}`];
+        entryKeys = generateSmartKeywords(npcName, content, ["NPC"]);
     } else {
-        const safeUserName = userName || "User";
-        entryTitle = `USER:${safeUserName}`; 
-        entryKeys = [safeUserName, "User"];
+        // User 优先用 YAML 里的名字（可能用户在设定里给自己起了全名），回退用酒馆用户名
+        const finalUserName = nameMatch ? nameMatch[1].trim() : (userName || "User");
+        entryTitle = `USER:${finalUserName}`; 
+        entryKeys = generateSmartKeywords(finalUserName, content, ["User"]);
     }
 
     try {
@@ -915,6 +1034,7 @@ async function syncToWorldInfoViaHelper(userName, content) {
             await window.TavernHelper.setLorebookEntries(targetBook, [{ 
                 uid: existingEntry.uid, 
                 content: content, 
+                keys: entryKeys, // 更新 Keys
                 enabled: true 
             }]);
         } else {
@@ -929,7 +1049,7 @@ async function syncToWorldInfoViaHelper(userName, content) {
             };
             await window.TavernHelper.createLorebookEntries(targetBook, [newEntry]);
         }
-        toastr.success(TEXT.TOAST_WI_SUCCESS(targetBook, entryTitle));
+        toastr.success(TEXT.TOAST_WI_SUCCESS(targetBook, entryTitle) + `\n触发词: ${entryKeys.join(', ')}`);
     } catch (e) { 
         console.error("[PW] World Info Sync Error:", e);
         toastr.error("写入世界书失败: " + e.message); 
@@ -1042,6 +1162,24 @@ async function openCreatorPopup() {
     const chipsIcon = uiStateCache.templateExpanded ? 'fa-angle-up' : 'fa-angle-down';
 
     const updateUiHtml = `<div id="pw-update-container"><div style="margin-top:10px; opacity:0.6; font-size:0.9em;"><i class="fas fa-spinner fa-spin"></i> 正在检查更新...</div></div>`;
+
+    // [Fix 10] Generate Preset Options
+    let presetOptionsHtml = `
+        <option value="current" ${uiStateCache.generationPreset === 'current' ? 'selected' : ''}>跟随酒馆预设 (Default)</option>
+        <option value="pure" ${uiStateCache.generationPreset === 'pure' ? 'selected' : ''}>✨ 纯净模式 (Pure Mode)</option>
+    `;
+    if (window.TavernHelper && typeof window.TavernHelper.getPresetNames === 'function') {
+        const presets = window.TavernHelper.getPresetNames().sort();
+        presets.forEach(p => {
+            if (p !== 'in_use') {
+                const sel = uiStateCache.generationPreset === p ? 'selected' : '';
+                presetOptionsHtml += `<option value="${p}" ${sel}>[预设] ${p}</option>`;
+            }
+        });
+    }
+
+    // [Fix 14] Initial Hint Text
+    const initialHint = getPresetHintText(uiStateCache.generationPreset);
 
     const html = `
 <div class="pw-wrapper">
@@ -1171,6 +1309,20 @@ async function openCreatorPopup() {
     <!-- Context View -->
     <div id="pw-view-context" class="pw-view">
         <div class="pw-scroll-area">
+            
+            <!-- [Fix 13] Preset Selector Relocated to TOP & Styled simply -->
+            <div class="pw-card-section">
+                <div class="pw-row">
+                    <label class="pw-section-label">生成使用的预设 (System Prompt)</label>
+                    <select id="pw-preset-select" class="pw-input" style="flex:1; width:100%;">
+                        ${presetOptionsHtml}
+                    </select>
+                </div>
+                <div id="pw-preset-hint" style="font-size:0.8em; opacity:0.7; margin-top:4px; margin-left: 5px; color: var(--SmartThemeBodyColor);">
+                    ${initialHint}
+                </div>
+            </div>
+
             <div class="pw-card-section">
                 <div class="pw-row">
                     <label class="pw-section-label pw-label-gold">角色开场白</label>
@@ -1496,6 +1648,15 @@ function bindEvents() {
     // --- NEW 标记点击跳转 ---
     $(document).on('click.pw', '#pw-new-badge', function() {
         $('.pw-tab[data-tab="system"]').click();
+    });
+
+    // [Fix 10] Preset Select Change Logic
+    $(document).on('change.pw', '#pw-preset-select', function() {
+        const val = $(this).val();
+        uiStateCache.generationPreset = val;
+        saveData();
+        // [Fix 14] Update Hint on Change
+        $('#pw-preset-hint').text(getPresetHintText(val));
     });
 
     // --- Prompt Editor Type Switch ---
@@ -1974,7 +2135,7 @@ function bindEvents() {
             };
             const responseText = await runGeneration(config, config, false);
 
-            $('#pw-diff-raw-textarea').val(responseText);
+            $('#pw-diff-raw-textarea').val(responseText); // Fix: Remove markdown backticks
             $('#pw-diff-old-raw-textarea').val(oldText);
 
             const oldMap = parseYamlToBlocks(oldText);
