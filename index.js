@@ -3,7 +3,7 @@ import { extension_settings, getContext } from "../../../extensions.js";
 import { saveSettingsDebounced, callPopup, getRequestHeaders, saveChat, reloadCurrentChat, saveCharacterDebounced } from "../../../../script.js";
 
 const extensionName = "st-persona-weaver";
-const CURRENT_VERSION = "2.2.2"; // UI Reorder & Pure Mode Logic Fix
+const CURRENT_VERSION = "2.2.3"; // Text Polish: Objective Preset Description
 
 const UPDATE_CHECK_URL = "https://raw.githubusercontent.com/sisisisilviaxie-star/st-persona-weaver/main/manifest.json";
 
@@ -1275,7 +1275,7 @@ async function openCreatorPopup() {
                     </select>
                 </div>
                 <div style="font-size:0.8em; opacity:0.7; margin-top:4px; margin-left: 5px;">
-                    推荐使用“纯净模式”以防止 LLM 续写剧情。注意：此模式不包含任何破限内容，如遇拒绝回答请尝试切换回默认或指定包含破限的预设。
+                    纯净模式可避免受预设风格影响或剧情续写，但无破限功能。如遇拒答，请尝试切换至其他包含破限的预设。
                 </div>
             </div>
 
