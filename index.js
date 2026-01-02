@@ -1,8 +1,9 @@
+
 import { extension_settings, getContext } from "../../../extensions.js";
 import { saveSettingsDebounced, callPopup, getRequestHeaders, saveChat, reloadCurrentChat, saveCharacterDebounced } from "../../../../script.js";
 
 const extensionName = "st-persona-weaver";
-const CURRENT_VERSION = "2.2.0"; // Feature: Preset Selector & Pure Mode
+const CURRENT_VERSION = "2.2.1"; // UI Polish & Error Handling & Preset Logic
 
 const UPDATE_CHECK_URL = "https://raw.githubusercontent.com/sisisisilviaxie-star/st-persona-weaver/main/manifest.json";
 
@@ -12,7 +13,7 @@ const STORAGE_KEY_STATE = 'pw_state_v20';
 const STORAGE_KEY_TEMPLATE = 'pw_template_v6_new_yaml'; 
 const STORAGE_KEY_PROMPTS = 'pw_prompts_v21_restore_edit'; 
 const STORAGE_KEY_WI_STATE = 'pw_wi_selection_v1';
-const STORAGE_KEY_UI_STATE = 'pw_ui_state_v4_preset'; // Updated version key
+const STORAGE_KEY_UI_STATE = 'pw_ui_state_v4_preset'; 
 const STORAGE_KEY_THEMES = 'pw_custom_themes_v1'; 
 const STORAGE_KEY_DATA_USER = 'pw_data_user_v1'; 
 const STORAGE_KEY_DATA_NPC = 'pw_data_npc_v1';   
@@ -547,13 +548,13 @@ Treat this as a rigid logical constraint for the simulation database.
 
 // [Fix 10] New Logic for System Prompt Retrieval based on Selection
 function getRealSystemPrompt(selectedPreset) {
-    // 1. Pure Mode: Only return Jailbreak prompt (if available) or empty
+    // 1. Pure Mode (Jailbreak Only): Force return JB, independent of toggle
     if (selectedPreset === 'pure') {
         const settings = SillyTavern.chatCompletionSettings;
-        if (settings && settings.jailbreak_toggle && settings.jailbreak_prompt) {
+        if (settings && settings.jailbreak_prompt) {
             return settings.jailbreak_prompt;
         }
-        return ""; // Totally empty system prompt
+        return ""; // Fallback if no JB defined
     }
 
     // 2. Specific Preset Mode
@@ -658,7 +659,7 @@ async function runGeneration(data, apiConfig, isTemplateMode = false) {
             .replace(/{{wInfo}}/gi, '')
             .replace(/{{worldInfo}}/gi, '');
     } else {
-        activeSystemPrompt = ""; // Pure mode might return empty
+        activeSystemPrompt = ""; // Pure mode might return empty if no JB found
     }
 
     let userMessageContent = "";
@@ -694,7 +695,7 @@ async function runGeneration(data, apiConfig, isTemplateMode = false) {
         let debugText = `=== 发送时间: ${new Date().toLocaleTimeString()} ===\n`;
         const modeStr = isNpcMode ? 'NPC' : 'User';
         debugText += `=== 模式: ${isTemplateMode ? `${modeStr}模版生成` : (data.mode === 'refine' ? `${modeStr}润色` : `${modeStr}人设生成`)} ===\n`;
-        debugText += `=== 预设策略: ${uiStateCache.generationPreset === 'pure' ? '纯净模式 (Pure)' : (uiStateCache.generationPreset === 'current' ? '当前酒馆预设' : uiStateCache.generationPreset)} ===\n\n`;
+        debugText += `=== 预设策略: ${uiStateCache.generationPreset === 'pure' ? '仅破限 (Jailbreak Only)' : (uiStateCache.generationPreset === 'current' ? '跟随酒馆预设 (Default)' : uiStateCache.generationPreset)} ===\n\n`;
         messages.forEach((msg, idx) => {
             debugText += `[BLOCK ${idx + 1}: ${msg.role.toUpperCase()}]\n`;
             debugText += `--- START ---\n${msg.content}\n--- END ---\n\n`;
@@ -735,7 +736,20 @@ async function runGeneration(data, apiConfig, isTemplateMode = false) {
                     body: JSON.stringify({ model: apiConfig.indepApiModel, messages: messages, temperature: 0.85 }),
                     signal: controller.signal
                 });
-                if (!res.ok) throw new Error(`API Error: ${res.status}`);
+                
+                // [Fix 11] Improved Error Handling
+                if (!res.ok) {
+                    let errText = await res.text();
+                    try {
+                        const errJson = JSON.parse(errText);
+                        if (errJson.error && errJson.error.message) errText = errJson.error.message;
+                    } catch (e) {
+                        // ignore json parse error, use raw text
+                    }
+                    if (errText.length > 200) errText = errText.substring(0, 200) + "...";
+                    throw new Error(`API Error (${res.status}): ${errText}`);
+                }
+                
                 const json = await res.json();
                 return json.choices[0].message.content;
             } else {
@@ -759,9 +773,13 @@ async function runGeneration(data, apiConfig, isTemplateMode = false) {
         try {
             responseContent = await doRequest(promptArray);
         } catch (err) {
-            if (prefillContent) {
-                console.warn("[PW] Generation failed, retrying without prefill...", err);
-                toastr.info("检测到 API 限制 (如 Gemini)，正在尝试兼容模式...");
+            // [Fix 12] Catch 400 errors specifically for provider constraints
+            const errStr = err.toString().toLowerCase();
+            const isBadRequest = errStr.includes('400') || errStr.includes('bad request') || errStr.includes('invalid');
+            
+            if (prefillContent && isBadRequest) {
+                console.warn("[PW] Generation failed (400/Bad Request), retrying without prefill...", err);
+                toastr.info("API 返回 400 错误 (可能是 Gemini 等模型不支持 Prefill)，正在尝试兼容模式重试...");
                 responseContent = await doRequest(promptArrayNoPrefill);
             } else {
                 throw err;
@@ -775,7 +793,7 @@ async function runGeneration(data, apiConfig, isTemplateMode = false) {
         clearTimeout(timeoutId); 
     }
     
-    if (!responseContent) throw new Error("API 返回为空");
+    if (!responseContent) throw new Error("API 返回为空 (Empty Response)");
     lastRawResponse = responseContent;
 
     const yamlRegex = /```(?:yaml)?\n([\s\S]*?)```/i;
@@ -1109,8 +1127,8 @@ async function openCreatorPopup() {
 
     // [Fix 10] Generate Preset Options
     let presetOptionsHtml = `
-        <option value="current" ${uiStateCache.generationPreset === 'current' ? 'selected' : ''}>跟随酒馆 (Default)</option>
-        <option value="pure" ${uiStateCache.generationPreset === 'pure' ? 'selected' : ''}>✨ 纯净模式 (Pure / Jailbreak Only)</option>
+        <option value="current" ${uiStateCache.generationPreset === 'current' ? 'selected' : ''}>跟随酒馆预设 (Default)</option>
+        <option value="pure" ${uiStateCache.generationPreset === 'pure' ? 'selected' : ''}>仅破限 (Jailbreak Only)</option>
     `;
     if (window.TavernHelper && typeof window.TavernHelper.getPresetNames === 'function') {
         const presets = window.TavernHelper.getPresetNames().sort();
@@ -1264,6 +1282,19 @@ async function openCreatorPopup() {
                 <textarea id="pw-greetings-preview" style="display:none; min-height: 300px; margin-top:5px;"></textarea>
             </div>
 
+            <!-- [Fix 13] Preset Selector Relocated here & Styled simply -->
+            <div class="pw-card-section">
+                <div class="pw-row">
+                    <label class="pw-section-label">生成使用的预设 (System Prompt)</label>
+                    <select id="pw-preset-select" class="pw-input" style="flex:1; width:100%;">
+                        ${presetOptionsHtml}
+                    </select>
+                </div>
+                <div style="font-size:0.8em; opacity:0.7; margin-top:4px; margin-left: 5px;">
+                    推荐使用“仅破限”模式，以防止 LLM 受到“角色扮演”指令影响而试图续写剧情。
+                </div>
+            </div>
+
             <div class="pw-card-section">
                 <div class="pw-row" style="margin-bottom:5px;">
                     <label class="pw-section-label pw-label-blue">世界书</label>
@@ -1326,23 +1357,6 @@ async function openCreatorPopup() {
                         <button class="pw-btn primary" id="pw-btn-import-theme" title="导入本地 .css 文件" style="padding:6px 10px;"><i class="fa-solid fa-file-import"></i></button>
                         
                         <button class="pw-btn primary" id="pw-btn-download-template" title="下载主题模版" style="padding:6px 10px;"><i class="fa-solid fa-download"></i></button>
-                    </div>
-                </div>
-            </div>
-
-            <!-- [Fix 10] Preset Selector Card -->
-            <div class="pw-card-section" style="border-left: 3px solid var(--SmartThemeQuoteColor);">
-                <div class="pw-row">
-                    <label style="color: var(--SmartThemeQuoteColor); font-weight:bold;">生成使用的预设 (System Prompt)</label>
-                </div>
-                <div class="pw-row" style="margin-top:5px;">
-                    <div style="flex:1;">
-                        <select id="pw-preset-select" class="pw-input" style="width:100%;">
-                            ${presetOptionsHtml}
-                        </select>
-                        <div style="font-size:0.8em; opacity:0.7; margin-top:4px;">
-                            推荐使用“纯净模式”以防止 LLM 续写剧情。
-                        </div>
                     </div>
                 </div>
             </div>
