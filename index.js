@@ -3,7 +3,7 @@ import { extension_settings, getContext } from "../../../extensions.js";
 import { saveSettingsDebounced, callPopup, getRequestHeaders, saveChat, reloadCurrentChat, saveCharacterDebounced } from "../../../../script.js";
 
 const extensionName = "st-persona-weaver";
-const CURRENT_VERSION = "2.2.3"; // Text Polish: Objective Preset Description
+const CURRENT_VERSION = "2.2.3"; // Dynamic Preset Hints
 
 const UPDATE_CHECK_URL = "https://raw.githubusercontent.com/sisisisilviaxie-star/st-persona-weaver/main/manifest.json";
 
@@ -604,6 +604,17 @@ function getRealSystemPrompt(selectedPreset) {
     return null;
 }
 
+// [Fix 14] Dynamic Preset Hint Logic
+function getPresetHintText(val) {
+    if (val === 'pure') {
+        return "纯净模式可避免受预设风格影响或剧情续写，但无破限功能。如遇拒答，请尝试切换至其他包含破限的预设。";
+    }
+    if (val === 'current') {
+        return "将使用酒馆当前激活的预设（Main + Jailbreak）。如果当前预设包含强烈的剧情续写指令，可能会影响生成结果。";
+    }
+    return `将强制使用指定预设 "${val}" 的 System Prompt 进行生成。`;
+}
+
 // ============================================================================
 // [核心] 生成逻辑
 // ============================================================================
@@ -1137,6 +1148,9 @@ async function openCreatorPopup() {
         });
     }
 
+    // [Fix 14] Initial Hint Text
+    const initialHint = getPresetHintText(uiStateCache.generationPreset);
+
     const html = `
 <div class="pw-wrapper">
     <div class="pw-header">
@@ -1274,8 +1288,8 @@ async function openCreatorPopup() {
                         ${presetOptionsHtml}
                     </select>
                 </div>
-                <div style="font-size:0.8em; opacity:0.7; margin-top:4px; margin-left: 5px;">
-                    纯净模式可避免受预设风格影响或剧情续写，但无破限功能。如遇拒答，请尝试切换至其他包含破限的预设。
+                <div id="pw-preset-hint" style="font-size:0.8em; opacity:0.7; margin-top:4px; margin-left: 5px; color: var(--SmartThemeBodyColor);">
+                    ${initialHint}
                 </div>
             </div>
 
@@ -1611,6 +1625,8 @@ function bindEvents() {
         const val = $(this).val();
         uiStateCache.generationPreset = val;
         saveData();
+        // [Fix 14] Update Hint on Change
+        $('#pw-preset-hint').text(getPresetHintText(val));
     });
 
     // --- Prompt Editor Type Switch ---
