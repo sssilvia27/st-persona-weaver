@@ -1,4 +1,3 @@
-
 import { extension_settings, getContext } from "../../../extensions.js";
 import { saveSettingsDebounced, callPopup, getRequestHeaders, saveChat, reloadCurrentChat, saveCharacterDebounced } from "../../../../script.js";
 
@@ -857,9 +856,19 @@ function loadData() {
     try { wiSelectionCache = JSON.parse(localStorage.getItem(STORAGE_KEY_WI_STATE)) || {}; } catch { wiSelectionCache = {}; }
     
     // [Updated] Load UI State with Preset info
+    // 使用对象展开，确保 generationPreset 即使在旧存档中没有，也会被默认值初始化为 'current'
     try {
-        uiStateCache = JSON.parse(localStorage.getItem(STORAGE_KEY_UI_STATE)) || { templateExpanded: true, theme: 'style.css', generationMode: 'user', generationPreset: 'current' };
-    } catch { uiStateCache = { templateExpanded: true, theme: 'style.css', generationMode: 'user', generationPreset: 'current' }; }
+        const saved = JSON.parse(localStorage.getItem(STORAGE_KEY_UI_STATE));
+        uiStateCache = { 
+            templateExpanded: true, 
+            theme: 'style.css', 
+            generationMode: 'user', 
+            generationPreset: 'current', 
+            ...saved 
+        };
+    } catch { 
+        uiStateCache = { templateExpanded: true, theme: 'style.css', generationMode: 'user', generationPreset: 'current' }; 
+    }
     
     try { customThemes = JSON.parse(localStorage.getItem(STORAGE_KEY_THEMES)) || {}; } catch { customThemes = {}; }
 
@@ -1773,7 +1782,7 @@ function bindEvents() {
         } else if (currentGreetingsList[idx]) {
             $preview.val(currentGreetingsList[idx].content);
             $preview.slideDown(200); // Slide direct
-            $toggleBtn.show().html('<i class="fa-solid fa-angle-up"></i> 收起预览');
+            $toggleBtn.show().html('<i class="fa-solid fa-angle-up"></i> 展开预览');
         }
     });
 
