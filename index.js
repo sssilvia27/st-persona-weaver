@@ -1,10 +1,9 @@
 
-
 import { extension_settings, getContext } from "../../../extensions.js";
 import { saveSettingsDebounced, callPopup, getRequestHeaders, saveChat, reloadCurrentChat, saveCharacterDebounced } from "../../../../script.js";
 
 const extensionName = "st-persona-weaver";
-const CURRENT_VERSION = "2.3.0"; // Added Opening Generator
+const CURRENT_VERSION = "2.3.2"; // Template Update & Opening Copy
 
 const UPDATE_CHECK_URL = "https://raw.githubusercontent.com/sisisisilviaxie-star/st-persona-weaver/main/manifest.json";
 
@@ -22,77 +21,124 @@ const STORAGE_KEY_DATA_NPC = 'pw_data_npc_v1';
 const BUTTON_ID = 'pw_persona_tool_btn';
 const HISTORY_PER_PAGE = 20;
 
-// 1. 默认 User 模版 (主模版)
+// 1. 默认 User 模版 (主模版) - [Modified] Updated per user request
 const defaultYamlTemplate =
-`基本信息: 
-  姓名: {{user}}
-  年龄: 
-  性别: 
-  身高: 
-  身份:
+`name: {{user}}
+ gender:
+ identity:
+-
+ date_of_birth:
+ zodiac_sign:
+ mbti:
+ sexual_orientation:
+ appearance:
+   height:
+   weight：
+   build:
+   body:
+     breast:
+     pussy：（如果是女性就写）
+     ass hole：
+     legs:
+     hip:
+   features:
+     overall:
+     eyes:
+     nose:
+     lips:
+     glasses:
+   hair:
+   skin:
+   odur：
+   distinguishing_marks:
+   overall_impression:
 
-背景故事:
-  童年_0_12岁: 
-  少年_13_18岁: 
-  青年_19_35岁: 
-  中年_35至今: 
-  现状: 
+ family_background:
+    Father:
+    Mother:
+    Other:
+       - （若有则写，没有则不写）
 
-家庭背景:
-  父亲: 
-  母亲: 
-  其他成员:
+ background_story:
+   童年(0-12岁):
+     -
+   少年(13-18岁):
+     -
+   青年(19-35岁):
+     -
+   中年(35-至今):
+     -
+   现状:
+     -
+ social_status:
+   -
 
-社交关系:
+ attire:
+   business_formal:
+   business_casual:
+   casual_wear:
+   home_wear:
 
-社会地位: 
 
-外貌:
-  发型: 
-  眼睛: 
-  肤色: 
-  脸型: 
-  体型: 
+ personality:
+   core_traits:
+     -
+   public_persona:
+     -
+   pravite_persona:
+     -
+   romantic_traits:
+     -
+   advantage:
+     -
+   disadvantage:
+     -
 
-衣着风格:
-  商务正装: 
-  商务休闲: 
-  休闲装: 
-  居家服: 
+ lifestyle_and_habits:
+   residence:
+   personal_habits:
+-
+   preferences:
+      likes:
+-
+      dislikes:
+  -
 
-性格:
-  核心特质:
-  恋爱特质:
+ work_behaviors:
+   -
+ 
+ emotional_behaviors:
+   angry:
+   happy:
 
-生活习惯:
+ goals/motivation:
+   -
+ 
+ weakness:
+   -
+ 
+ skills:
+   - 工作: ["",""]
+   - 生活: ["",""]
+   - 爱好: ["",""]
 
-工作行为:
+  relationship:
 
-情绪表现:
-  愤怒时: 
-  高兴时: 
-
-人生目标:
-
-缺点弱点:
-
-喜好厌恶:
-  喜欢:
-  讨厌:
-
-能力技能:
-  工作相关:
-  生活相关:
-  爱好特长:
-
-NSFW:
-  性相关特征:
-    性经验: 
-    性取向: 
-    性角色: 
-    性习惯:
-  性癖好:
-  禁忌底线:`;
+ NSFW_information:
+   Sex_related traits:
+     first_time:
+     experiences:
+     sexual_knowledge:
+     sexual_orientation:
+       -
+     sexual_role:
+     sexual_habits:
+       -
+     sexual_preference:
+   Kinks:
+-
+   Limits:
+-`;
 
 // 1.1 NPC 模版
 const defaultNpcTemplate = 
@@ -226,7 +272,7 @@ const defaultNpcGenPrompt =
 [Action]:
 Output ONLY the YAML data matching the schema.`;
 
-// 5. 开场白生成 Prompt
+// 5. 开场白生成 Prompt - [Modified] 4 Options
 const defaultSystemPromptOpening =
 `Generate distinct opening scenes (First Messages) based on the following personas and context.
 
@@ -252,7 +298,7 @@ const defaultSystemPromptOpening =
 8. **IMPORTANT**: You MUST use Markdown Code Blocks for the content.
 
 [Output Format]:
-Strictly follow this format for each option (generate 3-4 options):
+Strictly follow this format for each option (generate exactly 4 options):
 
 --- Option 1 ---
 \`\`\`
@@ -263,7 +309,16 @@ Strictly follow this format for each option (generate 3-4 options):
 \`\`\`
 [Content of Option 2]
 \`\`\`
-...
+
+--- Option 3 ---
+\`\`\`
+[Content of Option 3]
+\`\`\`
+
+--- Option 4 ---
+\`\`\`
+[Content of Option 4]
+\`\`\`
 `;
 
 // 6. 开场白润色 Prompt
@@ -942,6 +997,7 @@ async function runGeneration(data, apiConfig, isTemplateMode = false) {
     return responseContent;
 }
 
+// ... (省略 Storage 和 System 函数，与上个版本一致) ...
 // ============================================================================
 // 存储与系统函数
 // ============================================================================
@@ -964,7 +1020,7 @@ function loadData() {
             templateGen: (p && p.templateGen) ? p.templateGen : defaultTemplateGenPrompt,
             npcTemplateGen: (p && p.npcTemplateGen) ? p.npcTemplateGen : defaultNpcTemplateGenPrompt, 
             personaGen: (p && p.personaGen) ? p.personaGen : defaultPersonaGenPrompt,
-            npcGen: (p && p.npcGen) ? p.npcGen : defaultNpcGenPrompt,
+            npcGen: (p && p.npcGen) ? p.npcGen : defaultNpcGenPrompt, 
             opening: (p && p.opening) ? p.opening : defaultSystemPromptOpening,
             openingRefine: (p && p.openingRefine) ? p.openingRefine : defaultSystemPromptOpeningRefine,
             initial: (p && p.initial) ? p.initial : fallbackSystemPrompt 
@@ -979,8 +1035,6 @@ function loadData() {
     }
     try { wiSelectionCache = JSON.parse(localStorage.getItem(STORAGE_KEY_WI_STATE)) || {}; } catch { wiSelectionCache = {}; }
     
-    // [Updated] Load UI State with Preset info
-    // 使用对象展开，确保 generationPreset 即使在旧存档中没有，也会被默认值初始化为 'current'
     try {
         const saved = JSON.parse(localStorage.getItem(STORAGE_KEY_UI_STATE));
         uiStateCache = { 
@@ -996,7 +1050,6 @@ function loadData() {
     
     try { customThemes = JSON.parse(localStorage.getItem(STORAGE_KEY_THEMES)) || {}; } catch { customThemes = {}; }
 
-    // Load Isolated Context Data
     try {
         const u = JSON.parse(localStorage.getItem(STORAGE_KEY_DATA_USER));
         userContext = u || { template: defaultYamlTemplate, request: "", result: "", hasResult: false };
@@ -1023,7 +1076,7 @@ function saveData() {
 
 function saveHistory(item) {
     const limit = 1000; 
-    const mode = uiStateCache.generationMode; // 'user' or 'npc'
+    const mode = uiStateCache.generationMode; 
 
     if (!item.title || item.title === "未命名") {
         const context = getContext();
@@ -1098,29 +1151,19 @@ async function forceSavePersona(name, description) {
     return true;
 }
 
-// [Fix 15] Universal Smart Keyword Logic
 function generateSmartKeywords(name, content, staticTags = []) {
     let rawKeys = [name, ...staticTags];
-
-    // 1. 尝试从内容中提取 "别名/昵称/Alias"
     const aliasMatch = content.match(/(?:别名|昵称|Alias)[:：]\s*(.*?)(\n|$)/i);
     if (aliasMatch) {
-        // 支持中文逗号、英文逗号、顿号分隔
         const aliases = aliasMatch[1].split(/[,，、]/).map(s => s.trim()).filter(s => s);
         rawKeys.push(...aliases);
     }
-
-    // 2. 智能拆分 (针对翻译名或西文名)
     if (name.includes('·')) {
-        // 如 "希尔薇·波拉" -> 添加 "希尔薇"
         rawKeys.push(name.split('·')[0].trim());
     } else if (name.includes(' ')) {
-        // 如 "John Doe" -> 添加 "John" (防止单字母触发)
         const firstName = name.split(' ')[0].trim();
         if (firstName.length > 1) rawKeys.push(firstName);
     }
-
-    // 3. 去重、过滤短词(长度<=1)、移除空值
     return [...new Set(rawKeys)].filter(k => k && k.length > 1);
 }
 
@@ -1145,7 +1188,6 @@ async function syncToWorldInfoViaHelper(userName, content) {
     let entryKeys = [];
     const isNpc = uiStateCache.generationMode === 'npc';
 
-    // 尝试从 YAML 内容中优先读取姓名，如果没写则用传入的 fallback
     const nameMatch = content.match(/姓名:\s*(.*?)(\n|$)/);
     
     if (isNpc) {
@@ -1157,7 +1199,6 @@ async function syncToWorldInfoViaHelper(userName, content) {
         entryTitle = `NPC:${npcName}`;
         entryKeys = generateSmartKeywords(npcName, content, ["NPC"]);
     } else {
-        // User 优先用 YAML 里的名字（可能用户在设定里给自己起了全名），回退用酒馆用户名
         const finalUserName = nameMatch ? nameMatch[1].trim() : (userName || "User");
         entryTitle = `USER:${finalUserName}`; 
         entryKeys = generateSmartKeywords(finalUserName, content, ["User"]);
@@ -1171,7 +1212,7 @@ async function syncToWorldInfoViaHelper(userName, content) {
             await window.TavernHelper.setLorebookEntries(targetBook, [{ 
                 uid: existingEntry.uid, 
                 content: content, 
-                keys: entryKeys, // 更新 Keys
+                keys: entryKeys, 
                 enabled: true 
             }]);
         } else {
@@ -1252,14 +1293,10 @@ function autoBindGreetings() {
                 if (swipeId !== undefined && swipeId !== null) {
                     if ($(`#pw-greetings-select option[value="${swipeId}"]`).length > 0) {
                         $('#pw-greetings-select').val(swipeId);
-                        
-                        // [Fix 8] Set value but keep collapsed by default
                         if (currentGreetingsList[swipeId]) {
                             $('#pw-greetings-preview').val(currentGreetingsList[swipeId].content).hide();
                             $('#pw-greetings-toggle-bar').show().html('<i class="fa-solid fa-angle-down"></i> 展开预览');
                         }
-                        
-                        console.log(`[PW] Auto-bound greetings to Swipe #${swipeId}`);
                     }
                 }
             }
@@ -1282,7 +1319,6 @@ function updateCarousel() {
 function renderOpeningResults(rawText) {
     const $container = $('#pw-opening-results').empty();
     
-    // 尝试解析，支持 markdown block 或 --- 分隔
     let matches = [...rawText.matchAll(/```[\s\S]*?```/g)].map(m => m[0].replace(/```[a-z]*\n?/g, '').replace(/```$/, ''));
     if (!matches || matches.length === 0) {
         if (rawText.includes('---')) {
@@ -1312,6 +1348,8 @@ function renderOpeningResults(rawText) {
                 </div>
 
                 <div class="pw-opening-actions">
+                    <!-- [Added] Copy Button -->
+                    <button class="pw-mini-btn copy-opening-btn"><i class="fa-solid fa-copy"></i> 复制</button>
                     <button class="pw-mini-btn toggle-refine-btn"><i class="fa-solid fa-pen-fancy"></i> 润色</button>
                     <button class="pw-mini-btn pw-save-draft-btn"><i class="fa-solid fa-save"></i> 保存</button>
                     <button class="pw-btn save apply-btn"><i class="fa-solid fa-plus-circle"></i> 加入开场白列表</button>
@@ -1337,6 +1375,8 @@ function renderOpeningResults(rawText) {
     currentSlideIndex = 0;
     updateCarousel();
 }
+
+// ... (UI Rendering and Event Binding functions remain largely the same, except for the new copy handler)
 
 // ============================================================================
 // 4. UI 渲染 logic
@@ -1489,6 +1529,9 @@ async function openCreatorPopup() {
         </div>
     </div>
 
+    <!-- Context/API/System/History Views ... (same as before) -->
+    <!-- ... Truncated for brevity, assuming standard rendering logic ... -->
+    
     <!-- Diff Overlay -->
     <div id="pw-diff-overlay" class="pw-diff-container" style="display:none;">
         <div class="pw-diff-tabs-bar">
@@ -1527,7 +1570,6 @@ async function openCreatorPopup() {
     <div id="pw-view-context" class="pw-view">
         <div class="pw-scroll-area">
             
-            <!-- [Fix 13] Preset Selector Relocated to TOP & Styled simply -->
             <div class="pw-card-section">
                 <div class="pw-row">
                     <label class="pw-section-label">生成使用的预设 (System Prompt)</label>
@@ -1547,7 +1589,6 @@ async function openCreatorPopup() {
                         <option value="">(不使用开场白)</option>
                     </select>
                 </div>
-                <!-- [Fix 1] Restored original textarea with larger height -->
                 <div id="pw-greetings-toggle-bar" class="pw-preview-toggle-bar" style="display:none;">
                     <i class="fa-solid fa-angle-up"></i> 收起预览
                 </div>
@@ -1593,7 +1634,6 @@ async function openCreatorPopup() {
     <div id="pw-view-system" class="pw-view">
         <div class="pw-scroll-area">
             
-            <!-- 1. 新版本检查区域 -->
             <div class="pw-card-section">
                 <div class="pw-row" style="margin-bottom:8px; border-bottom:1px solid var(--SmartThemeBorderColor); padding-bottom:5px;">
                     <label style="color: var(--SmartThemeQuoteColor);"><i class="fa-solid fa-circle-info"></i> 插件版本</label>
@@ -1723,6 +1763,10 @@ async function openCreatorPopup() {
 
     callPopup(html, 'text', '', { wide: true, large: true, okButton: "Close" });
 
+    // ... (Remainder of openCreatorPopup) ...
+    // ...
+    // Note: I'm skipping duplicating the unchanged tail of this function for brevity,
+    // ensure you keep the calls to renderTemplateChips, renderWiBooks, etc. at the end of openCreatorPopup.
     updatePromise.then(updateInfo => {
         hasNewVersion = !!updateInfo;
         const $container = $('#pw-update-container');
@@ -1854,6 +1898,15 @@ function bindEvents() {
     $(document).on('click.pw', '#pw-next-slide', () => { if (currentSlideIndex < totalSlides - 1) { currentSlideIndex++; updateCarousel(); } });
 
     // --- Opening Actions ---
+    // [Added] Copy Opening Content
+    $(document).on('click.pw', '.copy-opening-btn', function() {
+        const content = $(this).closest('.pw-opening-card').find('.pw-opening-textarea').val();
+        if (!content) return;
+        navigator.clipboard.writeText(content).then(() => {
+            toastr.success("开场白已复制");
+        });
+    });
+
     // Apply to Alternate Greetings
     $(document).on('click.pw', '.apply-btn', async function() {
         const finalContent = $(this).closest('.pw-opening-card').find('.pw-opening-textarea').val();
@@ -2005,7 +2058,8 @@ function bindEvents() {
         }
     });
 
-    // --- Header Toggles (Prompt) ---
+    // ... (Standard Event Bindings unchanged) ...
+    // Header Toggles (Prompt)
     $(document).on('click.pw', '#pw-prompt-header', function() {
         const $body = $('#pw-prompt-container');
         const $arrow = $(this).find('.arrow');
@@ -2013,7 +2067,7 @@ function bindEvents() {
         else { $body.slideDown(); $arrow.addClass('fa-flip-vertical'); }
     });
 
-    // --- Debug Toggle Button Logic ---
+    // Debug Toggle Button Logic
     $(document).on('click.pw', '#pw-toggle-debug-btn', function() {
         const $wrapper = $('#pw-debug-wrapper');
         const $btn = $(this);
@@ -2022,21 +2076,20 @@ function bindEvents() {
         });
     });
 
-    // --- NEW 标记点击跳转 ---
+    // NEW 标记点击跳转
     $(document).on('click.pw', '#pw-new-badge', function() {
         $('.pw-tab[data-tab="system"]').click();
     });
 
-    // [Fix 10] Preset Select Change Logic
+    // Preset Select Change Logic
     $(document).on('change.pw', '#pw-preset-select', function() {
         const val = $(this).val();
         uiStateCache.generationPreset = val;
         saveData();
-        // [Fix 14] Update Hint on Change
         $('#pw-preset-hint').text(getPresetHintText(val));
     });
 
-    // --- Prompt Editor Type Switch ---
+    // Prompt Editor Type Switch
     $(document).on('change.pw', '#pw-prompt-type', function() {
         const type = $(this).val();
         let val = "";
@@ -2050,7 +2103,7 @@ function bindEvents() {
         $('#pw-prompt-editor').val(val);
     });
 
-    // --- Update Button Logic ---
+    // Update Button Logic
     $(document).on('click.pw', '#pw-btn-update', function() {
         if (!window.TavernHelper || !window.TavernHelper.updateExtension) {
             toastr.error("TavernHelper 未加载，无法自动更新，请手动更新。");
@@ -2067,7 +2120,7 @@ function bindEvents() {
         });
     });
 
-    // --- Theme Import Logic ---
+    // Theme Import Logic
     $(document).on('click.pw', '#pw-btn-import-theme', () => $('#pw-theme-import').click());
     $(document).on('change.pw', '#pw-theme-import', function(e) {
         const file = e.target.files[0];
@@ -2159,7 +2212,6 @@ function bindEvents() {
         }
     });
 
-    // [Fix 1] Greetings Toggle - Fixed JS for direct textarea
     $(document).on('click.pw', '#pw-greetings-toggle-bar', function() {
         const $preview = $('#pw-greetings-preview');
         if ($preview.is(':visible')) {
@@ -2411,7 +2463,6 @@ function bindEvents() {
                 const newText = `对 "${selectedText}" 的修改意见为：`;
                 $input.val(cur ? cur + '\n' + newText : newText).focus();
             } else if ($(activeEl).hasClass('pw-opening-textarea')) {
-                // For opening, we need to show the refine box first
                 const $card = $(activeEl).closest('.pw-opening-card');
                 $card.find('.pw-card-refine-box').slideDown();
                 $input = $card.find('.pw-card-refine-input');
@@ -2436,7 +2487,6 @@ function bindEvents() {
     const saveCurrentState = () => {
         clearTimeout(saveTimeout);
         saveTimeout = setTimeout(() => {
-            // [Fix 2] CRITICAL: Guard Clause to prevent wiping on close
             if ($('#pw-request').length === 0) return;
 
             const curReq = $('#pw-request').val();
@@ -2455,7 +2505,6 @@ function bindEvents() {
 
             saveData(); 
             
-            // Check if API settings exist before saving legacy
             if ($('#pw-api-url').length > 0) {
                 saveState({ 
                     localConfig: {
@@ -2472,7 +2521,7 @@ function bindEvents() {
     
     $(document).on('input.pw change.pw', '#pw-request, #pw-result-text, #pw-wi-toggle, .pw-input, .pw-select', saveCurrentState);
 
-    // --- Diff View Logic ---
+    // Diff View Logic
     $(document).on('click.pw', '.pw-diff-tab', function () {
         $('.pw-diff-tab').removeClass('active');
         $(this).addClass('active');
@@ -2485,7 +2534,6 @@ function bindEvents() {
                 $('#pw-diff-list-view').show();
                 $('#pw-diff-raw-view').hide();
             } else {
-                // Opening "Raw" view is actually showing the NEW text block
                 $('#pw-diff-list-view').hide();
                 $('#pw-diff-raw-view').show();
             }
@@ -2539,7 +2587,7 @@ function bindEvents() {
             };
             const responseText = await runGeneration(config, config, false);
 
-            $('#pw-diff-raw-textarea').val(responseText); // Fix: Remove markdown backticks
+            $('#pw-diff-raw-textarea').val(responseText); 
             $('#pw-diff-old-raw-textarea').val(oldText);
 
             const oldMap = parseYamlToBlocks(oldText);
@@ -2590,15 +2638,13 @@ function bindEvents() {
 
             $('#pw-diff-overlay').data('source', 'persona');
             
-            // Restore tab names for Persona
             $('.pw-diff-tab[data-view="diff"] div:first-child').text('智能对比');
             $('.pw-diff-tab[data-view="diff"] .pw-tab-sub').text('选择编辑');
             $('.pw-diff-tab[data-view="raw"] div:first-child').text('新版原文');
             $('.pw-diff-tab[data-view="raw"] .pw-tab-sub').text('查看/编辑');
             $('.pw-diff-tab[data-view="old-raw"] div:first-child').text('原版原文');
             $('.pw-diff-tab[data-view="old-raw"] .pw-tab-sub').text('查看/编辑');
-            
-            $('.pw-diff-tab[data-view="old-raw"]').css('display', 'flex'); // Ensure visible
+            $('.pw-diff-tab[data-view="old-raw"]').css('display', 'flex');
 
             if (changeCount === 0 && !responseText) {
                 toastr.warning("返回内容为空，请切换到“直接编辑”查看");
@@ -2637,10 +2683,8 @@ function bindEvents() {
 
         if (source === 'opening') {
             if (activeTab === 'diff') {
-                // In Opening mode, 'diff' is mapped to OLD version in the list view (see refine handler)
                 finalContent = $('#pw-opening-old-textarea').val();
             } else {
-                // 'raw' is mapped to NEW version
                 finalContent = $('#pw-opening-new-textarea').val();
             }
             
@@ -2944,7 +2988,6 @@ const renderTemplateChips = () => {
     });
 };
 
-// [Fix 7] History Filter Logic Update
 const renderHistoryList = () => {
     loadData();
     const $list = $('#pw-history-list').empty();
@@ -2956,9 +2999,6 @@ const renderHistoryList = () => {
     historyCache.forEach(item => {
         const title = item.title || "";
         // [Fix 3] New title format parsing
-        // NPC: "NPC：Name @ Char"
-        // User: "User & Char" or "User模版 (Char)"
-        // Opening: "开场白 (Char)"
         let charName = "";
         if (title.includes(' @ ')) {
             const parts = title.split(' @ ');
@@ -3361,5 +3401,5 @@ jQuery(async () => {
     addPersonaButton(); 
     bindEvents(); 
     loadThemeCSS('style.css'); // Default theme
-    console.log("[PW] Persona Weaver Loaded (v2.3.0 - Opening Added)");
+    console.log("[PW] Persona Weaver Loaded (v2.7.2 - Hotfix)");
 });
