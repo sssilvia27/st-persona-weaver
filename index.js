@@ -1535,11 +1535,11 @@ async function openCreatorPopup() {
     autoBindGreetings(); 
     renderThemeOptions(); 
     
-    const savedTheme = uiStateCache.theme || 'style.css';
-    if (savedTheme === 'style.css') {
-        loadThemeCSS('style.css');
-        $('#pw-theme-select').val('style.css');
-        $('#pw-btn-delete-theme').hide(); 
+const savedTheme = uiStateCache.theme || 'style.css';
+    if (savedTheme === 'style.css' || savedTheme === 'Cozy_Fox.css') {
+        loadThemeCSS(savedTheme);
+        $('#pw-theme-select').val(savedTheme);
+        $('#pw-btn-delete-theme').hide();
     } else if (customThemes[savedTheme]) {
         applyCustomTheme(customThemes[savedTheme]);
         $('#pw-theme-select').val(savedTheme);
@@ -1741,11 +1741,11 @@ function bindEvents() {
         URL.revokeObjectURL(url);
     });
 
-    $(document).on('change.pw', '#pw-theme-select', function() {
+$(document).on('change.pw', '#pw-theme-select', function() {
         const theme = $(this).val();
         uiStateCache.theme = theme;
         saveData();
-        if (theme === 'style.css') {
+        if (theme === 'style.css' || theme === 'Cozy_Fox.css') {
             loadThemeCSS(theme);
             $('#pw-btn-delete-theme').hide();
         } else if (customThemes[theme]) {
@@ -2500,8 +2500,12 @@ function applyCustomTheme(cssContent) {
 function renderThemeOptions() {
     const $select = $('#pw-theme-select').empty();
     $select.append('<option value="style.css">默认 (Native)</option>');
+    $select.append('<option value="Cozy_Fox.css">小狐狸</option>');
+    
     Object.keys(customThemes).forEach(name => {
-        $select.append(`<option value="${name}">${name}</option>`);
+        if (name !== 'style.css' && name !== 'Cozy_Fox.css') {
+            $select.append(`<option value="${name}">${name}</option>`);
+        }
     });
 }
 
