@@ -4,7 +4,7 @@
     "version": "2.1.0",
     "author": "Yellows & AI",
     "description": "AI辅助生成与润色用户设定",
-    "js": ["diff.min.js", "index.js"],
+    "js": "index.js",
     "css": "style.css",
     "type": "extension",
     "notes": "v2.1.0 更新：\n1. 新增 NPC 生成模式，支持参考聊天记录生成角色。\n2. 实装开场白智能绑定，自动识别当前开场白。\n3. 历史记录增加类型与角色筛选功能。\n\n2025最后一次更新www，祝大家新年快乐！"
