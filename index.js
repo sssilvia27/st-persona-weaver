@@ -273,6 +273,7 @@ let uiStateCache = { templateExpanded: true, theme: 'style.css', generationMode:
 let hasNewVersion = false;
 let customThemes = {}; 
 let historyPage = 1; 
+let lastRefineRequest = ""; 
 
 let userContext = { template: defaultYamlTemplate, request: "", result: "", hasResult: false };
 let npcContext = { template: defaultNpcTemplate, request: "", result: "", hasResult: false };
@@ -1300,6 +1301,7 @@ async function openCreatorPopup() {
 
         <div class="pw-diff-actions">
             <button class="pw-btn danger" id="pw-diff-cancel">放弃修改</button>
+            <button class="pw-btn primary" id="pw-diff-reroll" title="使用相同的提示词重新生成"><i class="fa-solid fa-rotate-right"></i> 重新生成</button>
             <button class="pw-btn save" id="pw-diff-confirm">保存并应用</button>
         </div>
     </div>
@@ -1559,7 +1561,65 @@ const savedTheme = uiStateCache.theme || 'style.css';
 // ============================================================================
 // 5. 事件绑定
 // ============================================================================
+// ============================================================================
+// 新增：独立的 Diff 渲染函数 (供润色和重Roll复用)
+// ============================================================================
+function renderDiffComparison(oldText, newText) {
+    $('#pw-diff-raw-textarea').val(newText);
+    $('#pw-diff-old-raw-textarea').val(oldText);
 
+    const oldMap = parseYamlToBlocks(oldText);
+    const newMap = parseYamlToBlocks(newText);
+    const allKeys = [...new Set([...oldMap.keys(), ...newMap.keys()])];
+
+    const $list = $('#pw-diff-list').empty();
+    let changeCount = 0;
+
+    allKeys.forEach(key => {
+        const matchedKeyInOld = findMatchingKey(key, oldMap) || key;
+        const matchedKeyInNew = findMatchingKey(key, newMap) || key;
+        const valOld = oldMap.get(matchedKeyInOld) || "";
+        const valNew = newMap.get(matchedKeyInNew) || "";
+
+        const isChanged = valOld.trim() !== valNew.trim();
+        if (isChanged) changeCount++;
+        if (!valOld && !valNew) return;
+
+        let cardsHtml = '';
+        if (!isChanged) {
+            cardsHtml = `
+            <div class="pw-diff-card new selected single-view" data-val="${encodeURIComponent(valNew)}">
+                <div class="pw-diff-label">无变更</div>
+                <textarea class="pw-diff-textarea">${valNew}</textarea>
+            </div>`;
+        } else {
+            cardsHtml = `
+            <div class="pw-diff-card old" data-val="${encodeURIComponent(valOld)}">
+                <div class="pw-diff-label">原版本</div>
+                <textarea class="pw-diff-textarea" readonly>${valOld || "(无)"}</textarea>
+            </div>
+            <div class="pw-diff-card new selected" data-val="${encodeURIComponent(valNew)}">
+                <div class="pw-diff-label">新版本</div>
+                <textarea class="pw-diff-textarea">${valNew || "(删除)"}</textarea>
+            </div>`;
+        }
+
+        const rowHtml = `
+        <div class="pw-diff-row" data-key="${key}">
+            <div class="pw-diff-attr-name">${key}</div>
+            <div class="pw-diff-cards">
+                ${cardsHtml}
+            </div>
+        </div>`;
+        $list.append(rowHtml);
+    });
+
+    if (changeCount === 0 && !newText) {
+        toastr.warning("返回内容为空，请切换到“直接编辑”查看");
+    } else if (changeCount === 0) {
+        toastr.info("没有检测到内容变化");
+    }
+}
 function bindEvents() {
     if (window.stPersonaWeaverBound) return;
     window.stPersonaWeaverBound = true;
@@ -2098,13 +2158,12 @@ $(document).on('change.pw', '#pw-theme-select', function() {
     });
 
     // Refine (Persona)
+   // ================== 1. 润色按钮逻辑 (主界面) ==================
     $(document).on('click.pw', '#pw-btn-refine', async function (e) {
         e.preventDefault();
-        
         if (isProcessing) return;
         isProcessing = true;
 
-        console.log("[PW] Refine Clicked");
         const refineReq = $('#pw-refine-input').val();
         if (!refineReq) {
             toastr.warning("请输入润色意见");
@@ -2112,6 +2171,8 @@ $(document).on('change.pw', '#pw-theme-select', function() {
             return;
         }
         
+        lastRefineRequest = refineReq; // <--- 【关键】记住这次的要求
+
         if(!promptsCache.personaGen) loadData();
 
         const oldText = $('#pw-result-text').val();
@@ -2135,54 +2196,8 @@ $(document).on('change.pw', '#pw-theme-select', function() {
             };
             const responseText = await runGeneration(config, config, false);
 
-            $('#pw-diff-raw-textarea').val(responseText); // Fix: Remove markdown backticks
-            $('#pw-diff-old-raw-textarea').val(oldText);
-
-            const oldMap = parseYamlToBlocks(oldText);
-            const newMap = parseYamlToBlocks(responseText);
-            const allKeys = [...new Set([...oldMap.keys(), ...newMap.keys()])];
-
-            const $list = $('#pw-diff-list').empty();
-            let changeCount = 0;
-
-            allKeys.forEach(key => {
-                const matchedKeyInOld = findMatchingKey(key, oldMap) || key;
-                const matchedKeyInNew = findMatchingKey(key, newMap) || key;
-                const valOld = oldMap.get(matchedKeyInOld) || "";
-                const valNew = newMap.get(matchedKeyInNew) || "";
-
-                const isChanged = valOld.trim() !== valNew.trim();
-                if (isChanged) changeCount++;
-                if (!valOld && !valNew) return;
-
-                let cardsHtml = '';
-                if (!isChanged) {
-                    cardsHtml = `
-                    <div class="pw-diff-card new selected single-view" data-val="${encodeURIComponent(valNew)}">
-                        <div class="pw-diff-label">无变更</div>
-                        <textarea class="pw-diff-textarea">${valNew}</textarea>
-                    </div>`;
-                } else {
-                    cardsHtml = `
-                    <div class="pw-diff-card old" data-val="${encodeURIComponent(valOld)}">
-                        <div class="pw-diff-label">原版本</div>
-                        <textarea class="pw-diff-textarea" readonly>${valOld || "(无)"}</textarea>
-                    </div>
-                    <div class="pw-diff-card new selected" data-val="${encodeURIComponent(valNew)}">
-                        <div class="pw-diff-label">新版本</div>
-                        <textarea class="pw-diff-textarea">${valNew || "(删除)"}</textarea>
-                    </div>`;
-                }
-
-                const rowHtml = `
-                <div class="pw-diff-row" data-key="${key}">
-                    <div class="pw-diff-attr-name">${key}</div>
-                    <div class="pw-diff-cards">
-                        ${cardsHtml}
-                    </div>
-                </div>`;
-                $list.append(rowHtml);
-            });
+            // 复用提取出来的渲染函数
+            renderDiffComparison(oldText, responseText);
 
             $('#pw-diff-overlay').data('source', 'persona');
             
@@ -2193,20 +2208,64 @@ $(document).on('change.pw', '#pw-theme-select', function() {
             $('.pw-diff-tab[data-view="old-raw"] div:first-child').text('原版原文');
             $('.pw-diff-tab[data-view="old-raw"] .pw-tab-sub').text('查看/编辑');
 
-            if (changeCount === 0 && !responseText) {
-                toastr.warning("返回内容为空，请切换到“直接编辑”查看");
-            } else if (changeCount === 0) {
-                toastr.info("没有检测到内容变化");
-            }
-
             $('.pw-diff-tab[data-view="diff"]').click();
             $('#pw-diff-overlay').fadeIn();
-            $('#pw-refine-input').val('');
+            $('#pw-refine-input').val(''); // 清空输入框
         } catch (e) { 
             console.error(e);
             toastr.error("润色失败: " + e.message); 
         } finally { 
             $btn.removeClass('fa-spinner fa-spin').addClass('fa-magic');
+            isProcessing = false;
+        }
+    });
+
+    // ================== 2. 重 Roll 按钮逻辑 (Diff界面内) ==================
+    $(document).on('click.pw', '#pw-diff-reroll', async function (e) {
+        e.preventDefault();
+        if (isProcessing) return;
+        if (!lastRefineRequest) {
+            toastr.warning("未找到上一次的润色要求");
+            return;
+        }
+
+        isProcessing = true;
+        const $btn = $(this);
+        const originalHtml = $btn.html();
+        $btn.html('<i class="fa-solid fa-spinner fa-spin"></i> 生成中...');
+
+        // 只要没点确认保存，旧文本就一直是 result-text 里的内容
+        const oldText = $('#pw-result-text').val(); 
+
+        try {
+            const contextData = await collectContextData();
+            const modelVal = $('#pw-api-source').val() === 'independent' ? $('#pw-api-model-select').val() : null;
+            const config = {
+                mode: 'refine', 
+                request: lastRefineRequest, // 直接复用上次的要求
+                currentText: oldText, 
+                wiText: contextData.wi,           
+                greetingsText: contextData.greetings,
+                apiSource: $('#pw-api-source').val(), 
+                indepApiUrl: $('#pw-api-url').val(),
+                indepApiKey: $('#pw-api-key').val(), 
+                indepApiModel: modelVal
+            };
+            
+            const responseText = await runGeneration(config, config, false);
+
+            // 复用渲染函数，原地刷新 Diff 界面
+            renderDiffComparison(oldText, responseText);
+            
+            // 确保切回对比面板
+            $('.pw-diff-tab[data-view="diff"]').click(); 
+            toastr.success("已重新生成并更新对比！");
+
+        } catch (e) {
+            console.error(e);
+            toastr.error("重Roll失败: " + e.message);
+        } finally {
+            $btn.html(originalHtml);
             isProcessing = false;
         }
     });
