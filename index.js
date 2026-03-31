@@ -3,7 +3,7 @@ import { extension_settings, getContext } from "../../../extensions.js";
 import { saveSettingsDebounced, callPopup, getRequestHeaders, saveChat, reloadCurrentChat, saveCharacterDebounced } from "../../../../script.js";
 
 const extensionName = "st-persona-weaver";
-const CURRENT_VERSION = "2.2.5"; // Smart Keywords for All
+const CURRENT_VERSION = "2.2.6"; // Smart Keywords for All
 
 const UPDATE_CHECK_URL = "https://raw.githubusercontent.com/sssilvia27/st-persona-weaver/main/manifest.json";
 
@@ -1145,6 +1145,28 @@ async function openCreatorPopup() {
     let updatePromise = checkForUpdates(); 
 
     const savedState = loadState();
+    let localConfig = savedState.localConfig || {};
+
+    // --- [新增] API 多配置迁移与初始化 ---
+    if (!localConfig.apiProfiles) {
+        localConfig.apiProfiles =[];
+        // 如果存在旧版独立API记录，自动将其存为“默认配置”
+        const existingUrl = localConfig.indepApiUrl || defaultSettings.indepApiUrl;
+        if (existingUrl) {
+            localConfig.apiProfiles.push({
+                id: Date.now().toString(),
+                name: "默认配置 1",
+                url: existingUrl,
+                key: localConfig.indepApiKey || defaultSettings.indepApiKey || "",
+                model: localConfig.indepApiModel || defaultSettings.indepApiModel || ""
+            });
+            localConfig.activeApiProfileId = localConfig.apiProfiles[0].id;
+        }
+        savedState.localConfig = localConfig;
+        saveState(savedState); // 保存迁移后的结构
+    }
+    // -------------------------------------
+
     const config = { ...defaultSettings, ...extension_settings[extensionName], ...savedState.localConfig };
 
     let currentName = $('.persona_name').first().text().trim();
@@ -1354,12 +1376,23 @@ async function openCreatorPopup() {
         </div>
     </div>
     
-    <!-- API View (Only Connection) -->
+<!-- API View (Only Connection) -->
     <div id="pw-view-api" class="pw-view">
         <div class="pw-scroll-area">
             <div class="pw-card-section">
                 <div class="pw-row"><label>API 来源</label><select id="pw-api-source" class="pw-input" style="flex:1;"><option value="main" ${config.apiSource === 'main' ? 'selected' : ''}>主 API</option><option value="independent" ${config.apiSource === 'independent' ? 'selected' : ''}>独立 API</option></select></div>
-                <div id="pw-indep-settings" style="display:${config.apiSource === 'independent' ? 'flex' : 'none'}; flex-direction:column; gap:15px;">
+                <div id="pw-indep-settings" style="display:${config.apiSource === 'independent' ? 'flex' : 'none'}; flex-direction:column; gap:15px; margin-top:8px;">
+                    
+                    <!-- [新增] API 配置预设管理 -->
+                    <div class="pw-row" style="padding-bottom: 12px; border-bottom: 1px dashed var(--SmartThemeBorderColor);">
+                        <label>配置预设</label>
+                        <div style="flex:1; display:flex; gap:5px; width:100%; min-width: 0;">
+                            <select id="pw-api-profile-select" class="pw-select" style="flex:1;"></select>
+                            <button id="pw-api-profile-add" class="pw-btn primary" title="新建配置" style="width:auto; padding: 6px 10px;"><i class="fa-solid fa-plus"></i></button>
+                            <button id="pw-api-profile-delete" class="pw-btn danger" title="删除当前配置" style="width:auto; padding: 6px 10px;"><i class="fa-solid fa-trash"></i></button>
+                        </div>
+                    </div>
+
                     <div class="pw-row"><label>URL</label><input type="text" id="pw-api-url" class="pw-input" value="${config.indepApiUrl}" style="flex:1;" placeholder="http://.../v1"></div>
                     <div class="pw-row"><label>Key</label><input type="password" id="pw-api-key" class="pw-input" value="${config.indepApiKey}" style="flex:1;"></div>
                     <div class="pw-row"><label>Model</label>
@@ -1536,6 +1569,7 @@ async function openCreatorPopup() {
     renderGreetingsList();
     autoBindGreetings(); 
     renderThemeOptions(); 
+    renderApiProfiles();
     
 const savedTheme = uiStateCache.theme || 'style.css';
     if (savedTheme === 'style.css' || savedTheme === 'Cozy_Fox.css') {
@@ -1632,7 +1666,87 @@ function bindEvents() {
         context.eventSource.on(context.eventTypes.MOVABLE_PANELS_RESET, addPersonaButton);
     }
     window.openPersonaWeaver = openCreatorPopup;
+// --- [新增] API 预设管理事件 ---
+    
+    // 1. 新建配置
+    $(document).on('click.pw', '#pw-api-profile-add', function(e) {
+        e.preventDefault();
+        const name = prompt("请输入新 API 配置的名称：\n(新建后会自动选中，并存入下方的 URL/Key/Model)", "新配置");
+        if (!name) return;
+        
+        const savedState = loadState();
+        let lc = savedState.localConfig || {};
+        if (!lc.apiProfiles) lc.apiProfiles =[];
+        
+        const newId = Date.now().toString();
+        lc.apiProfiles.push({
+            id: newId,
+            name: name,
+            url: $('#pw-api-url').val() || '',
+            key: $('#pw-api-key').val() || '',
+            model: $('#pw-api-model-select').val() || ''
+        });
+        lc.activeApiProfileId = newId;
+        saveState({ localConfig: lc });
+        renderApiProfiles();
+        toastr.success(`配置 "${name}" 已创建`);
+    });
 
+    // 2. 删除配置
+    $(document).on('click.pw', '#pw-api-profile-delete', function(e) {
+        e.preventDefault();
+        const activeId = $('#pw-api-profile-select').val();
+        if (!activeId || activeId === 'custom') return toastr.warning("只能删除已保存的具名配置");
+        if (!confirm("确定要删除当前选中的 API 配置吗？")) return;
+
+        const savedState = loadState();
+        let lc = savedState.localConfig || {};
+        if (lc.apiProfiles) {
+            lc.apiProfiles = lc.apiProfiles.filter(p => p.id !== activeId);
+            lc.activeApiProfileId = lc.apiProfiles.length > 0 ? lc.apiProfiles[0].id : 'custom';
+            saveState({ localConfig: lc });
+            renderApiProfiles();
+            
+            // 如果回退到了另一个配置，触发 change 以加载数据
+            if (lc.activeApiProfileId !== 'custom') {
+                $('#pw-api-profile-select').trigger('change.pw');
+            }
+            toastr.success("已删除配置");
+        }
+    });
+
+    // 3. 切换配置
+    $(document).on('change.pw', '#pw-api-profile-select', function() {
+        const activeId = $(this).val();
+        const savedState = loadState();
+        let lc = savedState.localConfig || {};
+
+        if (activeId === 'custom') {
+            lc.activeApiProfileId = 'custom';
+            saveState({ localConfig: lc });
+            return;
+        }
+
+        if (lc.apiProfiles) {
+            const prof = lc.apiProfiles.find(p => p.id === activeId);
+            if (prof) {
+                $('#pw-api-url').val(prof.url);
+                $('#pw-api-key').val(prof.key);
+                
+                // 处理 Model 选择下拉框的兼容逻辑
+                if ($('#pw-api-model-select option[value="'+prof.model+'"]').length === 0 && prof.model) {
+                    $('#pw-api-model-select').append(`<option value="${prof.model}">${prof.model}</option>`);
+                }
+                $('#pw-api-model-select').val(prof.model);
+
+                lc.activeApiProfileId = activeId;
+                lc.indepApiUrl = prof.url;
+                lc.indepApiKey = prof.key;
+                lc.indepApiModel = prof.model;
+                saveState({ localConfig: lc });
+            }
+        }
+    });
     // --- Mode Switcher (Pill Style - Isolated Data) ---
     $(document).on('click.pw', '.pw-mode-item', function() {
         const mode = $(this).data('mode');
@@ -2125,18 +2239,34 @@ $(document).on('change.pw', '#pw-theme-select', function() {
             
             // Check if API settings exist before saving legacy
             if ($('#pw-api-url').length > 0) {
-                saveState({ 
-                    localConfig: {
-                        apiSource: $('#pw-api-source').val(),
-                        indepApiUrl: $('#pw-api-url').val(),
-                        indepApiKey: $('#pw-api-key').val(),
-                        indepApiModel: $('#pw-api-model-select').val() || $('#pw-api-model').val(),
-                        extraBooks: window.pwExtraBooks || []
+                const currentSaved = loadState();
+                let currentLc = currentSaved.localConfig || {};
+
+                currentLc.apiSource = $('#pw-api-source').val();
+                currentLc.indepApiUrl = $('#pw-api-url').val();
+                currentLc.indepApiKey = $('#pw-api-key').val();
+                currentLc.indepApiModel = $('#pw-api-model-select').val() || $('#pw-api-model').val();
+                currentLc.extraBooks = window.pwExtraBooks || [];
+
+                //[修改] 如果当前选中了某个具体的预设，则同步实时更新该预设的数据
+                const activeId = $('#pw-api-profile-select').val();
+                if (activeId && activeId !== 'custom') {
+                    if (!currentLc.apiProfiles) currentLc.apiProfiles =[];
+                    const prof = currentLc.apiProfiles.find(p => p.id === activeId);
+                    if (prof) {
+                        prof.url = currentLc.indepApiUrl;
+                        prof.key = currentLc.indepApiKey;
+                        prof.model = currentLc.indepApiModel;
                     }
-                });
+                    currentLc.activeApiProfileId = activeId;
+                } else {
+                    currentLc.activeApiProfileId = 'custom';
+                }
+
+                saveState({ localConfig: currentLc });
             }
-        }, 500);
-    };
+        }, 500);  
+    };            
     
     $(document).on('input.pw change.pw', '#pw-request, #pw-result-text, #pw-wi-toggle, .pw-input, .pw-select', saveCurrentState);
 
@@ -2730,6 +2860,34 @@ const renderHistoryList = () => {
         $list.append($el);
     });
 };
+
+
+// ---[新增] 渲染 API 配置预设下拉框 ---
+function renderApiProfiles() {
+    const savedState = loadState();
+    const lc = savedState.localConfig || {};
+    const profiles = lc.apiProfiles ||[];
+    const $select = $('#pw-api-profile-select');
+    if ($select.length === 0) return;
+    $select.empty();
+
+    if (profiles.length === 0) {
+        $select.append('<option value="custom">-- 暂无配置 (输入自动存为自定义) --</option>');
+    } else {
+        profiles.forEach(p => {
+            $select.append(`<option value="${p.id}">${p.name}</option>`);
+        });
+        $select.append('<option value="custom">-- 自定义 (不关联预设) --</option>');
+    }
+
+    if (lc.activeApiProfileId && $select.find(`option[value="${lc.activeApiProfileId}"]`).length > 0) {
+        $select.val(lc.activeApiProfileId);
+    } else if (profiles.length > 0) {
+        $select.val(profiles[0].id);
+    } else {
+        $select.val('custom');
+    }
+}
 
 window.pwExtraBooks = [];
 const renderWiBooks = async () => {
