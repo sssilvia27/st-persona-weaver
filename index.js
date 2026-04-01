@@ -1238,7 +1238,7 @@ async function openCreatorPopup() {
                         <i class="fa-solid fa-user-secret"></i> NPC
                     </div>
                 </div>
-                <div class="pw-load-btn" id="pw-btn-load-current" style="${isNpc ? 'visibility:hidden;' : ''}">载入当前人设</div>
+                <div class="pw-load-btn" id="pw-btn-load-current">载入已有人设</div>
             </div>
 
             <div>
@@ -1330,9 +1330,10 @@ async function openCreatorPopup() {
         </div>
 
         <div class="pw-diff-actions">
-            <button class="pw-btn danger" id="pw-diff-cancel">放弃修改</button>
             <button class="pw-btn primary" id="pw-diff-reroll" title="使用相同的提示词重新生成"><i class="fa-solid fa-rotate-right"></i> 重新生成</button>
-            <button class="pw-btn save" id="pw-diff-confirm">保存并应用</button>
+            <div style="flex:1;"></div>
+            <button class="pw-btn danger" id="pw-diff-cancel"><i class="fa-solid fa-xmark"></i> 放弃</button>
+            <button class="pw-btn gen" id="pw-diff-confirm" style="width:auto;"><i class="fa-solid fa-check"></i> 保存并应用</button>
         </div>
     </div>
 
@@ -1808,15 +1809,13 @@ function bindEvents() {
 
         // 4. Update UI Buttons
         if (mode === 'npc') {
-            $('#pw-btn-gen').text("生成 NPC 设定");
+            $('#pw-btn-gen').html('<i class="fa-solid fa-wand-magic-sparkles"></i> 生成 NPC 设定');
             $('#pw-btn-apply').hide();
-            $('#pw-btn-load-current').css('visibility', 'hidden'); 
             $('#pw-load-main-template').show(); 
             toastr.info("已切换至 NPC 模式");
         } else {
-            $('#pw-btn-gen').text("生成 User 设定");
+            $('#pw-btn-gen').html('<i class="fa-solid fa-wand-magic-sparkles"></i> 生成 User 设定');
             $('#pw-btn-apply').show();
-            $('#pw-btn-load-current').css('visibility', 'visible');
             $('#pw-load-main-template').hide();
             toastr.info("已切换至 User 模式");
         }
@@ -2532,9 +2531,11 @@ $(document).on('change.pw', '#pw-theme-select', function() {
         }
     });
 
-    $(document).on('click.pw', '#pw-btn-load-current', function() {
-        const content = getActivePersonaDescription();
-        if (content) {
+    $(document).on('click.pw', '#pw-btn-load-current', async function() {
+        const isNpc = uiStateCache.generationMode === 'npc';
+
+        const applyContent = (content) => {
+            if (!content) return toastr.warning("未找到有效内容");
             if ($('#pw-result-text').val() && !confirm("当前结果框已有内容，确定要覆盖吗？")) return;
             $('#pw-result-text').val(content);
             $('#pw-result-area').fadeIn();
@@ -2542,8 +2543,100 @@ $(document).on('change.pw', '#pw-theme-select', function() {
             toastr.success(TEXT.TOAST_LOAD_CURRENT);
             saveCurrentState();
             $('#pw-result-text').trigger('input');
+        };
+
+        const loadFromWorldBook = async (filterKeyword) => {
+            const boundBooks = await getContextWorldBooks();
+            const allBooks = [...new Set([...boundBooks, ...(window.pwExtraBooks || [])])];
+            if (allBooks.length === 0) return toastr.warning("未找到可用的世界书");
+
+            let allEntries = [];
+            for (const bookName of allBooks) {
+                const entries = await getWorldBookEntries(bookName);
+                entries.forEach(e => {
+                    if (e.content) allEntries.push({ book: bookName, ...e });
+                });
+            }
+
+            if (filterKeyword) {
+                const kw = filterKeyword.toLowerCase();
+                const filtered = allEntries.filter(e =>
+                    (e.displayName || '').toLowerCase().includes(kw) ||
+                    (e.content || '').toLowerCase().includes(kw)
+                );
+                if (filtered.length > 0) allEntries = filtered;
+            }
+
+            if (allEntries.length === 0) return toastr.warning("世界书中没有找到相关条目");
+
+            const optionsHtml = allEntries.map((e, i) =>
+                `<option value="${i}">[${e.book}] ${e.displayName}</option>`
+            ).join('');
+
+            const selectHtml = `
+                <div style="display:flex; flex-direction:column; gap:10px;">
+                    <label style="font-weight:bold;">选择要载入的世界书条目：</label>
+                    <select id="pw-wi-load-select" class="pw-input" style="width:100%;" size="${Math.min(allEntries.length, 8)}">
+                        ${optionsHtml}
+                    </select>
+                    <div id="pw-wi-load-preview" style="max-height:200px; overflow-y:auto; padding:8px; background:var(--pw-paper-bg); border:1px solid var(--pw-border); border-radius:6px; font-size:0.9em; white-space:pre-wrap;"></div>
+                </div>`;
+
+            const popupPromise = callPopup(selectHtml, 'confirm', '', { okButton: '载入', cancelButton: '取消' });
+
+            $('#pw-wi-load-select').on('change click', function() {
+                const idx = parseInt($(this).val());
+                if (!isNaN(idx) && allEntries[idx]) {
+                    $('#pw-wi-load-preview').text(allEntries[idx].content);
+                }
+            });
+            if (allEntries.length > 0) {
+                $('#pw-wi-load-select').val(0).trigger('change');
+            }
+
+            const result = await popupPromise;
+            if (result) {
+                const idx = parseInt($('#pw-wi-load-select').val());
+                if (!isNaN(idx) && allEntries[idx]) {
+                    applyContent(allEntries[idx].content);
+                }
+            }
+            return;
+        };
+
+        if (isNpc) {
+            const charName = getContext().characters[getContext().characterId]?.name || '';
+            await loadFromWorldBook(charName);
         } else {
-            toastr.warning("未检测到有效的人设描述");
+            const userPersona = getActivePersonaDescription();
+            const hasUserPersona = !!userPersona;
+
+            const choiceHtml = `
+                <div style="display:flex; flex-direction:column; gap:12px;">
+                    <label style="font-weight:bold;">选择人设来源：</label>
+                    <div style="display:flex; gap:10px;">
+                        <button class="pw-btn primary pw-load-choice" data-choice="user" style="flex:1; padding:12px;" ${!hasUserPersona ? 'disabled title="未检测到当前User人设"' : ''}>
+                            <i class="fa-solid fa-user"></i> 当前 User 人设
+                        </button>
+                        <button class="pw-btn primary pw-load-choice" data-choice="worldbook" style="flex:1; padding:12px;">
+                            <i class="fa-solid fa-book-atlas"></i> 世界书条目
+                        </button>
+                    </div>
+                </div>`;
+
+            callPopup(choiceHtml, 'text', '', { okButton: '关闭' });
+
+            $(document).one('click', '.pw-load-choice', async function() {
+                const choice = $(this).data('choice');
+                $('.dialogue_popup_ok').trigger('click');
+
+                if (choice === 'user') {
+                    applyContent(userPersona);
+                } else {
+                    const userName = $('.persona_name').first().text().trim() || $('h5#your_name').text().trim() || '';
+                    await loadFromWorldBook(userName);
+                }
+            });
         }
     });
 
