@@ -1209,7 +1209,7 @@ async function openCreatorPopup() {
         const activeProf = localConfig.apiProfiles.find(p => p.id === localConfig.activeApiProfileId);
         if (activeProf) initialProfileName = activeProf.name;
     } else if (localConfig.activeApiProfileId === 'custom') {
-        initialProfileName = "自定义配置";
+        initialProfileName = "";
     }
 
     const html = `
@@ -1396,7 +1396,6 @@ async function openCreatorPopup() {
                         <label>配置预设</label>
                         <div style="flex:1; display:flex; gap:5px; width:100%; min-width: 0;">
                             <select id="pw-api-profile-select" class="pw-select" style="flex:1;"></select>
-                            <button id="pw-api-profile-save" class="pw-btn primary" title="保存当前配置" style="width:auto; padding: 6px 10px;"><i class="fa-solid fa-floppy-disk"></i></button>
                             <button id="pw-api-profile-add" class="pw-btn primary" title="新建空白配置" style="width:auto; padding: 6px 10px;"><i class="fa-solid fa-plus"></i></button>
                             <button id="pw-api-profile-delete" class="pw-btn danger" title="删除当前配置" style="width:auto; padding: 6px 10px;"><i class="fa-solid fa-trash"></i></button>
                         </div>
@@ -1719,7 +1718,7 @@ function bindEvents() {
 
         if (activeId === 'custom') {
             lc.activeApiProfileId = 'custom';
-            $('#pw-api-profile-name').val('自定义配置');
+            $('#pw-api-profile-name').val('');
             savedState.localConfig = lc;
             saveState(savedState);
             return;
@@ -1751,7 +1750,7 @@ function bindEvents() {
     $(document).on('click.pw', '#pw-api-profile-delete', function(e) {
         e.preventDefault();
         const activeId = $('#pw-api-profile-select').val();
-        if (!activeId || activeId === 'custom') return toastr.warning("只能删除已保存的具名配置");
+        if (!activeId || activeId === 'custom') return toastr.warning("请先选择一个已保存的配置");
         if (!confirm("确定要删除当前选中的 API 配置吗？")) return;
 
         const savedState = loadState();
@@ -1766,47 +1765,6 @@ function bindEvents() {
             $('#pw-api-profile-select').trigger('change.pw'); 
             toastr.success("已删除配置");
         }
-    });
-
-    // 4. 保存当前配置 (显式保存按钮)
-    $(document).on('click.pw', '#pw-api-profile-save', function(e) {
-        e.preventDefault();
-        const savedState = loadState();
-        let lc = savedState.localConfig || {};
-        if (!lc.apiProfiles) lc.apiProfiles = [];
-
-        const activeId = $('#pw-api-profile-select').val();
-        const name = $('#pw-api-profile-name').val().trim() || "未命名配置";
-        const url = $('#pw-api-url').val().trim();
-        const key = $('#pw-api-key').val();
-        const model = $('#pw-api-model-select').val() || '';
-
-        if (!url) return toastr.warning("请先填写 API URL");
-
-        if (activeId && activeId !== 'custom') {
-            const prof = lc.apiProfiles.find(p => p.id === activeId);
-            if (prof) {
-                prof.name = name;
-                prof.url = url;
-                prof.key = key;
-                prof.model = model;
-                $(`#pw-api-profile-select option[value="${activeId}"]`).text(name);
-            }
-            lc.activeApiProfileId = activeId;
-        } else {
-            const newId = Date.now().toString();
-            lc.apiProfiles.push({ id: newId, name, url, key, model });
-            lc.activeApiProfileId = newId;
-        }
-
-        lc.indepApiUrl = url;
-        lc.indepApiKey = key;
-        lc.indepApiModel = model;
-
-        savedState.localConfig = lc;
-        saveState(savedState);
-        renderApiProfiles();
-        toastr.success(`配置 "${name}" 已保存`);
     });
 
     // --- Mode Switcher (Pill Style - Isolated Data) ---
@@ -2939,12 +2897,12 @@ function renderApiProfiles() {
     $select.empty();
 
     if (profiles.length === 0) {
-        $select.append('<option value="custom">-- 暂无配置 (输入自动存为自定义) --</option>');
+        $select.append('<option value="custom">-- 暂无已保存配置 --</option>');
     } else {
         profiles.forEach(p => {
             $select.append(`<option value="${p.id}">${p.name}</option>`);
         });
-        $select.append('<option value="custom">-- 自定义 (不关联预设) --</option>');
+        $select.append('<option value="custom">-- 临时使用 (不保存) --</option>');
     }
 
     if (lc.activeApiProfileId && $select.find(`option[value="${lc.activeApiProfileId}"]`).length > 0) {
