@@ -1337,6 +1337,15 @@ async function openCreatorPopup() {
         </div>
     </div>
 
+    <!-- Load Persona Overlay -->
+    <div id="pw-load-overlay" style="display:none; position:absolute; top:0; left:0; width:100%; height:100%; z-index:2001; background:var(--SmartThemeBlurTintColor, rgba(0,0,0,0.85)); flex-direction:column;">
+        <div style="padding:15px; border-bottom:1px solid var(--pw-border); display:flex; align-items:center; justify-content:space-between;">
+            <span style="font-weight:bold; font-size:1.05em;" id="pw-load-overlay-title">载入已有人设</span>
+            <button class="pw-btn danger" id="pw-load-overlay-close" style="padding:4px 10px;"><i class="fa-solid fa-xmark"></i></button>
+        </div>
+        <div id="pw-load-overlay-content" style="flex:1; overflow-y:auto; padding:15px;"></div>
+    </div>
+
     <div id="pw-float-quote-btn" class="pw-float-quote-btn"><i class="fa-solid fa-pen-to-square"></i> 修改此段</div>
 
     <!-- Context View -->
@@ -2531,8 +2540,12 @@ $(document).on('change.pw', '#pw-theme-select', function() {
         }
     });
 
+    $(document).on('click.pw', '#pw-load-overlay-close', () => $('#pw-load-overlay').fadeOut());
+
     $(document).on('click.pw', '#pw-btn-load-current', async function() {
         const isNpc = uiStateCache.generationMode === 'npc';
+        const $overlay = $('#pw-load-overlay');
+        const $content = $('#pw-load-overlay-content');
 
         const applyContent = (content) => {
             if (!content) return toastr.warning("未找到有效内容");
@@ -2540,12 +2553,13 @@ $(document).on('change.pw', '#pw-theme-select', function() {
             $('#pw-result-text').val(content);
             $('#pw-result-area').fadeIn();
             $('#pw-request').addClass('minimized');
+            $overlay.fadeOut();
             toastr.success(TEXT.TOAST_LOAD_CURRENT);
             saveCurrentState();
             $('#pw-result-text').trigger('input');
         };
 
-        const loadFromWorldBook = async (filterKeyword) => {
+        const showWiSelector = async (filterKeyword) => {
             const boundBooks = await getContextWorldBooks();
             const allBooks = [...new Set([...boundBooks, ...(window.pwExtraBooks || [])])];
             if (allBooks.length === 0) return toastr.warning("未找到可用的世界书");
@@ -2567,74 +2581,70 @@ $(document).on('change.pw', '#pw-theme-select', function() {
                 if (filtered.length > 0) allEntries = filtered;
             }
 
-            if (allEntries.length === 0) return toastr.warning("世界书中没有找到相关条目");
+            if (allEntries.length === 0) { $overlay.fadeOut(); return toastr.warning("世界书中没有找到相关条目"); }
 
             const optionsHtml = allEntries.map((e, i) =>
                 `<option value="${i}">[${e.book}] ${e.displayName}</option>`
             ).join('');
 
-            const selectHtml = `
-                <div style="display:flex; flex-direction:column; gap:10px;">
-                    <label style="font-weight:bold;">选择要载入的世界书条目：</label>
-                    <select id="pw-wi-load-select" class="pw-input" style="width:100%;" size="${Math.min(allEntries.length, 8)}">
+            $content.html(`
+                <div style="display:flex; flex-direction:column; gap:10px; height:100%;">
+                    <select id="pw-wi-load-select" class="pw-input" style="width:100%; flex-shrink:0;" size="${Math.min(allEntries.length, 8)}">
                         ${optionsHtml}
                     </select>
-                    <div id="pw-wi-load-preview" style="max-height:200px; overflow-y:auto; padding:8px; background:var(--pw-paper-bg); border:1px solid var(--pw-border); border-radius:6px; font-size:0.9em; white-space:pre-wrap;"></div>
-                </div>`;
-
-            const popupPromise = callPopup(selectHtml, 'confirm', '', { okButton: '载入', cancelButton: '取消' });
+                    <div id="pw-wi-load-preview" style="flex:1; min-height:120px; overflow-y:auto; padding:10px; background:var(--pw-paper-bg); border:1px solid var(--pw-border); border-radius:6px; font-size:0.9em; white-space:pre-wrap; line-height:1.5;"></div>
+                    <button class="pw-btn gen" id="pw-wi-load-confirm" style="flex-shrink:0;"><i class="fa-solid fa-check"></i> 载入选中条目</button>
+                </div>`);
 
             $('#pw-wi-load-select').on('change click', function() {
                 const idx = parseInt($(this).val());
                 if (!isNaN(idx) && allEntries[idx]) {
                     $('#pw-wi-load-preview').text(allEntries[idx].content);
                 }
-            });
-            if (allEntries.length > 0) {
-                $('#pw-wi-load-select').val(0).trigger('change');
-            }
+            }).val(0).trigger('change');
 
-            const result = await popupPromise;
-            if (result) {
+            $('#pw-wi-load-confirm').on('click', function() {
                 const idx = parseInt($('#pw-wi-load-select').val());
                 if (!isNaN(idx) && allEntries[idx]) {
                     applyContent(allEntries[idx].content);
                 }
-            }
-            return;
+            });
         };
 
         if (isNpc) {
+            $('#pw-load-overlay-title').text('载入世界书 NPC 人设');
+            $content.html('<div style="text-align:center; padding:20px; opacity:0.6;"><i class="fas fa-spinner fa-spin"></i> 正在读取世界书...</div>');
+            $overlay.css('display', 'flex').hide().fadeIn();
             const charName = getContext().characters[getContext().characterId]?.name || '';
-            await loadFromWorldBook(charName);
+            await showWiSelector(charName);
         } else {
             const userPersona = getActivePersonaDescription();
             const hasUserPersona = !!userPersona;
 
-            const choiceHtml = `
-                <div style="display:flex; flex-direction:column; gap:12px;">
-                    <label style="font-weight:bold;">选择人设来源：</label>
-                    <div style="display:flex; gap:10px;">
-                        <button class="pw-btn primary pw-load-choice" data-choice="user" style="flex:1; padding:12px;" ${!hasUserPersona ? 'disabled title="未检测到当前User人设"' : ''}>
+            $('#pw-load-overlay-title').text('载入已有人设');
+            $content.html(`
+                <div style="display:flex; flex-direction:column; gap:15px; align-items:center; padding:20px 0;">
+                    <span style="opacity:0.7;">选择要载入的人设来源</span>
+                    <div style="display:flex; gap:12px; width:100%; max-width:400px;">
+                        <button class="pw-btn primary pw-load-choice" data-choice="user" style="flex:1; padding:14px; font-size:1em;${!hasUserPersona ? ' opacity:0.4; cursor:not-allowed;' : ''}" ${!hasUserPersona ? 'disabled title="未检测到当前 User 人设"' : ''}>
                             <i class="fa-solid fa-user"></i> 当前 User 人设
                         </button>
-                        <button class="pw-btn primary pw-load-choice" data-choice="worldbook" style="flex:1; padding:12px;">
+                        <button class="pw-btn primary pw-load-choice" data-choice="worldbook" style="flex:1; padding:14px; font-size:1em;">
                             <i class="fa-solid fa-book-atlas"></i> 世界书条目
                         </button>
                     </div>
-                </div>`;
+                </div>`);
 
-            callPopup(choiceHtml, 'text', '', { okButton: '关闭' });
+            $overlay.css('display', 'flex').hide().fadeIn();
 
-            $(document).one('click', '.pw-load-choice', async function() {
+            $content.find('.pw-load-choice').on('click', async function() {
                 const choice = $(this).data('choice');
-                $('.dialogue_popup_ok').trigger('click');
-
                 if (choice === 'user') {
                     applyContent(userPersona);
                 } else {
+                    $content.html('<div style="text-align:center; padding:20px; opacity:0.6;"><i class="fas fa-spinner fa-spin"></i> 正在读取世界书...</div>');
                     const userName = $('.persona_name').first().text().trim() || $('h5#your_name').text().trim() || '';
-                    await loadFromWorldBook(userName);
+                    await showWiSelector(userName);
                 }
             });
         }
