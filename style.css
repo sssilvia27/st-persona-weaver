@@ -262,11 +262,7 @@
 .pw-template-editor-area { display: none; flex-direction: column; gap: 0; background: var(--pw-paper-bg); border-radius: 6px; border: 1px solid var(--pw-border); overflow: hidden; }
 .pw-template-textarea { width: 100%; height: 200px; font-family: monospace; font-size: 0.85em; background: transparent; color: var(--pw-text-main); border: none; resize: vertical; padding: 8px; white-space: pre; outline: none; box-sizing: border-box; }
 .pw-template-toolbar { display: flex; justify-content: flex-start; align-items: center; padding: 5px 10px; background: rgba(128,128,128,0.2); border-bottom: 1px solid var(--pw-border); border-radius: 6px 6px 0 0; }
-.pw-template-editor-area .pw-refine-toolbar { border: none; border-top: 1px solid var(--pw-border); border-radius: 0; margin-bottom: 0; }
-.pw-template-editor-area .pw-refine-input { min-height: 50px; }
-.pw-template-editor-area .pw-refine-input.expanded { min-height: 150px; }
-.pw-template-footer { display: flex; justify-content: space-between; align-items: center; background: rgba(128,128,128,0.1); padding: 5px 10px; border-top: 1px solid var(--pw-border); gap: 8px; }
-.pw-template-footer .pw-btn.gen { width: auto; margin-top: 0; padding: 8px 16px; font-size: 0.9em; flex: 1; }
+.pw-template-footer { display: flex; justify-content: space-between; align-items: center; background: rgba(128,128,128,0.1); padding: 5px 10px; border-top: 1px solid var(--pw-border); }
 
 /* Shortcuts & Vars */
 .pw-shortcut-bar { display: flex; gap: 5px; align-items: center; }
