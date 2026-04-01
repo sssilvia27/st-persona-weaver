@@ -16,7 +16,8 @@ const STORAGE_KEY_WI_STATE = 'pw_wi_selection_v1';
 const STORAGE_KEY_UI_STATE = 'pw_ui_state_v4_preset';          
 const STORAGE_KEY_THEMES = 'pw_custom_themes_v1'; 
 const STORAGE_KEY_DATA_USER = 'pw_data_user_v1'; 
-const STORAGE_KEY_DATA_NPC = 'pw_data_npc_v1';   
+const STORAGE_KEY_DATA_NPC = 'pw_data_npc_v1';
+const STORAGE_KEY_PINNED_BOOKS = 'pw_pinned_books_v1';   
 
 const BUTTON_ID = 'pw_persona_tool_btn';
 const HISTORY_PER_PAGE = 20;
@@ -3204,6 +3205,15 @@ function renderApiProfiles() {
 }
 
 window.pwExtraBooks = [];
+window.pwPinnedBooks = [];
+try { window.pwPinnedBooks = JSON.parse(localStorage.getItem(STORAGE_KEY_PINNED_BOOKS)) || []; } catch { window.pwPinnedBooks = []; }
+// Merge pinned books into extra on init
+window.pwExtraBooks = [...window.pwPinnedBooks];
+
+function savePinnedBooks() {
+    try { localStorage.setItem(STORAGE_KEY_PINNED_BOOKS, JSON.stringify(window.pwPinnedBooks)); } catch(e) { console.warn(e); }
+}
+
 const renderWiBooks = async () => {
     const container = $('#pw-wi-container').empty();
     const baseBooks = await getContextWorldBooks();
@@ -3216,17 +3226,28 @@ const renderWiBooks = async () => {
 
     for (const book of allBooks) {
         const isBound = baseBooks.includes(book);
+        const isPinned = window.pwPinnedBooks.includes(book);
         
+        let statusLabel = '';
+        if (isBound) statusLabel = '<span class="pw-bound-status">(已绑定)</span>';
+        else if (isPinned) statusLabel = '<span class="pw-bound-status" style="color:var(--SmartThemeQuoteColor);">(已固定)</span>';
+
+        const pinIcon = !isBound
+            ? `<i class="fa-solid fa-thumbtack pw-pin-book-icon" title="${isPinned ? '取消固定' : '固定此世界书（跨角色卡保留）'}" style="cursor:pointer; margin-right:6px; opacity:${isPinned ? '1' : '0.4'}; color:${isPinned ? 'var(--SmartThemeQuoteColor)' : 'inherit'};"></i>`
+            : '';
+        const removeIcon = !isBound ? '<i class="fa-solid fa-times remove-book pw-remove-book-icon" title="移除"></i>' : '';
+
         const $el = $(`
         <div class="pw-wi-book">
             <div class="pw-wi-header" style="display:flex; align-items:center;">
                 <input type="checkbox" class="pw-wi-header-checkbox pw-wi-select-all" title="全选/全不选 (仅选中当前可见条目)">
                 <span class="pw-wi-book-title">
-                    ${book} ${isBound ? '<span class="pw-bound-status">(已绑定)</span>' : ''}
+                    ${book} ${statusLabel}
                 </span>
                 <div class="pw-wi-header-actions">
                     <div class="pw-wi-filter-toggle" title="展开/收起筛选"><i class="fa-solid fa-filter"></i></div>
-                    ${!isBound ? '<i class="fa-solid fa-times remove-book pw-remove-book-icon" title="移除"></i>' : ''}
+                    ${pinIcon}
+                    ${removeIcon}
                     <i class="fa-solid fa-chevron-down arrow"></i>
                 </div>
             </div>
@@ -3253,7 +3274,26 @@ const renderWiBooks = async () => {
             }
         });
 
-        $el.find('.remove-book').on('click', (e) => { e.stopPropagation(); window.pwExtraBooks = window.pwExtraBooks.filter(b => b !== book); renderWiBooks(); });
+        $el.find('.pw-pin-book-icon').on('click', function(e) {
+            e.stopPropagation();
+            if (window.pwPinnedBooks.includes(book)) {
+                window.pwPinnedBooks = window.pwPinnedBooks.filter(b => b !== book);
+                toastr.info(`已取消固定「${book}」`);
+            } else {
+                window.pwPinnedBooks.push(book);
+                toastr.success(`已固定「${book}」，将在所有角色卡中自动加载`);
+            }
+            savePinnedBooks();
+            renderWiBooks();
+        });
+
+        $el.find('.remove-book').on('click', (e) => {
+            e.stopPropagation();
+            window.pwExtraBooks = window.pwExtraBooks.filter(b => b !== book);
+            window.pwPinnedBooks = window.pwPinnedBooks.filter(b => b !== book);
+            savePinnedBooks();
+            renderWiBooks();
+        });
         
         $el.find('.pw-wi-filter-toggle').on('click', function(e) {
             e.stopPropagation();
