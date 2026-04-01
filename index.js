@@ -524,13 +524,21 @@ function wrapInputForSafety(request, oldText, isRefine) {
     const safeRequest = request.replace(/"/g, "'");
 
     if (isRefine) {
+        const isMultiNpc = oldText && oldText.includes('\n---\n');
+        const multiNpcHint = isMultiNpc ? `
+[MULTI_NPC_DOCUMENT]:
+The Target Buffer contains MULTIPLE NPC profiles separated by "---".
+Follow the user's instruction exactly — add, remove, modify, or rewrite NPCs as requested.
+Output the final result with each NPC separated by "---".
+` : '';
+
         return `
 [SYSTEM_OP: DATA_REVISION_PATCH]
 [TARGET_BUFFER]:
 """
 ${oldText}
 """
-[PATCH_INSTRUCTION]:
+${multiNpcHint}[PATCH_INSTRUCTION]:
 The user has submitted a revision patch: "${safeRequest}"
 [EXECUTION]:
 Apply this patch to the Target Buffer. Rewrite the content to satisfy the instruction. 
@@ -700,18 +708,14 @@ async function runGeneration(data, apiConfig, isTemplateMode = false) {
             .replace(/{{chatHistory}}/g, wrappedChatHistory);
     }
 
-    // --- NPC 批量生成指令注入 ---
-    if (isNpcMode && !isTemplateMode && data.mode !== 'refine' && data.npcCount === 'auto') {
+    // --- NPC 多角色自适应指令 ---
+    if (isNpcMode && !isTemplateMode) {
         userMessageContent += `
 
-[BATCH_MODE]:
-- Generate MULTIPLE NPCs based on the user's request. Decide the number yourself (if user says "几个", generate 3-5; if user specifies a number, follow it).
-- If the user gives detailed requirements for specific NPCs, follow those requirements for each.
-- Use the SAME YAML schema for each NPC. Keep each profile focused on distinguishing traits.
-- Separate each NPC with a line containing ONLY "---" (three dashes).
-- Each NPC MUST have a unique name and distinct personality/role.`;
-
-        prefillContent = "```yaml\n基本信息:\n  姓名:";
+[NPC_COUNT]: Decide the number of NPCs based on the user's request.
+- If the user asks for one NPC, generate one detailed NPC.
+- If the user asks for multiple (e.g. "几个同学", "3个保镖"), generate that many, each concise but distinct.
+- When generating multiple NPCs, separate each with a line containing ONLY "---".`;
     }
 
     const updateDebugView = (messages) => {
@@ -1287,13 +1291,6 @@ async function openCreatorPopup() {
             </div>
 
             <textarea id="pw-request" class="pw-textarea pw-auto-height" placeholder="在此输入要求，或点击上方模版块插入参考结构（无需全部填满）...">${activeData.request}</textarea>
-            <div id="pw-npc-batch-row" style="display:${isNpc ? 'flex' : 'none'}; align-items:center; gap:8px; margin-top:5px;">
-                <label style="white-space:nowrap; font-size:0.9em; opacity:0.8;">生成模式</label>
-                <select id="pw-npc-count" class="pw-select" style="flex:1;">
-                    <option value="1">单个 NPC（详细）</option>
-                    <option value="auto">批量 NPC（AI 决定数量）</option>
-                </select>
-            </div>
             <button id="pw-btn-gen" class="pw-btn gen"><i class="fa-solid fa-wand-magic-sparkles"></i> ${isNpc ? '生成 NPC 设定' : '生成 User 设定'}</button>
 
             <div id="pw-result-area" style="display:${activeData.hasResult ? 'block' : 'none'}; margin-top:15px;">
@@ -1842,13 +1839,11 @@ function bindEvents() {
             $('#pw-btn-gen').html('<i class="fa-solid fa-wand-magic-sparkles"></i> 生成 NPC 设定');
             $('#pw-btn-apply').hide();
             $('#pw-load-main-template').show();
-            $('#pw-npc-batch-row').show();
             toastr.info("已切换至 NPC 模式");
         } else {
             $('#pw-btn-gen').html('<i class="fa-solid fa-wand-magic-sparkles"></i> 生成 User 设定');
             $('#pw-btn-apply').show();
             $('#pw-load-main-template').hide();
-            $('#pw-npc-batch-row').hide();
             toastr.info("已切换至 User 模式");
         }
     });
@@ -2537,11 +2532,9 @@ $(document).on('change.pw', '#pw-theme-select', function() {
         try {
             const contextData = await collectContextData();
             const modelVal = $('#pw-api-source').val() === 'independent' ? $('#pw-api-model-select').val() : null;
-            const npcCountVal = uiStateCache.generationMode === 'npc' ? ($('#pw-npc-count').val() || '1') : '1';
             const config = {
                 mode: 'initial', 
-                request: req, 
-                npcCount: npcCountVal,
+                request: req,
                 wiText: contextData.wi,
                 greetingsText: contextData.greetings,
                 apiSource: $('#pw-api-source').val(), 
