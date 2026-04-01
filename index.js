@@ -200,8 +200,8 @@ Output ONLY the YAML data matching the schema.`;
 
 // 4. NPC 生成/润色 Prompt
 const defaultNpcGenPrompt = 
-`[Task: Generate NPC Profile]
-[Context: Create a new NPC relevant to the current story flow.]
+`[Task: Generate NPC Profile(s)]
+[Context: Create NPC(s) relevant to the current story flow. Generate one or multiple NPCs based on the user's request.]
 
 <story_context>
 {{charInfo}}
@@ -216,9 +216,10 @@ const defaultNpcGenPrompt =
 {{input}}
 
 [Requirements]
-1. The NPC should fit naturally into the current story context and world setting.
+1. Each NPC should fit naturally into the current story context and world setting.
 2. Relationship with {{user}} and {{char}} should be defined based on the chat history.
-3. Strictly follow the YAML schema provided.
+3. Follow the YAML schema provided. If generating a single NPC, be detailed. If generating multiple, focus on distinguishing traits for each.
+4. If generating multiple NPCs, separate each with a line containing ONLY "---".
 
 [Constraint]: Do NOT include any "Little Theater", "Small Theater", scene descriptions, internal monologues, or CoT status bars. STRICTLY YAML DATA ONLY.
 
@@ -2327,11 +2328,20 @@ $(document).on('change.pw', '#pw-theme-select', function() {
         if ($('#pw-result-area').is(':visible')) {
             $(this).removeClass('minimized');
             $('#pw-result-text').addClass('minimized');
+            $('#pw-refine-input').removeClass('expanded');
         }
     });
     $(document).on('focus.pw', '#pw-result-text', function() {
         if ($('#pw-result-area').is(':visible')) {
             $(this).removeClass('minimized');
+            $('#pw-request').addClass('minimized');
+            $('#pw-refine-input').removeClass('expanded');
+        }
+    });
+    $(document).on('focus.pw', '#pw-refine-input', function() {
+        if ($('#pw-result-area').is(':visible')) {
+            $(this).addClass('expanded');
+            $('#pw-result-text').addClass('minimized');
             $('#pw-request').addClass('minimized');
         }
     });
