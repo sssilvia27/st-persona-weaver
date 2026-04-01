@@ -700,6 +700,20 @@ async function runGeneration(data, apiConfig, isTemplateMode = false) {
             .replace(/{{chatHistory}}/g, wrappedChatHistory);
     }
 
+    // --- NPC 批量生成指令注入 ---
+    if (isNpcMode && !isTemplateMode && data.mode !== 'refine' && data.npcCount === 'auto') {
+        userMessageContent += `
+
+[BATCH_MODE]:
+- Generate MULTIPLE NPCs based on the user's request. Decide the number yourself (if user says "几个", generate 3-5; if user specifies a number, follow it).
+- If the user gives detailed requirements for specific NPCs, follow those requirements for each.
+- Use the SAME YAML schema for each NPC. Keep each profile focused on distinguishing traits.
+- Separate each NPC with a line containing ONLY "---" (three dashes).
+- Each NPC MUST have a unique name and distinct personality/role.`;
+
+        prefillContent = "```yaml\n基本信息:\n  姓名:";
+    }
+
     const updateDebugView = (messages) => {
         let debugText = `=== 发送时间: ${new Date().toLocaleTimeString()} ===\n`;
         const modeStr = isNpcMode ? 'NPC' : 'User';
@@ -1273,6 +1287,13 @@ async function openCreatorPopup() {
             </div>
 
             <textarea id="pw-request" class="pw-textarea pw-auto-height" placeholder="在此输入要求，或点击上方模版块插入参考结构（无需全部填满）...">${activeData.request}</textarea>
+            <div id="pw-npc-batch-row" style="display:${isNpc ? 'flex' : 'none'}; align-items:center; gap:8px; margin-top:5px;">
+                <label style="white-space:nowrap; font-size:0.9em; opacity:0.8;">生成模式</label>
+                <select id="pw-npc-count" class="pw-select" style="flex:1;">
+                    <option value="1">单个 NPC（详细）</option>
+                    <option value="auto">批量 NPC（AI 决定数量）</option>
+                </select>
+            </div>
             <button id="pw-btn-gen" class="pw-btn gen"><i class="fa-solid fa-wand-magic-sparkles"></i> ${isNpc ? '生成 NPC 设定' : '生成 User 设定'}</button>
 
             <div id="pw-result-area" style="display:${activeData.hasResult ? 'block' : 'none'}; margin-top:15px;">
@@ -1820,12 +1841,14 @@ function bindEvents() {
         if (mode === 'npc') {
             $('#pw-btn-gen').html('<i class="fa-solid fa-wand-magic-sparkles"></i> 生成 NPC 设定');
             $('#pw-btn-apply').hide();
-            $('#pw-load-main-template').show(); 
+            $('#pw-load-main-template').show();
+            $('#pw-npc-batch-row').show();
             toastr.info("已切换至 NPC 模式");
         } else {
             $('#pw-btn-gen').html('<i class="fa-solid fa-wand-magic-sparkles"></i> 生成 User 设定');
             $('#pw-btn-apply').show();
             $('#pw-load-main-template').hide();
+            $('#pw-npc-batch-row').hide();
             toastr.info("已切换至 User 模式");
         }
     });
@@ -2514,9 +2537,11 @@ $(document).on('change.pw', '#pw-theme-select', function() {
         try {
             const contextData = await collectContextData();
             const modelVal = $('#pw-api-source').val() === 'independent' ? $('#pw-api-model-select').val() : null;
+            const npcCountVal = uiStateCache.generationMode === 'npc' ? ($('#pw-npc-count').val() || '1') : '1';
             const config = {
                 mode: 'initial', 
                 request: req, 
+                npcCount: npcCountVal,
                 wiText: contextData.wi,
                 greetingsText: contextData.greetings,
                 apiSource: $('#pw-api-source').val(), 
@@ -2535,7 +2560,7 @@ $(document).on('change.pw', '#pw-theme-select', function() {
             toastr.error(e.message); 
         } finally { 
             const isNpc = uiStateCache.generationMode === 'npc';
-            $btn.prop('disabled', false).html(isNpc ? '生成 NPC 设定' : '生成 User 设定'); 
+            $btn.prop('disabled', false).html(isNpc ? '<i class="fa-solid fa-wand-magic-sparkles"></i> 生成 NPC 设定' : '<i class="fa-solid fa-wand-magic-sparkles"></i> 生成 User 设定'); 
             isProcessing = false;
         }
     });
