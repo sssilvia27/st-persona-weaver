@@ -137,9 +137,8 @@ NSFW:
 const defaultTemplateGenPrompt = 
 `[TASK: DESIGN_USER_PROFILE_SCHEMA]
 [CONTEXT: The user is entering a simulation world defined by the database provided in System Context.]
-[GOAL: Create or modify a comprehensive YAML template (Schema Only) for the **User Avatar (Protagonist)**.]
+[GOAL: Create a comprehensive YAML template (Schema Only) for the **User Avatar (Protagonist)**.]
 
-{{currentTemplate}}
 {{userRequirements}}
 
 <requirements>
@@ -152,7 +151,6 @@ const defaultTemplateGenPrompt =
 4. Scope: Biological, Sociological, Psychological, Special Abilities.
 5. Detail Level: High. This is for the main character.
 6. If user has provided specific requirements, prioritize fulfilling them.
-7. If a current template is provided, modify it based on the requirements instead of creating from scratch.
 </requirements>
 
 [Constraint]: Do NOT include any "Little Theater", scene descriptions, or values. STRICTLY YAML KEYS ONLY.
@@ -164,9 +162,8 @@ Output the YAML template now. No explanations.`;
 const defaultNpcTemplateGenPrompt = 
 `[TASK: DESIGN_NPC_PROFILE_SCHEMA]
 [CONTEXT: The user needs a supporting character for the simulation.]
-[GOAL: Create or modify a concise YAML template (Schema Only) for a **Non-Player Character (NPC)**.]
+[GOAL: Create a concise YAML template (Schema Only) for a **Non-Player Character (NPC)**.]
 
-{{currentTemplate}}
 {{userRequirements}}
 
 <requirements>
@@ -179,7 +176,6 @@ const defaultNpcTemplateGenPrompt =
 4. Scope: Functional (Role/Faction), Visual (Appearance), Relational (Connection to MC).
 5. Detail Level: Moderate. Focus on identifiable traits and narrative function.
 6. If user has provided specific requirements, prioritize fulfilling them.
-7. If a current template is provided, modify it based on the requirements instead of creating from scratch.
 </requirements>
 
 [Constraint]: Do NOT include any "Little Theater", scene descriptions, or values. STRICTLY YAML KEYS ONLY.
@@ -712,15 +708,16 @@ async function runGeneration(data, apiConfig, isTemplateMode = false) {
                 .replace(/{{userPersona}}/g, '')
                 .replace(/{{chatHistory}}/g, '');
         } else {
-            // Template initial generation: use template gen prompt
-            let basePrompt = isNpcMode
-                ? (promptsCache.npcTemplateGen || defaultNpcTemplateGenPrompt)
-                : (promptsCache.templateGen || defaultTemplateGenPrompt);
+            // Template initial generation: use template gen prompt (no old template reference)
+            let storedPrompt = isNpcMode
+                ? (promptsCache.npcTemplateGen || '')
+                : (promptsCache.templateGen || '');
+            const defaultPrompt = isNpcMode ? defaultNpcTemplateGenPrompt : defaultTemplateGenPrompt;
 
-            const currentTmpl = getCurrentTemplate();
-            const tmplBlock = currentTmpl
-                ? `[Current Template for Reference]:\n\`\`\`yaml\n${currentTmpl}\n\`\`\``
-                : '';
+            let basePrompt = (storedPrompt && storedPrompt.includes('{{userRequirements}}'))
+                ? storedPrompt
+                : defaultPrompt;
+
             const reqBlock = requestText.trim()
                 ? `[User Requirements]:\n${requestText.trim()}`
                 : '';
@@ -729,8 +726,12 @@ async function runGeneration(data, apiConfig, isTemplateMode = false) {
                 .replace(/{{user}}/g, currentName)
                 .replace(/{{char}}/g, charName)
                 .replace(/{{charInfo}}/g, wrappedCharInfo)
-                .replace(/{{currentTemplate}}/g, tmplBlock)
+                .replace(/{{currentTemplate}}/g, '')
                 .replace(/{{userRequirements}}/g, reqBlock);
+
+            if (reqBlock && !userMessageContent.includes('[User Requirements]')) {
+                userMessageContent += '\n\n' + reqBlock;
+            }
         }
 
         prefillContent = "```yaml\n";
@@ -891,9 +892,11 @@ function loadData() {
     try { historyCache = JSON.parse(localStorage.getItem(STORAGE_KEY_HISTORY)) || []; } catch { historyCache = []; }
     try {
         const p = JSON.parse(localStorage.getItem(STORAGE_KEY_PROMPTS));
+        const migrateTemplatePrompt = (stored, def) =>
+            (stored && stored.includes('{{userRequirements}}')) ? stored : def;
         promptsCache = {
-            templateGen: (p && p.templateGen) ? p.templateGen : defaultTemplateGenPrompt,
-            npcTemplateGen: (p && p.npcTemplateGen) ? p.npcTemplateGen : defaultNpcTemplateGenPrompt, 
+            templateGen: migrateTemplatePrompt(p && p.templateGen, defaultTemplateGenPrompt),
+            npcTemplateGen: migrateTemplatePrompt(p && p.npcTemplateGen, defaultNpcTemplateGenPrompt), 
             personaGen: (p && p.personaGen) ? p.personaGen : defaultPersonaGenPrompt,
             npcGen: (p && p.npcGen) ? p.npcGen : defaultNpcGenPrompt, 
             initial: (p && p.initial) ? p.initial : fallbackSystemPrompt 
@@ -1531,9 +1534,10 @@ async function openCreatorPopup() {
                         <div class="pw-var-btn" data-ins="{{greetings}}"><span>开场白</span><span class="code">{{greetings}}</span></div>
                         <div class="pw-var-btn" data-ins="{{template}}"><span>模版内容</span><span class="code">{{template}}</span></div>
                         <div class="pw-var-btn" data-ins="{{input}}"><span>用户要求</span><span class="code">{{input}}</span></div>
-                        <!-- NPC Specific -->
                         <div class="pw-var-btn" data-ins="{{userPersona}}"><span>User设定</span><span class="code">{{userPersona}}</span></div>
                         <div class="pw-var-btn" data-ins="{{chatHistory}}"><span>聊天记录</span><span class="code">{{chatHistory}}</span></div>
+                        <div class="pw-var-btn" data-ins="{{currentTemplate}}"><span>当前模版</span><span class="code">{{currentTemplate}}</span></div>
+                        <div class="pw-var-btn" data-ins="{{userRequirements}}"><span>模版需求</span><span class="code">{{userRequirements}}</span></div>
                     </div>
                     <textarea id="pw-prompt-editor" class="pw-textarea pw-auto-height" style="min-height:150px; font-size:0.85em;"></textarea>
                     
@@ -2397,6 +2401,7 @@ $(document).on('change.pw', '#pw-theme-select', function() {
             $(this).removeClass('minimized');
             $('#pw-result-text').addClass('minimized');
             $('#pw-refine-input').removeClass('expanded');
+            $('#pw-template-text').removeClass('expanded').addClass('minimized');
         }
     });
     $(document).on('focus.pw', '#pw-result-text', function() {
@@ -2404,6 +2409,7 @@ $(document).on('change.pw', '#pw-theme-select', function() {
             $(this).removeClass('minimized');
             $('#pw-request').addClass('minimized');
             $('#pw-refine-input').removeClass('expanded');
+            $('#pw-template-text').removeClass('expanded').addClass('minimized');
         }
     });
     $(document).on('focus.pw', '#pw-refine-input', function() {
@@ -2411,7 +2417,17 @@ $(document).on('change.pw', '#pw-theme-select', function() {
             $(this).addClass('expanded');
             $('#pw-result-text').addClass('minimized');
             $('#pw-request').addClass('minimized');
+            $('#pw-template-text').addClass('minimized');
         }
+    });
+
+    $(document).on('focus.pw', '#pw-template-text', function() {
+        $(this).removeClass('minimized').addClass('expanded');
+        $('#pw-request').addClass('minimized');
+        if ($('#pw-result-area').is(':visible')) {
+            $('#pw-result-text').addClass('minimized');
+        }
+        $('#pw-refine-input').removeClass('expanded');
     });
 
     // --- Diff View Logic ---
