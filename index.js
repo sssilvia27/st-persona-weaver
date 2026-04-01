@@ -137,7 +137,10 @@ NSFW:
 const defaultTemplateGenPrompt = 
 `[TASK: DESIGN_USER_PROFILE_SCHEMA]
 [CONTEXT: The user is entering a simulation world defined by the database provided in System Context.]
-[GOAL: Create a comprehensive YAML template (Schema Only) for the **User Avatar (Protagonist)**.]
+[GOAL: Create or modify a comprehensive YAML template (Schema Only) for the **User Avatar (Protagonist)**.]
+
+{{currentTemplate}}
+{{userRequirements}}
 
 <requirements>
 1. Language: **Simplified Chinese (简体中文)** keys.
@@ -148,20 +151,23 @@ const defaultTemplateGenPrompt =
    - If the world is Modern, use standard sociological attributes.
 4. Scope: Biological, Sociological, Psychological, Special Abilities.
 5. Detail Level: High. This is for the main character.
+6. If user has provided specific requirements, prioritize fulfilling them.
+7. If a current template is provided, modify it based on the requirements instead of creating from scratch.
 </requirements>
-
-{{input}}
 
 [Constraint]: Do NOT include any "Little Theater", scene descriptions, or values. STRICTLY YAML KEYS ONLY.
 
 [Action]:
-Output the blank YAML template now. No explanations.`;
+Output the YAML template now. No explanations.`;
 
 // 2.1 NPC 模版生成专用 Prompt
 const defaultNpcTemplateGenPrompt = 
 `[TASK: DESIGN_NPC_PROFILE_SCHEMA]
 [CONTEXT: The user needs a supporting character for the simulation.]
-[GOAL: Create a concise YAML template (Schema Only) for a **Non-Player Character (NPC)**.]
+[GOAL: Create or modify a concise YAML template (Schema Only) for a **Non-Player Character (NPC)**.]
+
+{{currentTemplate}}
+{{userRequirements}}
 
 <requirements>
 1. Language: **Simplified Chinese (简体中文)** keys.
@@ -171,15 +177,15 @@ const defaultNpcTemplateGenPrompt =
    - If the world is ABO, include "第二性别", "信息素".
    - If the world is Cyberpunk, include "义体化程度", "所属公司".
 4. Scope: Functional (Role/Faction), Visual (Appearance), Relational (Connection to MC).
-5. Detail Level: Moderate. Focus on identifiable traits and narrative function. Remove excessive introspection fields.
+5. Detail Level: Moderate. Focus on identifiable traits and narrative function.
+6. If user has provided specific requirements, prioritize fulfilling them.
+7. If a current template is provided, modify it based on the requirements instead of creating from scratch.
 </requirements>
-
-{{input}}
 
 [Constraint]: Do NOT include any "Little Theater", scene descriptions, or values. STRICTLY YAML KEYS ONLY.
 
 [Action]:
-Output the blank YAML template now. No explanations.`;
+Output the YAML template now. No explanations.`;
 
 // 3. User 人设生成/润色 Prompt
 const defaultPersonaGenPrompt =
@@ -688,35 +694,46 @@ async function runGeneration(data, apiConfig, isTemplateMode = false) {
     let prefillContent = "```yaml\n基本信息:"; 
 
     if (isTemplateMode) {
-        if (data.mode === 'refine') {
-            const schemaType = isNpcMode ? 'NPC' : 'User';
-            userMessageContent = `[TASK: MODIFY_${schemaType.toUpperCase()}_PROFILE_SCHEMA]
-[CONTEXT: Modify an existing YAML template (Schema Only) for a ${schemaType} profile.]
+        const isRefine = data.mode === 'refine';
 
-Current template:
-"""
-${currentText}
-"""
+        if (isRefine) {
+            // Template refine: reuse the persona refine wrapping mechanism
+            let basePrompt = isNpcMode
+                ? (promptsCache.npcGen || defaultNpcGenPrompt)
+                : (promptsCache.personaGen || defaultPersonaGenPrompt);
 
-User's modification request: "${requestText.replace(/"/g, "'")}"
-
-<requirements>
-1. Language: **Simplified Chinese (简体中文)** keys.
-2. Structure: YAML keys only. Leave values empty.
-3. Apply the user's modification request to the current template.
-4. You may add, remove, reorganize, or rename keys as instructed.
-</requirements>
-
-[Constraint]: Output ONLY the modified YAML template (keys only, no values). No explanations.`;
-            prefillContent = "```yaml\n";
-        } else {
-            let basePrompt = isNpcMode ? (promptsCache.npcTemplateGen || defaultNpcTemplateGenPrompt) : (promptsCache.templateGen || defaultTemplateGenPrompt);
-            const inputWrap = requestText ? `\n[USER_REQUIREMENTS]: "${requestText.replace(/"/g, "'")}"` : '';
             userMessageContent = basePrompt
                 .replace(/{{user}}/g, currentName)
                 .replace(/{{char}}/g, charName)
-                .replace(/{{input}}/g, inputWrap);
+                .replace(/{{charInfo}}/g, wrappedCharInfo)
+                .replace(/{{greetings}}/g, '')
+                .replace(/{{template}}/g, wrappedTags)
+                .replace(/{{input}}/g, wrappedInput)
+                .replace(/{{userPersona}}/g, '')
+                .replace(/{{chatHistory}}/g, '');
+        } else {
+            // Template initial generation: use template gen prompt
+            let basePrompt = isNpcMode
+                ? (promptsCache.npcTemplateGen || defaultNpcTemplateGenPrompt)
+                : (promptsCache.templateGen || defaultTemplateGenPrompt);
+
+            const currentTmpl = getCurrentTemplate();
+            const tmplBlock = currentTmpl
+                ? `[Current Template for Reference]:\n\`\`\`yaml\n${currentTmpl}\n\`\`\``
+                : '';
+            const reqBlock = requestText.trim()
+                ? `[User Requirements]:\n${requestText.trim()}`
+                : '';
+
+            userMessageContent = basePrompt
+                .replace(/{{user}}/g, currentName)
+                .replace(/{{char}}/g, charName)
+                .replace(/{{charInfo}}/g, wrappedCharInfo)
+                .replace(/{{currentTemplate}}/g, tmplBlock)
+                .replace(/{{userRequirements}}/g, reqBlock);
         }
+
+        prefillContent = "```yaml\n";
     } else {
         let basePrompt = isNpcMode ? (promptsCache.npcGen || defaultNpcGenPrompt) : (promptsCache.personaGen || defaultPersonaGenPrompt);
         
@@ -731,7 +748,7 @@ User's modification request: "${requestText.replace(/"/g, "'")}"
             .replace(/{{chatHistory}}/g, wrappedChatHistory);
     }
 
-    // NPC 多角色自适应已在 defaultNpcGenPrompt 中处理，无需运行时注入
+    // NPC多角色指令已在 defaultNpcGenPrompt 中包含，无需运行时注入
 
     const updateDebugView = (messages) => {
         let debugText = `=== 发送时间: ${new Date().toLocaleTimeString()} ===\n`;
@@ -1298,15 +1315,7 @@ async function openCreatorPopup() {
                         <div class="pw-mini-btn" id="pw-reset-template-small" title="恢复为该模式的默认模版" style="margin-left:auto; padding:2px 8px; font-size:0.8em; border:none; background:transparent; opacity:0.6;"><i class="fa-solid fa-rotate-left"></i></div>
                     </div>
                     <textarea id="pw-template-text" class="pw-template-textarea">${activeData.template}</textarea>
-                    <div class="pw-refine-toolbar">
-                        <textarea id="pw-template-request" class="pw-refine-input" placeholder="输入模板要求（如：加入ABO属性、细化性格分类...），留空则自动生成"></textarea>
-                        <div class="pw-refine-btn-vertical" id="pw-btn-template-refine" title="根据意见修改当前模板">
-                            <span class="pw-refine-btn-text">润色</span>
-                            <i class="fa-solid fa-magic"></i>
-                        </div>
-                    </div>
                     <div class="pw-template-footer">
-                        <button class="pw-btn gen" id="pw-gen-template-smart" style="flex:1; margin-top:0; padding:8px 16px;"><i class="fa-solid fa-wand-magic-sparkles"></i> 生成模板</button>
                         <button class="pw-mini-btn" id="pw-save-template">保存模版</button>
                     </div>
                 </div>
@@ -1327,6 +1336,7 @@ async function openCreatorPopup() {
                         <i class="fa-solid fa-magic"></i>
                     </div>
                 </div>
+                <button class="pw-btn gen" id="pw-btn-apply-template" style="display:none; margin-top:8px; width:100%;"><i class="fa-solid fa-file-import"></i> 应用到模版</button>
             </div>
         </div>
 
@@ -1854,7 +1864,18 @@ function bindEvents() {
             $('#pw-request').removeClass('minimized');
         }
 
-        renderTemplateChips(); // Re-render chips for new template
+        renderTemplateChips();
+
+        // Reset template editing state on mode switch
+        if (isEditingTemplate) {
+            isEditingTemplate = false;
+            $('#pw-template-editor').hide();
+            $('#pw-template-chips').css('display', 'flex');
+            $('#pw-toggle-edit-template').text("编辑模版").removeClass('editing');
+            $('#pw-template-block-header').find('i').show();
+            $('#pw-btn-apply-template').hide();
+        }
+        $('#pw-request').attr('placeholder', '在此输入要求，或点击上方模版块插入参考结构（无需全部填满）...');
 
         // 4. Update UI Buttons
         if (mode === 'npc') {
@@ -2050,19 +2071,26 @@ $(document).on('change.pw', '#pw-theme-select', function() {
 
     $(document).on('click.pw', '#pw-toggle-edit-template', () => {
         isEditingTemplate = !isEditingTemplate;
-        const tmpl = getCurrentTemplate(); // Get from context
+        const tmpl = getCurrentTemplate();
+        const isNpc = uiStateCache.generationMode === 'npc';
         
         if (isEditingTemplate) {
             $('#pw-template-text').val(tmpl);
             $('#pw-template-chips').hide();
             $('#pw-template-editor').css('display', 'flex');
             $('#pw-toggle-edit-template').text("取消编辑").addClass('editing');
-            $('#pw-template-block-header').find('i').hide(); 
+            $('#pw-template-block-header').find('i').hide();
+            $('#pw-request').attr('placeholder', '输入模版需求，如：添加修仙相关属性、简化外貌字段...');
+            $('#pw-btn-gen').html('<i class="fa-solid fa-wand-magic-sparkles"></i> 生成模版');
+            $('#pw-btn-apply-template').show();
         } else {
             $('#pw-template-editor').hide();
             $('#pw-template-chips').css('display', 'flex');
             $('#pw-toggle-edit-template').text("编辑模版").removeClass('editing');
             $('#pw-template-block-header').find('i').show();
+            $('#pw-request').attr('placeholder', '在此输入要求，或点击上方模版块插入参考结构（无需全部填满）...');
+            $('#pw-btn-gen').html(`<i class="fa-solid fa-wand-magic-sparkles"></i> ${isNpc ? '生成 NPC 设定' : '生成 User 设定'}`);
+            $('#pw-btn-apply-template').hide();
         }
     });
 
@@ -2109,8 +2137,8 @@ $(document).on('change.pw', '#pw-theme-select', function() {
         }
     });
 
-    // 智能生成模版事件
-    $(document).on('click.pw', '#pw-gen-template-smart', async function() {
+    // (旧的 #pw-gen-template-smart 已移除，模板生成统一走 #pw-btn-gen)
+    $(document).on('click.pw', '#pw-gen-template-smart-DISABLED', async function() {
         if (isProcessing) return;
         isProcessing = true;
         const $btn = $(this);
@@ -2122,9 +2150,8 @@ $(document).on('change.pw', '#pw-theme-select', function() {
             const charInfoText = getCharacterInfoText(); 
             const hasCharInfo = charInfoText && charInfoText.length > 50; 
             const hasWi = contextData.wi && contextData.wi.length > 10;
-            const userInput = $('#pw-template-request').val().trim();
 
-            if (!hasCharInfo && !hasWi && !userInput) {
+            if (!hasCharInfo && !hasWi) {
                 const wantGeneric = confirm("当前未检测到关联的角色卡或世界书信息。\n\n是否要生成通用模版？");
                 
                 if (!wantGeneric) {
@@ -2155,7 +2182,6 @@ $(document).on('change.pw', '#pw-theme-select', function() {
             const modelVal = $('#pw-api-source').val() === 'independent' ? $('#pw-api-model-select').val() : null;
             const config = {
                 wiText: contextData.wi,
-                request: userInput,
                 apiSource: $('#pw-api-source').val(), 
                 indepApiUrl: $('#pw-api-url').val(),
                 indepApiKey: $('#pw-api-key').val(), 
@@ -2210,69 +2236,26 @@ $(document).on('change.pw', '#pw-theme-select', function() {
         $('#pw-template-chips').css('display', 'flex');
         $('#pw-toggle-edit-template').text("编辑模版").removeClass('editing');
         $('#pw-template-block-header').find('i').show();
+        $('#pw-btn-apply-template').hide();
+        const isNpc = uiStateCache.generationMode === 'npc';
+        $('#pw-request').attr('placeholder', '在此输入要求，或点击上方模版块插入参考结构（无需全部填满）...');
+        $('#pw-btn-gen').html(`<i class="fa-solid fa-wand-magic-sparkles"></i> ${isNpc ? '生成 NPC 设定' : '生成 User 设定'}`);
         toastr.success("模版已更新并保存至记录");
     });
 
-    // 模板润色事件
-    $(document).on('click.pw', '#pw-btn-template-refine', async function() {
-        const refineInput = $('#pw-template-request').val().trim();
-        if (!refineInput) {
-            toastr.warning("请输入修改意见");
+    // Apply result to template
+    $(document).on('click.pw', '#pw-btn-apply-template', function() {
+        const resultText = $('#pw-result-text').val();
+        if (!resultText) {
+            toastr.warning("结果区域为空，无内容可应用");
             return;
         }
-        const currentTemplate = $('#pw-template-text').val().trim();
-        if (!currentTemplate) {
-            toastr.warning("当前模板为空，请先生成模板");
-            return;
-        }
-        if (isProcessing) return;
-        isProcessing = true;
-        const $btn = $(this);
-        const originalHtml = $btn.html();
-        $btn.html('<i class="fas fa-spinner fa-spin"></i>');
-        
-        try {
-            const contextData = await collectContextData();
-            const modelVal = $('#pw-api-source').val() === 'independent' ? $('#pw-api-model-select').val() : null;
-            const config = {
-                wiText: contextData.wi,
-                request: refineInput,
-                currentText: currentTemplate,
-                mode: 'refine',
-                apiSource: $('#pw-api-source').val(),
-                indepApiUrl: $('#pw-api-url').val(),
-                indepApiKey: $('#pw-api-key').val(),
-                indepApiModel: modelVal
-            };
-            
-            const refined = await runGeneration(config, config, true);
-            
-            if (refined) {
-                $('#pw-template-text').val(refined);
-                if (uiStateCache.generationMode === 'npc') npcContext.template = refined;
-                else userContext.template = refined;
-                saveData();
-                renderTemplateChips();
-                $('#pw-template-request').val('');
-                toastr.success("模板润色完成！请检查后点击「保存模版」确认。");
-            }
-        } catch (e) {
-            console.error(e);
-            toastr.error("模板润色失败: " + e.message);
-        } finally {
-            $btn.html(originalHtml);
-            isProcessing = false;
-        }
-    });
-
-    // 模板请求框 focus 放大
-    $(document).on('focus.pw', '#pw-template-request', function() {
-        $(this).addClass('expanded');
-    });
-    $(document).on('blur.pw', '#pw-template-request', function() {
-        if (!$(this).val().trim()) {
-            $(this).removeClass('expanded');
-        }
+        $('#pw-template-text').val(resultText);
+        if (uiStateCache.generationMode === 'npc') npcContext.template = resultText;
+        else userContext.template = resultText;
+        saveData();
+        renderTemplateChips();
+        toastr.success("已将结果应用到模版编辑器，请确认后点击「保存模版」");
     });
 
     $(document).on('click.pw', '.pw-shortcut-btn', function () {
@@ -2474,18 +2457,19 @@ $(document).on('change.pw', '#pw-theme-select', function() {
         try {
             const contextData = await collectContextData();
             const modelVal = $('#pw-api-source').val() === 'independent' ? $('#pw-api-model-select').val() : null;
+            const isTemplateRefine = isEditingTemplate;
             const config = {
                 mode: 'refine', 
                 request: refineReq, 
                 currentText: oldText, 
                 wiText: contextData.wi,           
-                greetingsText: contextData.greetings,
+                greetingsText: isTemplateRefine ? '' : contextData.greetings,
                 apiSource: $('#pw-api-source').val(), 
                 indepApiUrl: $('#pw-api-url').val(),
                 indepApiKey: $('#pw-api-key').val(), 
                 indepApiModel: modelVal
             };
-            const responseText = await runGeneration(config, config, false);
+            const responseText = await runGeneration(config, config, isTemplateRefine);
 
             // 复用提取出来的渲染函数
             renderDiffComparison(oldText, responseText);
@@ -2531,19 +2515,20 @@ $(document).on('change.pw', '#pw-theme-select', function() {
         try {
             const contextData = await collectContextData();
             const modelVal = $('#pw-api-source').val() === 'independent' ? $('#pw-api-model-select').val() : null;
+            const isTemplateRefine = isEditingTemplate;
             const config = {
                 mode: 'refine', 
-                request: lastRefineRequest, // 直接复用上次的要求
+                request: lastRefineRequest,
                 currentText: oldText, 
                 wiText: contextData.wi,           
-                greetingsText: contextData.greetings,
+                greetingsText: isTemplateRefine ? '' : contextData.greetings,
                 apiSource: $('#pw-api-source').val(), 
                 indepApiUrl: $('#pw-api-url').val(),
                 indepApiKey: $('#pw-api-key').val(), 
                 indepApiModel: modelVal
             };
             
-            const responseText = await runGeneration(config, config, false);
+            const responseText = await runGeneration(config, config, isTemplateRefine);
 
             // 复用渲染函数，原地刷新 Diff 界面
             renderDiffComparison(oldText, responseText);
@@ -2602,16 +2587,17 @@ $(document).on('change.pw', '#pw-theme-select', function() {
 
     $(document).on('click.pw', '#pw-diff-cancel', () => $('#pw-diff-overlay').fadeOut());
 
-    // Generate Persona
+    // Generate Persona / Template
     $(document).on('click.pw', '#pw-btn-gen', async function (e) {
         e.preventDefault();
         
         if (isProcessing) return;
         isProcessing = true;
 
-        console.log("[PW] Gen Clicked");
+        const isTemplateGen = isEditingTemplate;
+        console.log(`[PW] Gen Clicked (template=${isTemplateGen})`);
         const req = $('#pw-request').val();
-        if (!req) {
+        if (!req && !isTemplateGen) {
             toastr.warning("请输入要求");
             isProcessing = false;
             return;
@@ -2629,18 +2615,21 @@ $(document).on('change.pw', '#pw-theme-select', function() {
             const modelVal = $('#pw-api-source').val() === 'independent' ? $('#pw-api-model-select').val() : null;
             const config = {
                 mode: 'initial', 
-                request: req,
+                request: req || '',
                 wiText: contextData.wi,
-                greetingsText: contextData.greetings,
+                greetingsText: isTemplateGen ? '' : contextData.greetings,
                 apiSource: $('#pw-api-source').val(), 
                 indepApiUrl: $('#pw-api-url').val(),
                 indepApiKey: $('#pw-api-key').val(), 
                 indepApiModel: modelVal
             };
-            const text = await runGeneration(config, config, false);
+            const text = await runGeneration(config, config, isTemplateGen);
             $('#pw-result-text').val(text);
             $('#pw-result-area').fadeIn();
             $('#pw-request').addClass('minimized');
+            if (isTemplateGen) {
+                $('#pw-btn-apply-template').show();
+            }
             saveCurrentState();
             $('#pw-result-text').trigger('input');
         } catch (e) { 
@@ -2648,7 +2637,11 @@ $(document).on('change.pw', '#pw-theme-select', function() {
             toastr.error(e.message); 
         } finally { 
             const isNpc = uiStateCache.generationMode === 'npc';
-            $btn.prop('disabled', false).html(isNpc ? '<i class="fa-solid fa-wand-magic-sparkles"></i> 生成 NPC 设定' : '<i class="fa-solid fa-wand-magic-sparkles"></i> 生成 User 设定'); 
+            if (isTemplateGen) {
+                $btn.prop('disabled', false).html('<i class="fa-solid fa-wand-magic-sparkles"></i> 生成模版');
+            } else {
+                $btn.prop('disabled', false).html(isNpc ? '<i class="fa-solid fa-wand-magic-sparkles"></i> 生成 NPC 设定' : '<i class="fa-solid fa-wand-magic-sparkles"></i> 生成 User 设定');
+            }
             isProcessing = false;
         }
     });
