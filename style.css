@@ -287,8 +287,8 @@
 }
 .pw-refine-toolbar { display: flex; flex-direction: row; gap: 0; align-items: stretch; background: rgba(128,128,128,0.1); border: 1px solid var(--pw-border); border-top: none; border-radius: 0 0 6px 6px; margin-bottom: 5px; overflow: hidden; }
 .pw-refine-input { flex: 1; border: none; background: transparent; padding: 10px; font-size: 0.95em; color: var(--pw-text-main); resize: none; overflow-y: auto; min-height: 80px; line-height: 1.5; }
-.pw-refine-btn-vertical { width: 40px; cursor: pointer; background: rgba(128,128,128,0.15); border-left: 1px solid var(--pw-border); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px; color: var(--pw-text-main); font-weight: bold; transition: all 0.2s; flex-shrink: 0; }
-.pw-refine-btn-vertical:hover { background: rgba(128,128,128,0.3); }
+.pw-refine-btn-vertical { width: 44px; cursor: pointer; background: linear-gradient(180deg, var(--SmartThemeQuoteColor, #83c168), color-mix(in srgb, var(--SmartThemeQuoteColor, #83c168) 70%, #000)); border-left: none; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px; color: #fff; font-weight: bold; transition: all 0.2s; flex-shrink: 0; }
+.pw-refine-btn-vertical:hover { filter: brightness(1.15); }
 .pw-refine-btn-text { writing-mode: vertical-rl; text-orientation: upright; letter-spacing: 2px; }
 .pw-float-quote-btn { position: fixed; top: 20%; right: 0; background: var(--pw-paper-bg); color: var(--pw-text-main); padding: 8px 12px; border-radius: 20px 0 0 20px; font-weight: bold; font-size: 0.85em; box-shadow: -2px 2px 8px rgba(0,0,0,0.4); cursor: pointer; z-index: 9999; display: none; align-items: center; gap: 4px; border: 1px solid var(--pw-border); border-right: none; backdrop-filter: blur(5px); }
 
@@ -495,8 +495,7 @@
     gap: 10px;
 }
 
-#pw-diff-confirm { background: transparent; border: 1px solid var(--SmartThemeQuoteColor, #83c168); color: var(--SmartThemeQuoteColor, #83c168); }
-#pw-diff-confirm:hover { background: rgba(131, 193, 104, 0.1); }
+#pw-diff-confirm.pw-btn.gen { padding: 8px 20px; font-size: 0.95em; margin-top: 0; }
 #pw-diff-cancel { background: transparent; border: 1px solid var(--pw-danger); color: var(--pw-danger); }
 #pw-diff-cancel:hover { background: rgba(255, 107, 107, 0.1); }
 
