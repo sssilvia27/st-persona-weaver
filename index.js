@@ -150,6 +150,8 @@ const defaultTemplateGenPrompt =
 5. Detail Level: High. This is for the main character.
 </requirements>
 
+{{input}}
+
 [Constraint]: Do NOT include any "Little Theater", scene descriptions, or values. STRICTLY YAML KEYS ONLY.
 
 [Action]:
@@ -171,6 +173,8 @@ const defaultNpcTemplateGenPrompt =
 4. Scope: Functional (Role/Faction), Visual (Appearance), Relational (Connection to MC).
 5. Detail Level: Moderate. Focus on identifiable traits and narrative function. Remove excessive introspection fields.
 </requirements>
+
+{{input}}
 
 [Constraint]: Do NOT include any "Little Theater", scene descriptions, or values. STRICTLY YAML KEYS ONLY.
 
@@ -684,16 +688,34 @@ async function runGeneration(data, apiConfig, isTemplateMode = false) {
     let prefillContent = "```yaml\n基本信息:"; 
 
     if (isTemplateMode) {
-        if (isNpcMode) {
-            let basePrompt = promptsCache.npcTemplateGen || defaultNpcTemplateGenPrompt;
-            userMessageContent = basePrompt
-                .replace(/{{user}}/g, currentName)
-                .replace(/{{char}}/g, charName);
+        if (data.mode === 'refine') {
+            const schemaType = isNpcMode ? 'NPC' : 'User';
+            userMessageContent = `[TASK: MODIFY_${schemaType.toUpperCase()}_PROFILE_SCHEMA]
+[CONTEXT: Modify an existing YAML template (Schema Only) for a ${schemaType} profile.]
+
+Current template:
+"""
+${currentText}
+"""
+
+User's modification request: "${requestText.replace(/"/g, "'")}"
+
+<requirements>
+1. Language: **Simplified Chinese (简体中文)** keys.
+2. Structure: YAML keys only. Leave values empty.
+3. Apply the user's modification request to the current template.
+4. You may add, remove, reorganize, or rename keys as instructed.
+</requirements>
+
+[Constraint]: Output ONLY the modified YAML template (keys only, no values). No explanations.`;
+            prefillContent = "```yaml\n";
         } else {
-            let basePrompt = promptsCache.templateGen || defaultTemplateGenPrompt;
+            let basePrompt = isNpcMode ? (promptsCache.npcTemplateGen || defaultNpcTemplateGenPrompt) : (promptsCache.templateGen || defaultTemplateGenPrompt);
+            const inputWrap = requestText ? `\n[USER_REQUIREMENTS]: "${requestText.replace(/"/g, "'")}"` : '';
             userMessageContent = basePrompt
                 .replace(/{{user}}/g, currentName)
-                .replace(/{{char}}/g, charName);
+                .replace(/{{char}}/g, charName)
+                .replace(/{{input}}/g, inputWrap);
         }
     } else {
         let basePrompt = isNpcMode ? (promptsCache.npcGen || defaultNpcGenPrompt) : (promptsCache.personaGen || defaultPersonaGenPrompt);
@@ -709,15 +731,7 @@ async function runGeneration(data, apiConfig, isTemplateMode = false) {
             .replace(/{{chatHistory}}/g, wrappedChatHistory);
     }
 
-    // --- NPC 多角色自适应指令 ---
-    if (isNpcMode && !isTemplateMode) {
-        userMessageContent += `
-
-[NPC_COUNT]: Decide the number of NPCs based on the user's request.
-- If the user asks for one NPC, generate one detailed NPC.
-- If the user asks for multiple (e.g. "几个同学", "3个保镖"), generate that many, each concise but distinct.
-- When generating multiple NPCs, separate each with a line containing ONLY "---".`;
-    }
+    // NPC 多角色自适应已在 defaultNpcGenPrompt 中处理，无需运行时注入
 
     const updateDebugView = (messages) => {
         let debugText = `=== 发送时间: ${new Date().toLocaleTimeString()} ===\n`;
@@ -1284,8 +1298,15 @@ async function openCreatorPopup() {
                         <div class="pw-mini-btn" id="pw-reset-template-small" title="恢复为该模式的默认模版" style="margin-left:auto; padding:2px 8px; font-size:0.8em; border:none; background:transparent; opacity:0.6;"><i class="fa-solid fa-rotate-left"></i></div>
                     </div>
                     <textarea id="pw-template-text" class="pw-template-textarea">${activeData.template}</textarea>
+                    <div class="pw-refine-toolbar">
+                        <textarea id="pw-template-request" class="pw-refine-input" placeholder="输入模板要求（如：加入ABO属性、细化性格分类...），留空则自动生成"></textarea>
+                        <div class="pw-refine-btn-vertical" id="pw-btn-template-refine" title="根据意见修改当前模板">
+                            <span class="pw-refine-btn-text">润色</span>
+                            <i class="fa-solid fa-magic"></i>
+                        </div>
+                    </div>
                     <div class="pw-template-footer">
-                        <button class="pw-mini-btn" id="pw-gen-template-smart" title="根据当前世界书和设定，生成定制化模版">生成模板</button>
+                        <button class="pw-btn gen" id="pw-gen-template-smart" style="flex:1; margin-top:0; padding:8px 16px;"><i class="fa-solid fa-wand-magic-sparkles"></i> 生成模板</button>
                         <button class="pw-mini-btn" id="pw-save-template">保存模版</button>
                     </div>
                 </div>
@@ -2101,8 +2122,9 @@ $(document).on('change.pw', '#pw-theme-select', function() {
             const charInfoText = getCharacterInfoText(); 
             const hasCharInfo = charInfoText && charInfoText.length > 50; 
             const hasWi = contextData.wi && contextData.wi.length > 10;
+            const userInput = $('#pw-template-request').val().trim();
 
-            if (!hasCharInfo && !hasWi) {
+            if (!hasCharInfo && !hasWi && !userInput) {
                 const wantGeneric = confirm("当前未检测到关联的角色卡或世界书信息。\n\n是否要生成通用模版？");
                 
                 if (!wantGeneric) {
@@ -2133,6 +2155,7 @@ $(document).on('change.pw', '#pw-theme-select', function() {
             const modelVal = $('#pw-api-source').val() === 'independent' ? $('#pw-api-model-select').val() : null;
             const config = {
                 wiText: contextData.wi,
+                request: userInput,
                 apiSource: $('#pw-api-source').val(), 
                 indepApiUrl: $('#pw-api-url').val(),
                 indepApiKey: $('#pw-api-key').val(), 
@@ -2188,6 +2211,68 @@ $(document).on('change.pw', '#pw-theme-select', function() {
         $('#pw-toggle-edit-template').text("编辑模版").removeClass('editing');
         $('#pw-template-block-header').find('i').show();
         toastr.success("模版已更新并保存至记录");
+    });
+
+    // 模板润色事件
+    $(document).on('click.pw', '#pw-btn-template-refine', async function() {
+        const refineInput = $('#pw-template-request').val().trim();
+        if (!refineInput) {
+            toastr.warning("请输入修改意见");
+            return;
+        }
+        const currentTemplate = $('#pw-template-text').val().trim();
+        if (!currentTemplate) {
+            toastr.warning("当前模板为空，请先生成模板");
+            return;
+        }
+        if (isProcessing) return;
+        isProcessing = true;
+        const $btn = $(this);
+        const originalHtml = $btn.html();
+        $btn.html('<i class="fas fa-spinner fa-spin"></i>');
+        
+        try {
+            const contextData = await collectContextData();
+            const modelVal = $('#pw-api-source').val() === 'independent' ? $('#pw-api-model-select').val() : null;
+            const config = {
+                wiText: contextData.wi,
+                request: refineInput,
+                currentText: currentTemplate,
+                mode: 'refine',
+                apiSource: $('#pw-api-source').val(),
+                indepApiUrl: $('#pw-api-url').val(),
+                indepApiKey: $('#pw-api-key').val(),
+                indepApiModel: modelVal
+            };
+            
+            const refined = await runGeneration(config, config, true);
+            
+            if (refined) {
+                $('#pw-template-text').val(refined);
+                if (uiStateCache.generationMode === 'npc') npcContext.template = refined;
+                else userContext.template = refined;
+                saveData();
+                renderTemplateChips();
+                $('#pw-template-request').val('');
+                toastr.success("模板润色完成！请检查后点击「保存模版」确认。");
+            }
+        } catch (e) {
+            console.error(e);
+            toastr.error("模板润色失败: " + e.message);
+        } finally {
+            $btn.html(originalHtml);
+            isProcessing = false;
+        }
+    });
+
+    // 模板请求框 focus 放大
+    $(document).on('focus.pw', '#pw-template-request', function() {
+        $(this).addClass('expanded');
+    });
+    $(document).on('blur.pw', '#pw-template-request', function() {
+        if (!$(this).val().trim()) {
+            $(this).removeClass('expanded');
+        }
     });
 
     $(document).on('click.pw', '.pw-shortcut-btn', function () {
