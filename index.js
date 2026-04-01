@@ -183,6 +183,59 @@ const defaultNpcTemplateGenPrompt =
 [Action]:
 Output the YAML template now. No explanations.`;
 
+// 2.2 User 模版润色专用 Prompt
+const defaultTemplateRefinePrompt =
+`[TASK: REFINE_TEMPLATE_SCHEMA]
+[CONTEXT: Modify an existing YAML template structure for the **User Avatar**. A template defines ONLY attribute keys — NO values.]
+
+[Current Template to Refine]:
+\`\`\`yaml
+{{currentTemplate}}
+\`\`\`
+
+[User's Modification Request]:
+{{userRequirements}}
+
+<requirements>
+1. Modify the template structure according to the user's request above.
+2. Language: **Simplified Chinese (简体中文)** keys.
+3. Structure: YAML keys only. Leave ALL values empty.
+4. You may add, remove, rename, or reorganize fields as instructed.
+5. Preserve fields the user did not mention unless explicitly asked to restructure.
+</requirements>
+
+[Constraint]: This is a TEMPLATE (schema). Do NOT fill in any values. STRICTLY YAML KEYS ONLY.
+
+[Action]:
+Output the modified YAML template now. No explanations.`;
+
+// 2.3 NPC 模版润色专用 Prompt
+const defaultNpcTemplateRefinePrompt =
+`[TASK: REFINE_NPC_TEMPLATE_SCHEMA]
+[CONTEXT: Modify an existing YAML template structure for **NPC characters**. A template defines ONLY attribute keys — NO values.]
+
+[Current Template to Refine]:
+\`\`\`yaml
+{{currentTemplate}}
+\`\`\`
+
+[User's Modification Request]:
+{{userRequirements}}
+
+<requirements>
+1. Modify the template structure according to the user's request above.
+2. Language: **Simplified Chinese (简体中文)** keys.
+3. Structure: YAML keys only. Leave ALL values empty.
+4. You may add, remove, rename, or reorganize fields as instructed.
+5. Preserve fields the user did not mention unless explicitly asked to restructure.
+6. Focus on fields relevant to NPC identity: Role, Faction, Appearance, Relationship to MC.
+</requirements>
+
+[Constraint]: This is a TEMPLATE (schema). Do NOT fill in any values. STRICTLY YAML KEYS ONLY.
+
+[Action]:
+Output the modified YAML template now. No explanations.`;
+
 // 3. User 人设生成/润色 Prompt
 const defaultPersonaGenPrompt =
 `[Task: Generate/Refine Profile]
@@ -266,6 +319,8 @@ let currentTemplate = defaultYamlTemplate;
 let promptsCache = { 
     templateGen: defaultTemplateGenPrompt,
     npcTemplateGen: defaultNpcTemplateGenPrompt,
+    templateRefine: defaultTemplateRefinePrompt,
+    npcTemplateRefine: defaultNpcTemplateRefinePrompt,
     personaGen: defaultPersonaGenPrompt,
     npcGen: defaultNpcGenPrompt, 
     initial: fallbackSystemPrompt 
@@ -693,20 +748,16 @@ async function runGeneration(data, apiConfig, isTemplateMode = false) {
         const isRefine = data.mode === 'refine';
 
         if (isRefine) {
-            // Template refine: reuse the persona refine wrapping mechanism
+            // Template refine: use editable prompt from promptsCache
             let basePrompt = isNpcMode
-                ? (promptsCache.npcGen || defaultNpcGenPrompt)
-                : (promptsCache.personaGen || defaultPersonaGenPrompt);
+                ? (promptsCache.npcTemplateRefine || defaultNpcTemplateRefinePrompt)
+                : (promptsCache.templateRefine || defaultTemplateRefinePrompt);
 
             userMessageContent = basePrompt
                 .replace(/{{user}}/g, currentName)
                 .replace(/{{char}}/g, charName)
-                .replace(/{{charInfo}}/g, wrappedCharInfo)
-                .replace(/{{greetings}}/g, '')
-                .replace(/{{template}}/g, wrappedTags)
-                .replace(/{{input}}/g, wrappedInput)
-                .replace(/{{userPersona}}/g, '')
-                .replace(/{{chatHistory}}/g, '');
+                .replace(/{{currentTemplate}}/g, currentText)
+                .replace(/{{userRequirements}}/g, requestText);
         } else {
             // Template initial generation: use template gen prompt (no old template reference)
             let storedPrompt = isNpcMode
@@ -896,7 +947,9 @@ function loadData() {
             (stored && stored.includes('{{userRequirements}}')) ? stored : def;
         promptsCache = {
             templateGen: migrateTemplatePrompt(p && p.templateGen, defaultTemplateGenPrompt),
-            npcTemplateGen: migrateTemplatePrompt(p && p.npcTemplateGen, defaultNpcTemplateGenPrompt), 
+            npcTemplateGen: migrateTemplatePrompt(p && p.npcTemplateGen, defaultNpcTemplateGenPrompt),
+            templateRefine: (p && p.templateRefine) ? p.templateRefine : defaultTemplateRefinePrompt,
+            npcTemplateRefine: (p && p.npcTemplateRefine) ? p.npcTemplateRefine : defaultNpcTemplateRefinePrompt,
             personaGen: (p && p.personaGen) ? p.personaGen : defaultPersonaGenPrompt,
             npcGen: (p && p.npcGen) ? p.npcGen : defaultNpcGenPrompt, 
             initial: (p && p.initial) ? p.initial : fallbackSystemPrompt 
@@ -904,6 +957,7 @@ function loadData() {
     } catch { 
         promptsCache = { 
             templateGen: defaultTemplateGenPrompt, npcTemplateGen: defaultNpcTemplateGenPrompt,
+            templateRefine: defaultTemplateRefinePrompt, npcTemplateRefine: defaultNpcTemplateRefinePrompt,
             personaGen: defaultPersonaGenPrompt, npcGen: defaultNpcGenPrompt, 
             initial: fallbackSystemPrompt 
         }; 
@@ -1525,6 +1579,8 @@ async function openCreatorPopup() {
                             <option value="npcGen">NPC人设生成/润色指令</option>
                             <option value="templateGen">User模版生成指令</option>
                             <option value="npcTemplateGen">NPC模版生成指令</option>
+                            <option value="templateRefine">User模版润色指令</option>
+                            <option value="npcTemplateRefine">NPC模版润色指令</option>
                         </select>
                     </div>
                     <div class="pw-var-btns">
@@ -1929,9 +1985,7 @@ function bindEvents() {
     // --- Prompt Editor Type Switch ---
     $(document).on('change.pw', '#pw-prompt-type', function() {
         const type = $(this).val();
-        if (type === 'templateGen') { $('#pw-prompt-editor').val(promptsCache.templateGen); } 
-        else if (type === 'npcTemplateGen') { $('#pw-prompt-editor').val(promptsCache.npcTemplateGen); } 
-        else if (type === 'npcGen') { $('#pw-prompt-editor').val(promptsCache.npcGen); } 
+        if (promptsCache[type]) { $('#pw-prompt-editor').val(promptsCache[type]); }
         else { $('#pw-prompt-editor').val(promptsCache.personaGen); }
     });
 
@@ -2888,15 +2942,7 @@ $(document).on('change.pw', '#pw-theme-select', function() {
 
     $(document).on('click.pw', '#pw-api-save', () => {
         const type = $('#pw-prompt-type').val();
-        if (type === 'templateGen') {
-            promptsCache.templateGen = $('#pw-prompt-editor').val();
-        } else if (type === 'npcTemplateGen') {
-            promptsCache.npcTemplateGen = $('#pw-prompt-editor').val();
-        } else if (type === 'npcGen') {
-            promptsCache.npcGen = $('#pw-prompt-editor').val();
-        } else {
-            promptsCache.personaGen = $('#pw-prompt-editor').val();
-        }
+        promptsCache[type] = $('#pw-prompt-editor').val();
         saveData();
         toastr.success("Prompt已保存");
     });
@@ -2904,14 +2950,18 @@ $(document).on('change.pw', '#pw-theme-select', function() {
     $(document).on('click.pw', '#pw-reset-prompt', () => {
         if (!confirm("确定恢复默认 Prompt？")) return;
         const type = $('#pw-prompt-type').val();
-        if (type === 'templateGen') {
-            $('#pw-prompt-editor').val(defaultTemplateGenPrompt);
-        } else if (type === 'npcTemplateGen') {
-            $('#pw-prompt-editor').val(defaultNpcTemplateGenPrompt);
-        } else if (type === 'npcGen') {
-            $('#pw-prompt-editor').val(defaultNpcGenPrompt);
-        } else {
-            $('#pw-prompt-editor').val(defaultPersonaGenPrompt);
+        const defaults = {
+            templateGen: defaultTemplateGenPrompt,
+            npcTemplateGen: defaultNpcTemplateGenPrompt,
+            templateRefine: defaultTemplateRefinePrompt,
+            npcTemplateRefine: defaultNpcTemplateRefinePrompt,
+            personaGen: defaultPersonaGenPrompt,
+            npcGen: defaultNpcGenPrompt
+        };
+        if (defaults[type]) {
+            $('#pw-prompt-editor').val(defaults[type]);
+            promptsCache[type] = defaults[type];
+            saveData();
         }
     });
 
