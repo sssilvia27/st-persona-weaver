@@ -1273,7 +1273,7 @@ async function openCreatorPopup() {
             </div>
 
             <textarea id="pw-request" class="pw-textarea pw-auto-height" placeholder="在此输入要求，或点击上方模版块插入参考结构（无需全部填满）...">${activeData.request}</textarea>
-            <button id="pw-btn-gen" class="pw-btn gen">${isNpc ? '生成 NPC 设定' : '生成 User 设定'}</button>
+            <button id="pw-btn-gen" class="pw-btn gen"><i class="fa-solid fa-wand-magic-sparkles"></i> ${isNpc ? '生成 NPC 设定' : '生成 User 设定'}</button>
 
             <div id="pw-result-area" style="display:${activeData.hasResult ? 'block' : 'none'}; margin-top:15px;">
                 <div class="pw-relative-container">
@@ -2295,6 +2295,20 @@ $(document).on('change.pw', '#pw-theme-select', function() {
     };           
     
     $(document).on('input.pw change.pw', '#pw-request, #pw-result-text, #pw-wi-toggle, .pw-input, .pw-select', saveCurrentState);
+
+    // --- 文本框焦点切换：点击哪个展开哪个 ---
+    $(document).on('focus.pw', '#pw-request', function() {
+        if ($('#pw-result-area').is(':visible')) {
+            $(this).removeClass('minimized');
+            $('#pw-result-text').addClass('minimized');
+        }
+    });
+    $(document).on('focus.pw', '#pw-result-text', function() {
+        if ($('#pw-result-area').is(':visible')) {
+            $(this).removeClass('minimized');
+            $('#pw-request').addClass('minimized');
+        }
+    });
 
     // --- Diff View Logic ---
     $(document).on('click.pw', '.pw-diff-tab', function () {
