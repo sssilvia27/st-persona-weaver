@@ -168,8 +168,9 @@
 }
 .pw-input:focus, .pw-textarea:focus, .pw-select:focus { border-color: var(--pw-text-main); box-shadow: 0 0 5px rgba(128,128,128,0.2); }
 .pw-textarea { resize: vertical; line-height: 1.5; }
-#pw-request { min-height: 200px; transition: min-height 0.3s ease; }
+#pw-request { min-height: 200px; transition: min-height 0.3s ease, height 0.3s ease; }
 #pw-request.minimized { min-height: 80px; height: 80px !important; }
+.pw-result-textarea.minimized { min-height: 80px !important; height: 80px !important; }
 
 #pw-greetings-select { flex: 1; width: 100%; max-width: 100%; }
 
@@ -183,7 +184,15 @@
     white-space: nowrap;
 }
 .pw-btn:hover { background: rgba(128,128,128,0.25); filter: brightness(1.1); }
-.pw-btn.gen { background: var(--pw-text-main); color: var(--smart-theme-bg, #000); border: none; width: 100%; margin-top: 5px; }
+.pw-btn.gen {
+    background: linear-gradient(135deg, var(--SmartThemeQuoteColor, #83c168), color-mix(in srgb, var(--SmartThemeQuoteColor, #83c168) 70%, #000));
+    color: #fff; border: none; width: 100%; margin-top: 8px;
+    padding: 12px 16px; font-size: 1.05em; font-weight: bold; letter-spacing: 0.5px;
+    border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+    transition: all 0.2s ease;
+}
+.pw-btn.gen:hover { filter: brightness(1.15); box-shadow: 0 4px 12px rgba(0,0,0,0.3); transform: translateY(-1px); }
+.pw-btn.gen:active { transform: translateY(0); box-shadow: 0 1px 4px rgba(0,0,0,0.2); }
 .pw-btn.save { border-color: var(--pw-text-main); color: var(--pw-text-main); }
 .pw-btn.danger { border-color: var(--pw-danger); color: var(--pw-danger); background: transparent; }
 .pw-btn.danger:hover { background: rgba(255, 107, 107, 0.1); }
@@ -339,11 +348,11 @@
 .pw-badge.template { background-color: rgba(255, 165, 0, 0.2); color: #ffbc42; border: 1px solid rgba(255, 165, 0, 0.4); }
 
 /* =========================================
-   Diff / Refine View (REWRITTEN & FIXED)
+   Diff / Refine View (Theme-Adaptive)
 ========================================= */
 .pw-diff-container {
-    background-color: #1a1a1a !important; /* Force solid dark background */
-    color: #eee;
+    background-color: var(--SmartThemeBlurTintColor, var(--smart-theme-bg, rgba(20,20,20,0.95)));
+    color: var(--pw-text-main);
     padding: 0;
     position: absolute;
     top: 0; left: 0;
@@ -355,8 +364,8 @@
 }
 
 .pw-diff-tabs-bar {
-    background-color: #111 !important; /* Force solid background for header */
-    border-bottom: 1px solid #444;
+    background-color: rgba(0,0,0,0.15);
+    border-bottom: 1px solid var(--pw-border);
     padding: 0;
     gap: 0;
     display: flex;
@@ -366,11 +375,11 @@
     padding: 10px 20px;
     cursor: pointer;
     border: none;
-    border-right: 1px solid #444;
-    border-bottom: 1px solid #444;
+    border-right: 1px solid var(--pw-border);
+    border-bottom: 1px solid var(--pw-border);
     background: transparent;
-    color: #aaa;
-    opacity: 1;
+    color: var(--pw-text-main);
+    opacity: 0.6;
     font-size: 0.9em;
     display: flex;
     flex-direction: column;
@@ -379,9 +388,10 @@
 }
 
 .pw-diff-tab.active {
-    background-color: #222 !important;
-    color: #fff !important;
-    border-bottom: 1px solid #222; /* Matches content bg */
+    background-color: var(--pw-paper-bg);
+    color: var(--pw-text-main) !important;
+    opacity: 1;
+    border-bottom: 1px solid var(--pw-paper-bg);
 }
 
 .pw-tab-sub { font-size: 0.75em; opacity: 0.7; font-weight: normal; margin-top: 2px; }
@@ -390,14 +400,14 @@
     flex: 1;
     overflow: hidden;
     padding: 15px;
-    background-color: #222 !important; /* Force solid content bg */
+    background-color: var(--pw-paper-bg);
 }
 
 .pw-diff-list-view { overflow-y: auto; height: 100%; padding-right: 5px; }
 
 .pw-diff-row {
-    background: #2a2a2a;
-    border: 1px solid #444;
+    background: rgba(0,0,0,0.08);
+    border: 1px solid var(--pw-border);
     border-radius: 8px;
     padding: 0;
     margin-bottom: 15px;
@@ -405,12 +415,12 @@
 }
 
 .pw-diff-attr-name {
-    background: #333;
-    color: #fff;
+    background: rgba(0,0,0,0.12);
+    color: var(--pw-text-main);
     padding: 8px;
     font-weight: bold;
     text-align: center;
-    border-bottom: 1px solid #444;
+    border-bottom: 1px solid var(--pw-border);
     font-size: 1em;
     margin: 0;
 }
@@ -419,16 +429,16 @@
     display: flex;
     padding: 10px;
     gap: 10px;
-    background: #2a2a2a;
+    background: transparent;
 }
 
 .pw-diff-card {
     flex: 1;
     display: flex;
     flex-direction: column;
-    border: 1px solid #555;
+    border: 1px solid var(--pw-border);
     border-radius: 6px;
-    background: #111;
+    background: rgba(0,0,0,0.06);
     overflow: hidden;
     cursor: pointer;
     opacity: 0.6;
@@ -439,32 +449,34 @@
 
 /* Highlight Selected Card */
 .pw-diff-card.selected {
-    border: 2px solid #83c168 !important; /* Hardcoded Green */
+    border: 2px solid var(--SmartThemeQuoteColor, #83c168) !important;
     opacity: 1 !important;
-    box-shadow: 0 0 10px rgba(131, 193, 104, 0.2);
+    box-shadow: 0 0 10px rgba(131, 193, 104, 0.15);
 }
 
 .pw-diff-label {
     text-align: center;
     font-size: 0.8em;
     padding: 5px;
-    background: #333;
-    color: #aaa;
-    border-bottom: 1px solid #444;
+    background: rgba(0,0,0,0.1);
+    color: var(--pw-text-main);
+    opacity: 0.7;
+    border-bottom: 1px solid var(--pw-border);
     font-weight: bold;
 }
 
 .pw-diff-card.selected .pw-diff-label {
-    background: rgba(131, 193, 104, 0.2);
-    color: #83c168 !important;
-    border-bottom: 1px solid #83c168;
+    background: rgba(131, 193, 104, 0.15);
+    color: var(--SmartThemeQuoteColor, #83c168) !important;
+    opacity: 1;
+    border-bottom: 1px solid var(--SmartThemeQuoteColor, #83c168);
 }
 
 .pw-diff-textarea {
     width: 100%;
     background: transparent;
     border: none;
-    color: #ddd;
+    color: var(--pw-text-main);
     padding: 10px;
     font-family: inherit;
     font-size: 0.95em;
@@ -475,25 +487,25 @@
 }
 
 .pw-diff-actions {
-    background: #1a1a1a;
+    background: rgba(0,0,0,0.1);
     padding: 15px;
-    border-top: 1px solid #444;
+    border-top: 1px solid var(--pw-border);
     display: flex;
     justify-content: flex-end;
     gap: 10px;
 }
 
-#pw-diff-confirm { background: transparent; border: 1px solid #83c168; color: #83c168; }
+#pw-diff-confirm { background: transparent; border: 1px solid var(--SmartThemeQuoteColor, #83c168); color: var(--SmartThemeQuoteColor, #83c168); }
 #pw-diff-confirm:hover { background: rgba(131, 193, 104, 0.1); }
-#pw-diff-cancel { background: transparent; border: 1px solid #ff6b6b; color: #ff6b6b; }
+#pw-diff-cancel { background: transparent; border: 1px solid var(--pw-danger); color: var(--pw-danger); }
 #pw-diff-cancel:hover { background: rgba(255, 107, 107, 0.1); }
 
 .pw-diff-raw-view { display: none; height: 100%; }
 .pw-diff-raw-textarea {
     width: 100%; height: 100%;
-    background: #111;
-    color: #ddd;
-    border: 1px solid #444;
+    background: rgba(0,0,0,0.08);
+    color: var(--pw-text-main);
+    border: 1px solid var(--pw-border);
     padding: 10px;
     font-family: monospace;
     resize: none;
