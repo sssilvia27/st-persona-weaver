@@ -1466,12 +1466,14 @@ async function openCreatorPopup() {
     </div>
 
     <!-- Load Persona Overlay -->
-    <div id="pw-load-overlay" style="display:none; position:absolute; top:0; left:0; width:100%; height:100%; z-index:2001; background:var(--SmartThemeBlurTintColor, rgba(0,0,0,0.85)); flex-direction:column;">
-        <div style="padding:15px; border-bottom:1px solid var(--pw-border); display:flex; align-items:center; justify-content:space-between;">
-            <span style="font-weight:bold; font-size:1.05em;" id="pw-load-overlay-title">载入已有人设</span>
-            <button class="pw-btn danger" id="pw-load-overlay-close" style="padding:4px 10px;"><i class="fa-solid fa-xmark"></i></button>
+    <div id="pw-load-overlay" style="display:none; position:absolute; top:0; left:0; width:100%; height:100%; z-index:2001; background:var(--SmartThemeBlurTintColor, rgba(0,0,0,0.85)); flex-direction:column; justify-content:center; align-items:center;">
+        <div style="width:92%; max-width:500px; max-height:80vh; background:var(--smart-theme-bg, #1a1a1a); border:1px solid var(--pw-border); border-radius:8px; display:flex; flex-direction:column; overflow:hidden;">
+            <div style="padding:10px 15px; border-bottom:1px solid var(--pw-border); display:flex; align-items:center; justify-content:space-between; flex-shrink:0;">
+                <span style="font-weight:bold; font-size:1em;" id="pw-load-overlay-title">载入已有人设</span>
+                <button class="pw-btn danger" id="pw-load-overlay-close" style="padding:4px 10px;"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div id="pw-load-overlay-content" style="flex:1; overflow-y:auto; padding:12px; min-height:0;"></div>
         </div>
-        <div id="pw-load-overlay-content" style="flex:1; overflow-y:auto; padding:15px;"></div>
     </div>
 
     <div id="pw-float-quote-btn" class="pw-float-quote-btn"><i class="fa-solid fa-pen-to-square"></i> 修改此段</div>
@@ -2819,20 +2821,21 @@ $(document).on('change.pw', '#pw-theme-select', function() {
             ).join('');
 
             $content.html(`
-                <div style="display:flex; flex-direction:column; gap:10px; height:100%;">
-                    <select id="pw-wi-load-select" class="pw-input" style="width:100%; flex-shrink:0;" size="${Math.min(allEntries.length, 8)}">
+                <div style="display:flex; flex-direction:column; gap:8px;">
+                    <select id="pw-wi-load-select" class="pw-input" style="width:100%;">
+                        <option value="" disabled>-- 选择条目 --</option>
                         ${optionsHtml}
                     </select>
-                    <div id="pw-wi-load-preview" style="flex:1; min-height:120px; overflow-y:auto; padding:10px; background:var(--pw-paper-bg); border:1px solid var(--pw-border); border-radius:6px; font-size:0.9em; white-space:pre-wrap; line-height:1.5;"></div>
+                    <div id="pw-wi-load-preview" style="max-height:35vh; overflow-y:auto; padding:8px; background:var(--pw-paper-bg); border:1px solid var(--pw-border); border-radius:6px; font-size:0.85em; white-space:pre-wrap; line-height:1.5; text-align:left; color:var(--pw-text-main); display:none;"></div>
                     <button class="pw-btn gen" id="pw-wi-load-confirm" style="flex-shrink:0;"><i class="fa-solid fa-check"></i> 载入选中条目</button>
                 </div>`);
 
-            $('#pw-wi-load-select').on('change click', function() {
+            $('#pw-wi-load-select').on('change', function() {
                 const idx = parseInt($(this).val());
                 if (!isNaN(idx) && allEntries[idx]) {
-                    $('#pw-wi-load-preview').text(allEntries[idx].content);
+                    $('#pw-wi-load-preview').text(allEntries[idx].content).show();
                 }
-            }).val(0).trigger('change');
+            });
 
             $('#pw-wi-load-confirm').on('click', function() {
                 const idx = parseInt($('#pw-wi-load-select').val());
@@ -2854,13 +2857,13 @@ $(document).on('change.pw', '#pw-theme-select', function() {
 
             $('#pw-load-overlay-title').text('载入已有人设');
             $content.html(`
-                <div style="display:flex; flex-direction:column; gap:15px; align-items:center; padding:20px 0;">
-                    <span style="opacity:0.7;">选择要载入的人设来源</span>
-                    <div style="display:flex; gap:12px; width:100%; max-width:400px;">
-                        <button class="pw-btn primary pw-load-choice" data-choice="user" style="flex:1; padding:14px; font-size:1em;${!hasUserPersona ? ' opacity:0.4; cursor:not-allowed;' : ''}" ${!hasUserPersona ? 'disabled title="未检测到当前 User 人设"' : ''}>
-                            <i class="fa-solid fa-user"></i> 当前 User 人设
+                <div style="display:flex; flex-direction:column; gap:10px;">
+                    <span style="opacity:0.7; font-size:0.9em;">选择载入来源</span>
+                    <div style="display:flex; gap:8px; width:100%;">
+                        <button class="pw-btn primary pw-load-choice" data-choice="user" style="flex:1; padding:10px; font-size:0.95em;${!hasUserPersona ? ' opacity:0.4; cursor:not-allowed;' : ''}" ${!hasUserPersona ? 'disabled title="未检测到当前 User 人设"' : ''}>
+                            <i class="fa-solid fa-user"></i> User 人设
                         </button>
-                        <button class="pw-btn primary pw-load-choice" data-choice="worldbook" style="flex:1; padding:14px; font-size:1em;">
+                        <button class="pw-btn primary pw-load-choice" data-choice="worldbook" style="flex:1; padding:10px; font-size:0.95em;">
                             <i class="fa-solid fa-book-atlas"></i> 世界书条目
                         </button>
                     </div>
