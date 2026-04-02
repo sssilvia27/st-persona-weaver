@@ -3,7 +3,7 @@ import { extension_settings, getContext } from "../../../extensions.js";
 import { saveSettingsDebounced, callPopup, getRequestHeaders, saveChat, reloadCurrentChat, saveCharacterDebounced } from "../../../../script.js";
 
 const extensionName = "st-persona-weaver";
-const CURRENT_VERSION = "2.2.6"; // Smart Keywords for All
+const CURRENT_VERSION = "3.0.0"; // Avatar Reference + Chat Inference
 
 const UPDATE_CHECK_URL = "https://raw.githubusercontent.com/sssilvia27/st-persona-weaver/main/manifest.json";
 
@@ -1711,18 +1711,18 @@ async function openCreatorPopup() {
                 </div>
             </div>
 
-            <div class="pw-avatar-ref-row" id="pw-avatar-ref-row">
-                <span class="pw-avatar-ref-label"><i class="fa-solid fa-image-portrait"></i> 头像参考</span>
+            <div class="pw-context-row ${(uiStateCache.avatarRef.selectedIds || []).length > 0 ? 'active' : ''}" id="pw-avatar-ref-row">
+                <span class="pw-context-row-label">头像参考</span>
                 <div id="pw-avatar-strip" class="pw-avatar-strip"></div>
                 <span id="pw-avatar-add-btn" class="pw-avatar-add-btn" title="管理头像"><i class="fa-solid fa-plus"></i></span>
             </div>
 
-            <div class="pw-chat-infer-row" id="pw-chat-infer-row">
-                <label class="pw-chat-infer-check-label" title="启用后将基于聊天记录进行人设推断/更新">
-                    <input type="checkbox" id="pw-chat-infer-main-toggle" ${chatHistEnabled ? 'checked' : ''}>
-                    <i class="fa-solid fa-comments"></i> 聊天记录注入
+            <div class="pw-context-row ${chatHistEnabled ? 'active' : ''}" id="pw-chat-infer-row">
+                <label class="pw-context-row-label" style="cursor:pointer;">
+                    <input type="checkbox" id="pw-chat-infer-main-toggle" ${chatHistEnabled ? 'checked' : ''} style="display:none;">
+                    聊天记录注入
                 </label>
-                <span id="pw-chat-infer-summary" class="pw-chat-infer-summary">${chatHistEnabled ? (uiStateCache.chatHistory.preset === 'all' ? '全部' : '最近' + (uiStateCache.chatHistory.preset || '10') + '条') : '默认最近10条'}</span>
+                <span id="pw-chat-infer-summary" class="pw-context-row-hint">${chatHistEnabled ? (uiStateCache.chatHistory.preset === 'all' ? '全部' : '最近' + (uiStateCache.chatHistory.preset || '10') + '条') : ''}</span>
                 <span id="pw-chat-token-badge" class="pw-chat-token-badge" style="display:none;"></span>
             </div>
 
@@ -3445,6 +3445,7 @@ $(document).on('change.pw', '#pw-theme-select', function() {
     $(document).on('change.pw', '#pw-chat-infer-main-toggle', function () {
         const enabled = $(this).prop('checked');
         uiStateCache.chatHistory.enabled = enabled;
+        $('#pw-chat-infer-row').toggleClass('active', enabled);
         if (enabled) {
             if (!uiStateCache.chatHistory.preset) uiStateCache.chatHistory.preset = '10';
             refreshChatTokenEstimate();
@@ -3459,7 +3460,7 @@ $(document).on('change.pw', '#pw-theme-select', function() {
     });
 
     $(document).on('click.pw', '#pw-chat-infer-row', function (e) {
-        if ($(e.target).is('input[type="checkbox"]') || $(e.target).closest('.pw-chat-infer-check-label').length) return;
+        if ($(e.target).is('input[type="checkbox"]') || $(e.target).closest('.pw-context-row-label').length) return;
         $('.pw-tab[data-tab="context"]').click();
         setTimeout(() => {
             const $section = $('#pw-chat-history-section');
@@ -3475,6 +3476,7 @@ $(document).on('change.pw', '#pw-theme-select', function() {
         const idx = sel.indexOf(id);
         if (idx >= 0) { sel.splice(idx, 1); $(this).removeClass('selected'); }
         else { sel.push(id); $(this).addClass('selected'); }
+        $('#pw-avatar-ref-row').toggleClass('active', sel.length > 0);
         saveCurrentState();
     });
 
@@ -3575,15 +3577,15 @@ $(document).on('change.pw', '#pw-theme-select', function() {
         const conf = uiStateCache.chatHistory || {};
         const enabled = conf.enabled;
         const preset = conf.preset || '10';
-        let text;
-        if (!enabled) {
-            text = '默认最近10条';
-        } else if (preset === 'custom' && conf.floorFrom && conf.floorTo) {
-            text = `#${conf.floorFrom}-#${conf.floorTo}`;
-        } else if (preset === 'all') {
-            text = '全部消息';
-        } else {
-            text = `最近${preset}条`;
+        let text = '';
+        if (enabled) {
+            if (preset === 'custom' && conf.floorFrom && conf.floorTo) {
+                text = `#${conf.floorFrom}-#${conf.floorTo}`;
+            } else if (preset === 'all') {
+                text = '全部消息';
+            } else {
+                text = `最近${preset}条`;
+            }
         }
         $('#pw-chat-infer-summary').text(text);
     }
