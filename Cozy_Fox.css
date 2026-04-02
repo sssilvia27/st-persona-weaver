@@ -561,6 +561,112 @@
 }
 
 /* =========================================
+   Context Rows (Avatar Ref + Chat Infer)
+========================================= */
+.pw-context-row {
+    background: var(--cozy-card);
+    border: 2px solid var(--cozy-beige);
+    border-radius: 14px;
+    padding: 8px 12px;
+    box-shadow: 3px 3px 0 var(--cozy-beige);
+}
+.pw-context-row.active {
+    border-color: var(--cozy-border-color);
+    box-shadow: 3px 3px 0 var(--cozy-border-color);
+}
+.pw-context-row-label {
+    color: var(--cozy-text);
+    font-weight: 800;
+    font-family: 'Nunito', sans-serif;
+}
+.pw-context-row-hint {
+    color: var(--cozy-text);
+    font-family: 'Nunito', sans-serif;
+    font-weight: 700;
+}
+
+/* Avatar strip highlight */
+.pw-avatar-strip-img {
+    border: 2px solid transparent;
+    border-radius: 50%;
+}
+.pw-avatar-strip-img.selected {
+    border-color: var(--cozy-orange) !important;
+    box-shadow: 0 0 0 2px var(--cozy-orange), 3px 3px 0 rgba(0,0,0,0.1);
+}
+.pw-avatar-add-btn {
+    border: 2px dashed var(--cozy-beige);
+    color: var(--cozy-text);
+}
+.pw-avatar-add-btn:hover {
+    border-color: var(--cozy-orange);
+    color: var(--cozy-orange);
+}
+
+/* Token badge */
+.pw-chat-token-badge {
+    font-family: 'Nunito', monospace;
+    font-weight: 700;
+    border-radius: 10px;
+}
+
+/* Avatar Management (Context Tab) */
+.pw-avatar-mgmt-grid { gap: 10px; }
+.pw-avatar-card-img {
+    border: 2px solid var(--cozy-beige);
+    border-radius: 10px;
+}
+.pw-avatar-card-name {
+    color: var(--cozy-text);
+    font-family: 'Nunito', sans-serif;
+    font-weight: 700;
+}
+.pw-avatar-tag {
+    font-family: 'Nunito', sans-serif;
+    font-weight: 700;
+    border: 2px solid var(--cozy-beige);
+    border-radius: 10px;
+}
+.pw-avatar-tag.active {
+    border-color: var(--cozy-olive);
+    background: var(--cozy-mint);
+    color: var(--cozy-olive);
+}
+.pw-avatar-card-del {
+    background: var(--pw-danger);
+    border: 1px solid #fff;
+}
+
+/* Chat History Settings (Context Tab) */
+#pw-chat-history-section .pw-section-label {
+    color: var(--cozy-olive);
+    font-weight: 800;
+}
+.pw-chat-filter-section {
+    border: 2px solid var(--cozy-beige) !important;
+    border-radius: 12px !important;
+    background: var(--cozy-bg) !important;
+}
+.pw-chat-filter-header {
+    padding: 8px 10px;
+    font-weight: 700;
+}
+#pw-chat-filter-body {
+    padding: 8px;
+}
+#pw-chat-scan-results {
+    background: var(--cozy-bg) !important;
+    border: 1px solid var(--cozy-beige);
+    border-radius: 8px;
+}
+#pw-chat-preview-area {
+    background: var(--cozy-bg) !important;
+    border: 2px solid var(--cozy-beige) !important;
+    border-radius: 12px !important;
+    color: var(--cozy-text) !important;
+}
+
+/* =========================================
    Mobile Specific Overrides
 ========================================= */
 @media screen and (max-width: 600px) {
