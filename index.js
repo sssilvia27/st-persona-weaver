@@ -839,30 +839,60 @@ async function runGeneration(data, apiConfig, isTemplateMode = false) {
         const doRequest = async (messages) => {
             if (apiConfig.apiSource === 'independent') {
                 let baseUrl = apiConfig.indepApiUrl.replace(/\/$/, '');
-                if (baseUrl.endsWith('/chat/completions')) baseUrl = baseUrl.replace(/\/chat\/completions$/, '');
-                const url = `${baseUrl}/chat/completions`;
+                const isAnthropic = baseUrl.includes('anthropic.com') || baseUrl.includes('/v1/messages');
+
+                let url, headers, body;
+
+                if (isAnthropic) {
+                    baseUrl = baseUrl.replace(/\/v1\/messages$/, '').replace(/\/v1$/, '');
+                    url = `${baseUrl}/v1/messages`;
+
+                    const systemParts = messages.filter(m => m.role === 'system').map(m => m.content);
+                    const nonSystem = messages.filter(m => m.role !== 'system');
+
+                    headers = {
+                        'Content-Type': 'application/json',
+                        'x-api-key': apiConfig.indepApiKey,
+                        'anthropic-version': '2023-06-01'
+                    };
+                    body = JSON.stringify({
+                        model: apiConfig.indepApiModel,
+                        system: systemParts.join('\n\n'),
+                        messages: nonSystem,
+                        max_tokens: 8192,
+                        temperature: 0.85
+                    });
+                } else {
+                    if (baseUrl.endsWith('/chat/completions')) baseUrl = baseUrl.replace(/\/chat\/completions$/, '');
+                    url = `${baseUrl}/chat/completions`;
+
+                    headers = {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${apiConfig.indepApiKey}`
+                    };
+                    body = JSON.stringify({
+                        model: apiConfig.indepApiModel,
+                        messages: messages,
+                        temperature: 0.85
+                    });
+                }
+
+                const res = await fetch(url, { method: 'POST', headers, body, signal: controller.signal });
                 
-                const res = await fetch(url, {
-                    method: 'POST', 
-                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiConfig.indepApiKey}` },
-                    body: JSON.stringify({ model: apiConfig.indepApiModel, messages: messages, temperature: 0.85 }),
-                    signal: controller.signal
-                });
-                
-                // [Fix 11] Improved Error Handling
                 if (!res.ok) {
                     let errText = await res.text();
                     try {
                         const errJson = JSON.parse(errText);
                         if (errJson.error && errJson.error.message) errText = errJson.error.message;
-                    } catch (e) {
-                        // ignore json parse error, use raw text
-                    }
+                    } catch (e) {}
                     if (errText.length > 200) errText = errText.substring(0, 200) + "...";
                     throw new Error(`API Error (${res.status}): ${errText}`);
                 }
                 
                 const json = await res.json();
+                if (isAnthropic) {
+                    return json.content[0].text;
+                }
                 return json.choices[0].message.content;
             } else {
                 if (window.TavernHelper && typeof window.TavernHelper.generateRaw === 'function') {
@@ -1414,8 +1444,8 @@ async function openCreatorPopup() {
     <!-- Diff Overlay -->
     <div id="pw-diff-overlay" class="pw-diff-container" style="display:none;">
         <div class="pw-diff-tabs-bar">
-            <div class="pw-diff-tab active" data-view="diff">
-                <div>智能对比</div><div class="pw-tab-sub">选择编辑</div>
+            <div class="pw-diff-tab active" data-view="merge">
+                <div>最终预览</div><div class="pw-tab-sub">智能合并</div>
             </div>
             <div class="pw-diff-tab" data-view="raw">
                 <div>新版原文</div><div class="pw-tab-sub">查看/编辑</div>
@@ -1426,10 +1456,10 @@ async function openCreatorPopup() {
         </div>
         
         <div class="pw-diff-content-area">
-            <div id="pw-diff-list-view" class="pw-diff-list-view">
-                <div id="pw-diff-list" style="display:flex; flex-direction:column; gap:10px;"></div>
+            <div id="pw-diff-merge-view" class="pw-diff-merge-view">
+                <div id="pw-diff-merge-list"></div>
             </div>
-            <div id="pw-diff-raw-view" class="pw-diff-raw-view">
+            <div id="pw-diff-raw-view" class="pw-diff-raw-view" style="display:none;">
                 <textarea id="pw-diff-raw-textarea" class="pw-diff-raw-textarea" spellcheck="false"></textarea>
             </div>
             <div id="pw-diff-old-raw-view" class="pw-diff-raw-view" style="display:none;">
@@ -1737,7 +1767,7 @@ function renderDiffComparison(oldText, newText) {
     const newMap = parseYamlToBlocks(newText);
     const allKeys = [...new Set([...oldMap.keys(), ...newMap.keys()])];
 
-    const $list = $('#pw-diff-list').empty();
+    const $merge = $('#pw-diff-merge-list').empty();
     let changeCount = 0;
 
     allKeys.forEach(key => {
@@ -1750,41 +1780,36 @@ function renderDiffComparison(oldText, newText) {
         if (isChanged) changeCount++;
         if (!valOld && !valNew) return;
 
-        let cardsHtml = '';
         if (!isChanged) {
-            cardsHtml = `
-            <div class="pw-diff-card new selected single-view" data-val="${encodeURIComponent(valNew)}">
-                <div class="pw-diff-label">无变更</div>
-                <textarea class="pw-diff-textarea">${valNew}</textarea>
-            </div>`;
-        } else {
-            cardsHtml = `
-            <div class="pw-diff-card old" data-val="${encodeURIComponent(valOld)}">
-                <div class="pw-diff-label">原版本</div>
-                <textarea class="pw-diff-textarea" readonly>${valOld || "(无)"}</textarea>
-            </div>
-            <div class="pw-diff-card new selected" data-val="${encodeURIComponent(valNew)}">
-                <div class="pw-diff-label">新版本</div>
-                <textarea class="pw-diff-textarea">${valNew || "(删除)"}</textarea>
-            </div>`;
+            $merge.append(`<div class="pw-merge-block unchanged" data-key="${key}"><div class="pw-merge-key">${key}:</div><div class="pw-merge-static"><pre>${_esc(valNew)}</pre></div></div>`);
+            return; // skip rest for unchanged
         }
+        const badge = !valOld ? '新增' : !valNew ? '删除' : '修改';
+        $merge.append(`<div class="pw-merge-block changed" data-key="${key}"><div class="pw-merge-key">${key}: <span class="pw-merge-badge">${badge}</span></div><div class="pw-merge-versions"><div class="pw-merge-version pw-merge-old" data-role="old" title="点击使用旧版本"><span class="pw-merge-vlabel">旧</span><div class="pw-merge-content"><pre>${_esc(valOld || '(无)')}</pre></div></div><div class="pw-merge-version pw-merge-new selected" data-role="new" title="点击使用新版本"><span class="pw-merge-vlabel">新</span><textarea class="pw-merge-textarea">${valNew || '(删除)'}</textarea></div></div></div>`);
+    });
 
-        const rowHtml = `
-        <div class="pw-diff-row" data-key="${key}">
-            <div class="pw-diff-attr-name">${key}</div>
-            <div class="pw-diff-cards">
-                ${cardsHtml}
-            </div>
-        </div>`;
-        $list.append(rowHtml);
+    // Toggle old/new selection per changed block
+    $merge.off('click.toggle').on('click.toggle', '.pw-merge-version', function() {
+        const $block = $(this).closest('.pw-merge-block');
+        if ($block.hasClass('unchanged') || $(this).hasClass('selected')) return;
+        const $cur = $block.find('.pw-merge-version.selected');
+        const curVal = $cur.find('.pw-merge-textarea').val() || $cur.find('pre').text() || '';
+        const clickVal = $(this).find('pre').text() || $(this).find('.pw-merge-textarea').val() || '';
+        $cur.removeClass('selected');
+        $cur.find('.pw-merge-textarea').remove();
+        if (!$cur.find('.pw-merge-content').length) $cur.append('<div class="pw-merge-content"><pre>' + _esc(curVal) + '</pre></div>');
+        $(this).addClass('selected');
+        $(this).find('.pw-merge-content').remove();
+        if (!$(this).find('.pw-merge-textarea').length) $(this).append('<textarea class="pw-merge-textarea">' + clickVal + '</textarea>');
     });
 
     if (changeCount === 0 && !newText) {
-        toastr.warning("返回内容为空，请切换到“直接编辑”查看");
+        toastr.warning('\u8fd4\u56de\u5185\u5bb9\u4e3a\u7a7a\uff0c\u8bf7\u5207\u6362\u5230\u65b0\u7248\u539f\u6587\u67e5\u770b');
     } else if (changeCount === 0) {
-        toastr.info("没有检测到内容变化");
+        toastr.info('\u6ca1\u6709\u68c0\u6d4b\u5230\u5185\u5bb9\u53d8\u5316');
     }
 }
+function _esc(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 function bindEvents() {
     if (window.stPersonaWeaverBound) return;
     window.stPersonaWeaverBound = true;
@@ -2491,10 +2516,10 @@ $(document).on('change.pw', '#pw-theme-select', function() {
         $(this).addClass('active');
         const view = $(this).data('view');
         
-        $('#pw-diff-list-view, #pw-diff-raw-view, #pw-diff-old-raw-view').hide();
+        $('#pw-diff-merge-view, #pw-diff-raw-view, #pw-diff-old-raw-view').hide();
 
-        if (view === 'diff') { 
-            $('#pw-diff-list-view').show();
+        if (view === 'merge') { 
+            $('#pw-diff-merge-view').show();
         } else if (view === 'raw') { 
             $('#pw-diff-raw-view').show();
         } else if (view === 'old-raw') {
@@ -2546,15 +2571,8 @@ $(document).on('change.pw', '#pw-theme-select', function() {
             renderDiffComparison(oldText, responseText);
 
             $('#pw-diff-overlay').data('source', 'persona');
-            
-            $('.pw-diff-tab[data-view="diff"] div:first-child').text('智能对比');
-            $('.pw-diff-tab[data-view="diff"] .pw-tab-sub').text('选择编辑');
-            $('.pw-diff-tab[data-view="raw"] div:first-child').text('新版原文');
-            $('.pw-diff-tab[data-view="raw"] .pw-tab-sub').text('查看/编辑');
-            $('.pw-diff-tab[data-view="old-raw"] div:first-child').text('原版原文');
-            $('.pw-diff-tab[data-view="old-raw"] .pw-tab-sub').text('查看/编辑');
 
-            $('.pw-diff-tab[data-view="diff"]').click();
+            $('.pw-diff-tab[data-view="merge"]').click();
             $('#pw-diff-overlay').fadeIn();
             $('#pw-refine-input').val(''); // 清空输入框
         } catch (e) { 
@@ -2605,7 +2623,7 @@ $(document).on('change.pw', '#pw-theme-select', function() {
             renderDiffComparison(oldText, responseText);
             
             // 确保切回对比面板
-            $('.pw-diff-tab[data-view="diff"]').click(); 
+            $('.pw-diff-tab[data-view="merge"]').click(); 
             toastr.success("已重新生成并更新对比！");
 
         } catch (e) {
@@ -2615,17 +2633,6 @@ $(document).on('change.pw', '#pw-theme-select', function() {
             $btn.html(originalHtml);
             isProcessing = false;
         }
-    });
-
-    $(document).on('click.pw', '.pw-diff-card', function () {
-        const $row = $(this).closest('.pw-diff-row');
-        if ($(this).hasClass('single-view')) return;
-
-        $row.find('.pw-diff-card').removeClass('selected');
-        $(this).addClass('selected');
-        
-        $row.find('.pw-diff-textarea').prop('readonly', true);
-        $(this).find('.pw-diff-textarea').prop('readonly', false).focus();
     });
 
     $(document).on('click.pw', '#pw-diff-confirm', function () {
@@ -2638,10 +2645,17 @@ $(document).on('change.pw', '#pw-theme-select', function() {
         } else if (activeTab === 'old-raw') {
             finalContent = $('#pw-diff-old-raw-textarea').val();
         } else {
+            // Assemble from merge view: each block contributes its selected value
             let finalLines = [];
-            $('.pw-diff-row').each(function () {
+            $('.pw-merge-block').each(function () {
                 const key = $(this).data('key');
-                const val = $(this).find('.pw-diff-card.selected .pw-diff-textarea').val().trimEnd();
+                let val = '';
+                if ($(this).hasClass('unchanged')) {
+                    val = $(this).find('.pw-merge-static pre').text().trimEnd();
+                } else {
+                    const $sel = $(this).find('.pw-merge-version.selected');
+                    val = ($sel.find('.pw-merge-textarea').val() || $sel.find('pre').text() || '').trimEnd();
+                }
                 if (val && val !== "(删除)" && val !== "(无)") {
                     if (val.includes('\n') || val.startsWith('  ')) finalLines.push(`${key}:\n${val}`);
                     else finalLines.push(`${key}: ${val.trim()}`);
