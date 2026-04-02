@@ -1005,11 +1005,10 @@ async function runGeneration(data, apiConfig, isTemplateMode = false) {
         if ($debugArea.length) $debugArea.val(debugText);
     };
 
-    // Collect selected avatar images
+    // Collect selected avatar images (auto-enabled when any image is selected)
     const avatarConf = uiStateCache.avatarRef || {};
-    const avatarEnabled = avatarConf.enabled && !isTemplateMode;
     const selectedAvatarImages = [];
-    if (avatarEnabled && avatarConf.selectedIds && avatarConf.selectedIds.length > 0) {
+    if (!isTemplateMode && avatarConf.selectedIds && avatarConf.selectedIds.length > 0) {
         for (const id of avatarConf.selectedIds) {
             if (id === '__user_current__' && currentUserAvatarBase64) {
                 selectedAvatarImages.push(currentUserAvatarBase64);
@@ -1544,27 +1543,27 @@ function renderAvatarStrip() {
 }
 
 function renderAvatarMgmt() {
-    const $list = $('#pw-avatar-mgmt-list');
+    const $list = $('#pw-avatar-mgmt-grid');
     if (!$list.length) return;
     $list.empty();
     if (avatarImagesCache.length === 0) {
-        $list.html('<div style="font-size:0.8em; opacity:0.4; padding:8px;">暂无上传图片</div>');
+        $list.html('<div style="font-size:0.8em; opacity:0.4; padding:8px; text-align:center;">暂无上传图片</div>');
         return;
     }
     avatarImagesCache.forEach(img => {
         const hasUser = img.tags && img.tags.includes('user');
         const hasNpc = img.tags && img.tags.includes('npc');
         const $item = $(`
-            <div class="pw-avatar-mgmt-item" data-img-id="${img.id}">
-                <img src="${img.base64}" class="pw-avatar-mgmt-thumb">
-                <div class="pw-avatar-mgmt-info">
-                    <span class="pw-avatar-mgmt-name" title="${img.name}">${img.name || '未命名'}</span>
-                    <div class="pw-avatar-mgmt-tags">
-                        <span class="pw-avatar-tag ${hasUser ? 'active' : ''}" data-tag="user">User</span>
-                        <span class="pw-avatar-tag ${hasNpc ? 'active' : ''}" data-tag="npc">NPC</span>
-                    </div>
+            <div class="pw-avatar-card" data-img-id="${img.id}">
+                <div class="pw-avatar-card-top">
+                    <img src="${img.base64}" class="pw-avatar-card-img">
+                    <span class="pw-avatar-card-del" title="删除"><i class="fa-solid fa-xmark"></i></span>
                 </div>
-                <span class="pw-avatar-mgmt-del" title="删除"><i class="fa-solid fa-trash-can"></i></span>
+                <span class="pw-avatar-card-name" title="点击编辑名称">${img.name || '未命名'}</span>
+                <div class="pw-avatar-card-tags">
+                    <span class="pw-avatar-tag ${hasUser ? 'active' : ''}" data-tag="user">User</span>
+                    <span class="pw-avatar-tag ${hasNpc ? 'active' : ''}" data-tag="npc">NPC</span>
+                </div>
             </div>
         `);
         $list.append($item);
@@ -1713,11 +1712,9 @@ async function openCreatorPopup() {
             </div>
 
             <div class="pw-avatar-ref-row" id="pw-avatar-ref-row">
-                <label class="pw-avatar-ref-label" title="启用后将选中的头像图片一并发送给 AI（需要模型支持多模态）">
-                    <input type="checkbox" id="pw-avatar-ref-toggle" ${uiStateCache.avatarRef.enabled ? 'checked' : ''}>
-                    <i class="fa-solid fa-image-portrait"></i> 头像参考
-                </label>
+                <span class="pw-avatar-ref-label"><i class="fa-solid fa-image-portrait"></i> 头像参考</span>
                 <div id="pw-avatar-strip" class="pw-avatar-strip"></div>
+                <span id="pw-avatar-add-btn" class="pw-avatar-add-btn" title="管理头像"><i class="fa-solid fa-plus"></i></span>
             </div>
 
             <div class="pw-chat-infer-row" id="pw-chat-infer-row">
@@ -1805,7 +1802,7 @@ async function openCreatorPopup() {
             <!-- [Fix 13] Preset Selector Relocated to TOP & Styled simply -->
             <div class="pw-card-section">
                 <div class="pw-row">
-                    <label class="pw-section-label">生成使用的预设 (System Prompt)</label>
+                    <label class="pw-section-label">生成预设</label>
                     <select id="pw-preset-select" class="pw-input" style="flex:1; width:100%;">
                         ${presetOptionsHtml}
                     </select>
@@ -1844,25 +1841,23 @@ async function openCreatorPopup() {
 
             <div class="pw-card-section" id="pw-avatar-mgmt-section">
                 <div class="pw-row" style="margin-bottom:5px;">
-                    <label class="pw-section-label" style="display:flex; align-items:center; gap:8px;">
-                        <i class="fa-solid fa-image-portrait"></i> 头像参考管理
-                    </label>
+                    <label class="pw-section-label">头像参考</label>
+                    <div style="display:flex; gap:6px; align-items:center;">
+                        <label class="pw-mini-btn" style="cursor:pointer; display:inline-flex; align-items:center; gap:4px; padding:3px 10px; font-size:0.8em;">
+                            <i class="fa-solid fa-upload"></i> 上传
+                            <input type="file" id="pw-avatar-upload" accept="image/*" multiple style="display:none;">
+                        </label>
+                        <span id="pw-avatar-mgmt-collapse" style="cursor:pointer; opacity:0.5; font-size:0.85em;" title="展开/收起"><i class="fa-solid fa-chevron-down"></i></span>
+                    </div>
                 </div>
-                <div style="display:flex; gap:6px; margin-bottom:8px; flex-wrap:wrap;">
-                    <label class="pw-btn primary" style="padding:5px 12px; font-size:0.82em; cursor:pointer; display:inline-flex; align-items:center; gap:4px;">
-                        <i class="fa-solid fa-upload"></i> 上传图片
-                        <input type="file" id="pw-avatar-upload" accept="image/*" multiple style="display:none;">
-                    </label>
-                    <span style="font-size:0.75em; opacity:0.5; align-self:center;">支持多选，建议 ≤500KB/张</span>
+                <div id="pw-avatar-mgmt-body" class="pw-avatar-mgmt-body">
+                    <div id="pw-avatar-mgmt-grid" class="pw-avatar-mgmt-grid"></div>
                 </div>
-                <div id="pw-avatar-mgmt-list" class="pw-avatar-mgmt-list"></div>
             </div>
 
             <div class="pw-card-section" id="pw-chat-history-section">
                 <div class="pw-row" style="margin-bottom:5px;">
-                    <label class="pw-section-label" style="display:flex; align-items:center; gap:8px;">
-                        <i class="fa-solid fa-comments"></i> 聊天记录设置
-                    </label>
+                    <label class="pw-section-label">聊天记录设置</label>
                     <span style="font-size:0.72em; opacity:0.5;">在主页面勾选启用</span>
                 </div>
                 <div id="pw-chat-history-body" style="display:flex; padding-top:5px; flex-direction:column; gap:8px;">
@@ -3474,16 +3469,7 @@ $(document).on('change.pw', '#pw-theme-select', function() {
 
     // === Avatar Reference System ===
 
-    $(document).on('change.pw', '#pw-avatar-ref-toggle', function () {
-        uiStateCache.avatarRef.enabled = $(this).prop('checked');
-        saveCurrentState();
-    });
-
     $(document).on('click.pw', '.pw-avatar-strip-img', function () {
-        if (!uiStateCache.avatarRef.enabled) {
-            uiStateCache.avatarRef.enabled = true;
-            $('#pw-avatar-ref-toggle').prop('checked', true);
-        }
         const id = $(this).data('avatar-id');
         const sel = uiStateCache.avatarRef.selectedIds;
         const idx = sel.indexOf(id);
@@ -3521,8 +3507,8 @@ $(document).on('change.pw', '#pw-theme-select', function() {
     });
 
     $(document).on('click.pw', '.pw-avatar-tag', function () {
-        const $item = $(this).closest('.pw-avatar-mgmt-item');
-        const imgId = $item.data('img-id');
+        const $card = $(this).closest('.pw-avatar-card');
+        const imgId = $card.data('img-id');
         const tag = $(this).data('tag');
         const img = avatarImagesCache.find(i => i.id === imgId);
         if (!img) return;
@@ -3534,17 +3520,52 @@ $(document).on('change.pw', '#pw-theme-select', function() {
         renderAvatarStrip();
     });
 
-    $(document).on('click.pw', '.pw-avatar-mgmt-del', function () {
-        const $item = $(this).closest('.pw-avatar-mgmt-item');
-        const imgId = $item.data('img-id');
+    $(document).on('click.pw', '.pw-avatar-card-del', function () {
+        const $card = $(this).closest('.pw-avatar-card');
+        const imgId = $card.data('img-id');
         const idx = avatarImagesCache.findIndex(i => i.id === imgId);
         if (idx >= 0) {
             avatarImagesCache.splice(idx, 1);
             uiStateCache.avatarRef.selectedIds = uiStateCache.avatarRef.selectedIds.filter(id => id !== imgId);
             saveAvatarImages();
             saveCurrentState();
-            $item.slideUp(200, () => { $item.remove(); renderAvatarStrip(); });
+            $card.fadeOut(200, () => { $card.remove(); renderAvatarStrip(); });
         }
+    });
+
+    $(document).on('click.pw', '.pw-avatar-card-name', function () {
+        const $card = $(this).closest('.pw-avatar-card');
+        const imgId = $card.data('img-id');
+        const img = avatarImagesCache.find(i => i.id === imgId);
+        if (!img) return;
+        const $name = $(this);
+        const currentName = img.name || '';
+        const $input = $(`<input type="text" class="pw-input" value="${currentName}" style="font-size:0.78em; padding:2px 4px; width:100%; text-align:center;">`);
+        $name.replaceWith($input);
+        $input.focus().select();
+        const save = () => {
+            const newName = $input.val().trim() || '未命名';
+            img.name = newName;
+            saveAvatarImages();
+            const $newName = $(`<span class="pw-avatar-card-name" title="点击编辑名称">${newName}</span>`);
+            $input.replaceWith($newName);
+        };
+        $input.on('blur', save).on('keydown', function(e) { if (e.key === 'Enter') save(); });
+    });
+
+    $(document).on('click.pw', '#pw-avatar-mgmt-collapse', function () {
+        const $body = $('#pw-avatar-mgmt-body');
+        const $icon = $(this).find('i');
+        $body.slideToggle(200);
+        $icon.toggleClass('fa-chevron-down fa-chevron-up');
+    });
+
+    $(document).on('click.pw', '#pw-avatar-add-btn', function () {
+        $('.pw-tab[data-tab="context"]').click();
+        setTimeout(() => {
+            const $section = $('#pw-avatar-mgmt-section');
+            if ($section.length) $section[0].scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }, 200);
     });
 
     renderAvatarMgmt();
