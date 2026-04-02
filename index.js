@@ -23,87 +23,6 @@ const STORAGE_KEY_AVATAR_IMAGES = 'pw_avatar_images_v1';
 const BUTTON_ID = 'pw_persona_tool_btn';
 const HISTORY_PER_PAGE = 20;
 
-const COZY_FOX_CSS = `
-/* ===== Cozy Fox Theme Override ===== */
-.pw-wrapper {
-    --pw-fox-accent: #7d9a56;
-    --pw-fox-border: rgba(175, 150, 110, 0.55);
-    --pw-fox-warm-bg: rgba(175, 150, 110, 0.04);
-}
-
-.pw-card-section {
-    border-style: dashed !important;
-    border-color: var(--pw-fox-border) !important;
-    background: var(--pw-fox-warm-bg) !important;
-}
-.pw-context-row {
-    border-style: dashed;
-    border-color: var(--pw-fox-border);
-    background: var(--pw-fox-warm-bg);
-}
-.pw-context-row.active {
-    border-color: var(--pw-fox-accent);
-    background: rgba(125, 154, 86, 0.05);
-}
-.pw-avatar-strip-img.selected {
-    border-color: var(--pw-fox-accent);
-    box-shadow: 0 0 8px rgba(125, 154, 86, 0.35);
-}
-.pw-avatar-add-btn { border-color: var(--pw-fox-border); }
-.pw-avatar-add-btn:hover { border-color: var(--pw-fox-accent); }
-.pw-avatar-tag.active {
-    border-color: var(--pw-fox-accent);
-    color: var(--pw-fox-accent);
-}
-#pw-chat-history-section {
-    border-style: dashed !important;
-    border-color: var(--pw-fox-border) !important;
-    background: var(--pw-fox-warm-bg) !important;
-}
-#pw-chat-history-section:has(#pw-chat-history-toggle:checked) {
-    border-color: var(--pw-fox-accent) !important;
-}
-.pw-chat-filter-section { border-color: var(--pw-fox-border); }
-.pw-chat-filter-header:hover { background: rgba(175, 150, 110, 0.06); }
-.pw-info-display { border-style: dashed; border-color: var(--pw-fox-border); }
-.pw-tag-chip { border-left-color: var(--pw-fox-accent); }
-.pw-tag-chip:hover { border-left-color: var(--pw-fox-accent); }
-.pw-tab.active { border-bottom-color: var(--pw-fox-accent); }
-.pw-btn.gen { background: var(--pw-fox-accent); }
-.pw-refine-btn-vertical { background: var(--pw-fox-accent); }
-.pw-input:focus, .pw-textarea:focus, .pw-select:focus {
-    border-color: var(--pw-fox-accent);
-    box-shadow: 0 0 5px rgba(125, 154, 86, 0.2);
-}
-.pw-wi-book { border-style: dashed; border-color: var(--pw-fox-border); }
-.pw-search-box { border-color: var(--pw-fox-border); }
-.pw-history-item { border-color: var(--pw-fox-border); }
-.pw-header { border-bottom-style: dashed; border-bottom-color: var(--pw-fox-border); position: relative; }
-.pw-footer { border-top-style: dashed; border-top-color: var(--pw-fox-border); }
-.pw-template-editor-area { border-style: dashed; border-color: var(--pw-fox-border); }
-.pw-template-toolbar { border-bottom-color: var(--pw-fox-border); }
-.pw-template-footer { border-top-color: var(--pw-fox-border); }
-.pw-diff-mode-btn.active { background: var(--pw-fox-accent) !important; }
-.pw-chat-token-badge { border-radius: 10px; }
-.pw-chat-tag-chip { border-color: var(--pw-fox-border); }
-.pw-chat-tag-chip:hover { border-color: var(--pw-fox-accent); background: rgba(125, 154, 86, 0.06); }
-
-.pw-header::after {
-    content: '';
-    position: absolute;
-    top: -18px; right: -8px;
-    width: 90px; height: 90px;
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 120 120'%3E%3Cellipse cx='60' cy='72' rx='32' ry='28' fill='%23d4915e'/%3E%3Cellipse cx='60' cy='78' rx='18' ry='13' fill='%23f5e6d0'/%3E%3Cpolygon points='30,50 22,12 48,38' fill='%23d4915e'/%3E%3Cpolygon points='90,50 98,12 72,38' fill='%23d4915e'/%3E%3Cpolygon points='32,44 26,18 46,36' fill='%23f5e6d0'/%3E%3Cpolygon points='88,44 94,18 74,36' fill='%23f5e6d0'/%3E%3Ccircle cx='48' cy='62' r='3.5' fill='%23433'/%3E%3Ccircle cx='72' cy='62' r='3.5' fill='%23433'/%3E%3Cellipse cx='60' cy='70' rx='4' ry='2.5' fill='%23433'/%3E%3Cpath d='M56,70 Q60,76 64,70' stroke='%23433' fill='none' stroke-width='1.5'/%3E%3Ccircle cx='48' cy='61' r='1' fill='%23fff'/%3E%3Ccircle cx='72' cy='61' r='1' fill='%23fff'/%3E%3Cellipse cx='38' cy='72' rx='6' ry='4' fill='%23e8a87c' opacity='0.4'/%3E%3Cellipse cx='82' cy='72' rx='6' ry='4' fill='%23e8a87c' opacity='0.4'/%3E%3Cpath d='M18,88 Q16,82 22,85 Q18,90 24,92' fill='%237d9a56' opacity='0.6'/%3E%3Cpath d='M14,94 Q12,88 18,91 Q14,96 20,98' fill='%23a0b572' opacity='0.5'/%3E%3Cpath d='M102,88 Q104,82 98,85 Q102,90 96,92' fill='%23c4813c' opacity='0.5'/%3E%3Cpath d='M98,95 Q100,89 95,92 Q98,97 92,96' fill='%23d4915e' opacity='0.4'/%3E%3C/svg%3E");
-    background-size: contain;
-    background-repeat: no-repeat;
-    opacity: 0.85;
-    pointer-events: none;
-    z-index: 0;
-}
-.pw-top-bar { position: relative; z-index: 1; }
-.pw-tabs { position: relative; z-index: 1; }
-`;
-
 // 1. 默认 User 模版 (主模版)
 const defaultYamlTemplate =
 `基本信息: 
@@ -1798,10 +1717,10 @@ async function openCreatorPopup() {
                 <span id="pw-avatar-add-btn" class="pw-avatar-add-btn" title="管理头像"><i class="fa-solid fa-plus"></i></span>
             </div>
 
-            <div class="pw-context-row ${chatHistEnabled ? 'active' : ''}" id="pw-chat-infer-row" style="cursor:pointer;">
+            <div class="pw-context-row ${chatHistEnabled ? 'active' : ''}" id="pw-chat-infer-row">
                 <input type="checkbox" id="pw-chat-infer-main-toggle" ${chatHistEnabled ? 'checked' : ''} style="display:none;">
-                <span class="pw-context-row-label">聊天记录注入</span>
-                <span class="pw-context-row-right" id="pw-chat-infer-right">
+                <span class="pw-context-row-label pw-chat-toggle-zone" style="cursor:pointer;">聊天记录注入</span>
+                <span class="pw-context-row-right pw-chat-settings-zone">
                     <span id="pw-chat-infer-summary" class="pw-context-row-hint">${chatHistEnabled ? (uiStateCache.chatHistory.preset === 'all' ? '全部' : '最近' + (uiStateCache.chatHistory.preset || '10') + '条') : '未启用'}</span>
                     <span id="pw-chat-token-badge" class="pw-chat-token-badge" style="display:none;"></span>
                 </span>
@@ -2597,14 +2516,6 @@ function bindEvents() {
                 cssContent = await res.text();
             } catch (e) {
                 cssContent = `/* Native Style v${CURRENT_VERSION} */\n.pw-wrapper { --pw-text-main: var(--smart-theme-body-color); ... }`;
-            }
-        } else if (currentThemeName === 'Cozy_Fox.css') {
-            try {
-                const res = await fetch(`scripts/extensions/third-party/${extensionName}/style.css?v=${CURRENT_VERSION}`);
-                cssContent = await res.text();
-                cssContent += '\n\n' + COZY_FOX_CSS;
-            } catch (e) {
-                cssContent = COZY_FOX_CSS;
             }
         } else { cssContent = customThemes[currentThemeName]; }
         if (!cssContent) return toastr.error("无法获取主题内容");
@@ -3548,19 +3459,25 @@ $(document).on('change.pw', '#pw-theme-select', function() {
         updateChatInferBadge();
     });
 
-    $(document).on('click.pw', '#pw-chat-infer-row', function (e) {
-        const $target = $(e.target);
-        const enabled = uiStateCache.chatHistory && uiStateCache.chatHistory.enabled;
-        if (enabled && ($target.closest('#pw-chat-infer-summary').length || $target.closest('#pw-chat-token-badge').length)) {
+    $(document).on('click.pw', '#pw-chat-infer-row .pw-chat-toggle-zone', function (e) {
+        e.stopPropagation();
+        const $cb = $('#pw-chat-infer-main-toggle');
+        $cb.prop('checked', !$cb.prop('checked')).trigger('change');
+    });
+
+    $(document).on('click.pw', '#pw-chat-infer-row .pw-chat-settings-zone', function (e) {
+        e.stopPropagation();
+        const enabled = $('#pw-chat-infer-main-toggle').prop('checked');
+        if (enabled) {
             $('.pw-tab[data-tab="context"]').click();
             setTimeout(() => {
                 const $section = $('#pw-chat-history-section');
                 if ($section.length) $section[0].scrollIntoView({ behavior: 'smooth', block: 'center' });
             }, 200);
-            return;
+        } else {
+            const $cb = $('#pw-chat-infer-main-toggle');
+            $cb.prop('checked', true).trigger('change');
         }
-        const $cb = $('#pw-chat-infer-main-toggle');
-        $cb.prop('checked', !$cb.prop('checked')).trigger('change');
     });
 
     // === Avatar Reference System ===
@@ -3812,28 +3729,31 @@ $(document).on('change.pw', '#pw-theme-select', function() {
     $(document).on('click.pw', '#pw-history-clear-all', function () { if (confirm("清空?")) { historyCache = []; saveData(); renderHistoryList(); } });
 }
 
+// 动态加载外部 CSS 文件 (用于 style.css)
 function loadThemeCSS(fileName) {
+    // [Fix 5] Clear custom style when loading file
     $('#pw-custom-style').remove();
-    $('#pw-theme-override').remove();
 
-    const versionQuery = `?v=${CURRENT_VERSION}`;
-    const baseHref = `scripts/extensions/third-party/${extensionName}/style.css${versionQuery}`;
+    const versionQuery = `?v=${CURRENT_VERSION}`; 
+    const href = `scripts/extensions/third-party/${extensionName}/${fileName}${versionQuery}`;
 
     if ($('#pw-style-link').length) {
-        $('#pw-style-link').attr('href', baseHref);
+        $('#pw-style-link').attr('href', href);
     } else {
-        $('<link>').attr('rel', 'stylesheet').attr('type', 'text/css')
-            .attr('href', baseHref).attr('id', 'pw-style-link').appendTo('head');
-    }
-
-    if (fileName === 'Cozy_Fox.css') {
-        $('<style id="pw-theme-override">').text(COZY_FOX_CSS).appendTo('head');
+        $('<link>')
+            .attr('rel', 'stylesheet')
+            .attr('type', 'text/css')
+            .attr('href', href)
+            .attr('id', 'pw-style-link')
+            .appendTo('head');
     }
 }
 
+// 应用自定义 CSS 内容 (用于导入的主题)
 function applyCustomTheme(cssContent) {
-    $('#pw-theme-override').remove();
-    $('#pw-style-link').remove();
+    // [Fix 5] Clear file link when loading custom
+    $('#pw-style-link').remove(); 
+    
     if ($('#pw-custom-style').length) $('#pw-custom-style').remove();
     $('<style id="pw-custom-style">').text(cssContent).appendTo('head');
 }
@@ -4370,5 +4290,5 @@ jQuery(async () => {
     addPersonaButton(); 
     bindEvents(); 
     loadThemeCSS('style.css'); // Default theme
-    console.log("[PW] Persona Weaver Loaded (v3.0.0)");
+    console.log("[PW] Persona Weaver Loaded (v2.7.2 - Hotfix)");
 });
