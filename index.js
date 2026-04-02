@@ -1002,9 +1002,9 @@ async function runGeneration(data, apiConfig, isTemplateMode = false) {
         if ($debugArea.length) $debugArea.val(debugText);
     };
 
-    // Fetch avatar if enabled (User mode only, not template mode)
+    // Fetch avatar if enabled (not template mode)
     let avatarBase64 = null;
-    const avatarRefEnabled = uiStateCache.avatarRef && !isNpcMode && !isTemplateMode;
+    const avatarRefEnabled = uiStateCache.avatarRef && !isTemplateMode;
     if (avatarRefEnabled) {
         avatarBase64 = await fetchAvatarAsBase64();
         if (avatarBase64) console.log("[PW] Avatar image loaded for multimodal request");
@@ -1025,9 +1025,12 @@ async function runGeneration(data, apiConfig, isTemplateMode = false) {
         if (wrappedWi && wrappedWi.trim().length > 0) promptArray.push({ role: 'system', content: wrappedWi });
 
         if (avatarBase64) {
+            const avatarHint = isNpcMode
+                ? `[Reference Image: The above image is provided as a visual reference for the NPC character(s). Use it to inform appearance descriptions in the persona.]`
+                : `[User Avatar Image: The above image is the user's current avatar/profile picture. Use it as visual reference for generating appearance-related descriptions in the persona.]`;
             promptArray.push({ role: 'user', content: [
                 { type: "image_url", image_url: { url: avatarBase64 } },
-                { type: "text", text: "[User Avatar Image: The above image is the user's current avatar/profile picture. Use it as visual reference for generating appearance-related descriptions in the persona.]\n\n" + userMessageContent }
+                { type: "text", text: avatarHint + "\n\n" + userMessageContent }
             ]});
         } else {
             promptArray.push({ role: 'user', content: userMessageContent });
@@ -1115,19 +1118,9 @@ async function runGeneration(data, apiConfig, isTemplateMode = false) {
                 return json.choices[0].message.content;
             } else {
                 if (window.TavernHelper && typeof window.TavernHelper.generateRaw === 'function') {
-                    const flatMessages = messages.map(m => {
-                        if (Array.isArray(m.content)) {
-                            const textParts = m.content.filter(b => b.type === 'text').map(b => b.text);
-                            return { ...m, content: textParts.join('\n') };
-                        }
-                        return m;
-                    });
-                    if (avatarBase64 && messages !== flatMessages) {
-                        console.warn("[PW] Avatar image stripped for TavernHelper path — use independent API for multimodal support");
-                    }
                     return await window.TavernHelper.generateRaw({
                         user_input: '', 
-                        ordered_prompts: flatMessages,
+                        ordered_prompts: messages,
                         overrides: { 
                             world_info_before: '', world_info_after: '', persona_description: '', 
                             char_description: '', char_personality: '', scenario: '', dialogue_examples: '',
@@ -1653,8 +1646,8 @@ async function openCreatorPopup() {
                 <span id="pw-chat-token-badge" class="pw-chat-token-badge" style="display:none;"></span>
             </div>
 
-            <div class="pw-avatar-ref-row" id="pw-avatar-ref-row" style="${isNpc ? 'display:none;' : ''}">
-                <label class="pw-avatar-ref-label" title="启用后将 User 头像图片一并发送给 AI，帮助生成更贴合外观的人设">
+            <div class="pw-avatar-ref-row" id="pw-avatar-ref-row">
+                <label class="pw-avatar-ref-label" title="启用后将头像图片一并发送给 AI，帮助生成更贴合外观的人设（需要模型支持多模态）">
                     <input type="checkbox" id="pw-avatar-ref-toggle" ${uiStateCache.avatarRef ? 'checked' : ''}>
                     <i class="fa-solid fa-image-portrait"></i> 头像参考
                 </label>
@@ -2328,12 +2321,10 @@ function bindEvents() {
         if (mode === 'npc') {
             $('#pw-btn-apply').hide();
             $('#pw-load-main-template').show();
-            $('#pw-avatar-ref-row').hide();
             toastr.info("已切换至 NPC 模式");
         } else {
             $('#pw-btn-apply').show();
             $('#pw-load-main-template').hide();
-            $('#pw-avatar-ref-row').show();
             toastr.info("已切换至 User 模式");
         }
         updateChatInferBadge();
@@ -3408,9 +3399,6 @@ $(document).on('change.pw', '#pw-theme-select', function() {
         uiStateCache.avatarRef = $(this).prop('checked');
         if (uiStateCache.avatarRef) {
             refreshAvatarPreview();
-            if ($('#pw-api-source').val() !== 'independent') {
-                toastr.warning("头像参考需要使用独立 API（支持多模态的模型）才能发送图片，酒馆内置 API 暂不支持图片传输", "提示", { timeOut: 5000 });
-            }
         } else {
             $('#pw-avatar-ref-preview').hide();
             $('#pw-avatar-ref-status').text('').hide();
@@ -3419,6 +3407,18 @@ $(document).on('change.pw', '#pw-theme-select', function() {
     });
 
     if (uiStateCache.avatarRef) refreshAvatarPreview();
+
+    // Auto-refresh avatar when user switches persona in SillyTavern
+    try {
+        const parentDoc = (window.parent || window).document;
+        const avatarBlock = parentDoc.querySelector('#user_avatar_block');
+        if (avatarBlock) {
+            const avatarObserver = new MutationObserver(() => {
+                if (uiStateCache.avatarRef) setTimeout(refreshAvatarPreview, 300);
+            });
+            avatarObserver.observe(avatarBlock, { attributes: true, subtree: true, attributeFilter: ['class'] });
+        }
+    } catch (e) { console.warn("[PW] Could not observe avatar changes:", e); }
 
     function updateChatInferSummary() {
         const conf = uiStateCache.chatHistory || {};
