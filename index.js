@@ -369,7 +369,7 @@ let lastRawResponse = "";
 let isProcessing = false;
 let currentGreetingsList = []; 
 let wiSelectionCache = {};
-let uiStateCache = { templateExpanded: true, theme: 'style.css', generationMode: 'user', generationPreset: 'current', chatHistory: { enabled: false, preset: '20', floorFrom: '', floorTo: '', excludeTags: [], includeTags: [] } }; 
+let uiStateCache = { templateExpanded: true, theme: 'style.css', generationMode: 'user', generationPreset: 'current', avatarRef: false, chatHistory: { enabled: false, preset: '20', floorFrom: '', floorTo: '', excludeTags: [], includeTags: [] } }; 
 let hasNewVersion = false;
 let customThemes = {}; 
 let historyPage = 1; 
@@ -705,6 +705,45 @@ function getActivePersonaDescription() {
     return "";
 }
 
+function getUserAvatarUrl() {
+    const parentWin = window.parent || window;
+    const parentDoc = parentWin.document;
+    const makeUrl = (filename) => {
+        if (!filename) return null;
+        if (filename.startsWith('http') || filename.startsWith('data:')) return filename;
+        const cleanName = filename.split(/[/\\]/).pop();
+        return `/User%20Avatars/${encodeURIComponent(cleanName)}?v=${Date.now()}`;
+    };
+    const selectedContainer = parentDoc.querySelector('#user_avatar_block .avatar-container.selected');
+    if (selectedContainer) {
+        const avatarId = selectedContainer.getAttribute('data-avatar-id');
+        if (avatarId) return makeUrl(avatarId);
+    }
+    if (parentWin.user_avatar) return makeUrl(parentWin.user_avatar);
+    const sidebarImg = parentDoc.getElementById('user_avatar_img');
+    if (sidebarImg && sidebarImg.src && !sidebarImg.src.includes('placeholder')) return sidebarImg.src;
+    return null;
+}
+
+async function fetchAvatarAsBase64() {
+    const url = getUserAvatarUrl();
+    if (!url) return null;
+    try {
+        const response = await fetch(url);
+        if (!response.ok) return null;
+        const blob = await response.blob();
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onloadend = () => resolve(reader.result);
+            reader.onerror = () => resolve(null);
+            reader.readAsDataURL(blob);
+        });
+    } catch (e) {
+        console.warn("[PW] Avatar fetch failed:", e);
+        return null;
+    }
+}
+
 function wrapInputForSafety(request, oldText, isRefine) {
     if (!request) return "";
     const safeRequest = request.replace(/"/g, "'");
@@ -951,13 +990,28 @@ async function runGeneration(data, apiConfig, isTemplateMode = false) {
         debugText += `=== 预设策略: ${uiStateCache.generationPreset === 'pure' ? '✨ 纯净模式 (Pure Mode)' : (uiStateCache.generationPreset === 'current' ? '跟随酒馆预设 (Default)' : uiStateCache.generationPreset)} ===\n\n`;
         messages.forEach((msg, idx) => {
             debugText += `[BLOCK ${idx + 1}: ${msg.role.toUpperCase()}]\n`;
-            debugText += `--- START ---\n${msg.content}\n--- END ---\n\n`;
+            if (Array.isArray(msg.content)) {
+                const textParts = msg.content.filter(b => b.type === 'text').map(b => b.text);
+                const hasImage = msg.content.some(b => b.type === 'image_url');
+                debugText += `--- START ---\n${hasImage ? '[📷 User Avatar Image Attached]\n' : ''}${textParts.join('\n')}\n--- END ---\n\n`;
+            } else {
+                debugText += `--- START ---\n${msg.content}\n--- END ---\n\n`;
+            }
         });
         const $debugArea = $('#pw-debug-preview');
         if ($debugArea.length) $debugArea.val(debugText);
     };
 
-    console.log(`[PW] Sending Prompt... Mode: ${isNpcMode ? 'NPC' : 'User'}`);
+    // Fetch avatar if enabled (User mode only, not template mode)
+    let avatarBase64 = null;
+    const avatarRefEnabled = uiStateCache.avatarRef && !isNpcMode && !isTemplateMode;
+    if (avatarRefEnabled) {
+        avatarBase64 = await fetchAvatarAsBase64();
+        if (avatarBase64) console.log("[PW] Avatar image loaded for multimodal request");
+        else console.warn("[PW] Avatar ref enabled but no image found");
+    }
+
+    console.log(`[PW] Sending Prompt... Mode: ${isNpcMode ? 'NPC' : 'User'}${avatarBase64 ? ' [+Avatar]' : ''}`);
     
     let responseContent = "";
     const controller = new AbortController();
@@ -969,9 +1023,17 @@ async function runGeneration(data, apiConfig, isTemplateMode = false) {
             promptArray.push({ role: 'system', content: activeSystemPrompt });
         }
         if (wrappedWi && wrappedWi.trim().length > 0) promptArray.push({ role: 'system', content: wrappedWi });
-        promptArray.push({ role: 'user', content: userMessageContent });
+
+        if (avatarBase64) {
+            promptArray.push({ role: 'user', content: [
+                { type: "image_url", image_url: { url: avatarBase64 } },
+                { type: "text", text: "[User Avatar Image: The above image is the user's current avatar/profile picture. Use it as visual reference for generating appearance-related descriptions in the persona.]\n\n" + userMessageContent }
+            ]});
+        } else {
+            promptArray.push({ role: 'user', content: userMessageContent });
+        }
         
-        const promptArrayNoPrefill = JSON.parse(JSON.stringify(promptArray));
+        const promptArrayNoPrefill = promptArray.map(m => ({ ...m }));
 
         if (prefillContent) promptArray.push({ role: 'assistant', content: prefillContent });
 
@@ -989,7 +1051,23 @@ async function runGeneration(data, apiConfig, isTemplateMode = false) {
                     url = `${baseUrl}/v1/messages`;
 
                     const systemParts = messages.filter(m => m.role === 'system').map(m => m.content);
-                    const nonSystem = messages.filter(m => m.role !== 'system');
+                    const nonSystem = messages.filter(m => m.role !== 'system').map(m => {
+                        if (Array.isArray(m.content)) {
+                            const anthropicContent = m.content.map(block => {
+                                if (block.type === 'image_url' && block.image_url?.url) {
+                                    const dataUrl = block.image_url.url;
+                                    const match = dataUrl.match(/^data:(image\/\w+);base64,(.+)$/);
+                                    if (match) {
+                                        return { type: 'image', source: { type: 'base64', media_type: match[1], data: match[2] } };
+                                    }
+                                }
+                                if (block.type === 'text') return { type: 'text', text: block.text };
+                                return block;
+                            });
+                            return { ...m, content: anthropicContent };
+                        }
+                        return m;
+                    });
 
                     headers = {
                         'Content-Type': 'application/json',
@@ -1037,9 +1115,19 @@ async function runGeneration(data, apiConfig, isTemplateMode = false) {
                 return json.choices[0].message.content;
             } else {
                 if (window.TavernHelper && typeof window.TavernHelper.generateRaw === 'function') {
+                    const flatMessages = messages.map(m => {
+                        if (Array.isArray(m.content)) {
+                            const textParts = m.content.filter(b => b.type === 'text').map(b => b.text);
+                            return { ...m, content: textParts.join('\n') };
+                        }
+                        return m;
+                    });
+                    if (avatarBase64 && messages !== flatMessages) {
+                        console.warn("[PW] Avatar image stripped for TavernHelper path — use independent API for multimodal support");
+                    }
                     return await window.TavernHelper.generateRaw({
                         user_input: '', 
-                        ordered_prompts: messages,
+                        ordered_prompts: flatMessages,
                         overrides: { 
                             world_info_before: '', world_info_after: '', persona_description: '', 
                             char_description: '', char_personality: '', scenario: '', dialogue_examples: '',
@@ -1140,7 +1228,7 @@ function loadData() {
     try { wiSelectionCache = JSON.parse(localStorage.getItem(STORAGE_KEY_WI_STATE)) || {}; } catch { wiSelectionCache = {}; }
     
     // [Updated] Load UI State with Preset info + chatHistory config
-    const defaultUiState = { templateExpanded: true, theme: 'style.css', generationMode: 'user', generationPreset: 'current', chatHistory: { enabled: false, preset: '20', floorFrom: '', floorTo: '', excludeTags: [], includeTags: [] } };
+    const defaultUiState = { templateExpanded: true, theme: 'style.css', generationMode: 'user', generationPreset: 'current', avatarRef: false, chatHistory: { enabled: false, preset: '20', floorFrom: '', floorTo: '', excludeTags: [], includeTags: [] } };
     try {
         uiStateCache = JSON.parse(localStorage.getItem(STORAGE_KEY_UI_STATE)) || defaultUiState;
         if (!uiStateCache.chatHistory) uiStateCache.chatHistory = { enabled: false, preset: '20', floorFrom: '', floorTo: '', excludeTags: [], includeTags: [] };
@@ -1563,6 +1651,15 @@ async function openCreatorPopup() {
                 </label>
                 <span id="pw-chat-infer-summary" class="pw-chat-infer-summary">${chatHistEnabled ? (uiStateCache.chatHistory.preset === 'all' ? '全部' : '最近' + (uiStateCache.chatHistory.preset || '10') + '条') : '默认最近10条'}</span>
                 <span id="pw-chat-token-badge" class="pw-chat-token-badge" style="display:none;"></span>
+            </div>
+
+            <div class="pw-avatar-ref-row" id="pw-avatar-ref-row" style="${isNpc ? 'display:none;' : ''}">
+                <label class="pw-avatar-ref-label" title="启用后将 User 头像图片一并发送给 AI，帮助生成更贴合外观的人设">
+                    <input type="checkbox" id="pw-avatar-ref-toggle" ${uiStateCache.avatarRef ? 'checked' : ''}>
+                    <i class="fa-solid fa-image-portrait"></i> 头像参考
+                </label>
+                <span class="pw-avatar-ref-status" id="pw-avatar-ref-status"></span>
+                <img id="pw-avatar-ref-preview" class="pw-avatar-ref-preview" src="" style="display:none;">
             </div>
 
             <textarea id="pw-request" class="pw-textarea pw-auto-height" placeholder="在此输入要求，或点击上方模版块插入参考结构（无需全部填满）...">${activeData.request}</textarea>
@@ -2231,10 +2328,12 @@ function bindEvents() {
         if (mode === 'npc') {
             $('#pw-btn-apply').hide();
             $('#pw-load-main-template').show();
+            $('#pw-avatar-ref-row').hide();
             toastr.info("已切换至 NPC 模式");
         } else {
             $('#pw-btn-apply').show();
             $('#pw-load-main-template').hide();
+            $('#pw-avatar-ref-row').show();
             toastr.info("已切换至 User 模式");
         }
         updateChatInferBadge();
@@ -3290,6 +3389,36 @@ $(document).on('change.pw', '#pw-theme-select', function() {
             if ($section.length) $section[0].scrollIntoView({ behavior: 'smooth', block: 'center' });
         }, 200);
     });
+
+    // === Avatar Reference Events ===
+    function refreshAvatarPreview() {
+        const url = getUserAvatarUrl();
+        const $preview = $('#pw-avatar-ref-preview');
+        const $status = $('#pw-avatar-ref-status');
+        if (url) {
+            $preview.attr('src', url).show();
+            $status.text('').hide();
+        } else {
+            $preview.hide();
+            $status.text('未检测到头像').show();
+        }
+    }
+
+    $(document).on('change.pw', '#pw-avatar-ref-toggle', function () {
+        uiStateCache.avatarRef = $(this).prop('checked');
+        if (uiStateCache.avatarRef) {
+            refreshAvatarPreview();
+            if ($('#pw-api-source').val() !== 'independent') {
+                toastr.warning("头像参考需要使用独立 API（支持多模态的模型）才能发送图片，酒馆内置 API 暂不支持图片传输", "提示", { timeOut: 5000 });
+            }
+        } else {
+            $('#pw-avatar-ref-preview').hide();
+            $('#pw-avatar-ref-status').text('').hide();
+        }
+        saveCurrentState();
+    });
+
+    if (uiStateCache.avatarRef) refreshAvatarPreview();
 
     function updateChatInferSummary() {
         const conf = uiStateCache.chatHistory || {};
