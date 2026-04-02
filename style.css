@@ -517,6 +517,43 @@
 }
 
 /* =========================================
+   Merge Diff View (Inline)
+========================================= */
+.pw-diff-merge-view { overflow-y: auto; height: 100%; padding-right: 5px; }
+#pw-diff-merge-list { display: flex; flex-direction: column; gap: 2px; }
+
+.pw-merge-block { border-radius: 4px; padding: 4px 8px; }
+.pw-merge-block.unchanged { opacity: 0.75; }
+.pw-merge-block.changed { background: rgba(128,128,128,0.08); border: 1px solid var(--pw-border); border-radius: 6px; padding: 8px; margin: 4px 0; }
+
+.pw-merge-key { font-weight: bold; color: var(--SmartThemeQuoteColor, #83c168); font-size: 0.95em; margin-bottom: 2px; }
+.pw-merge-badge { font-size: 0.7em; padding: 1px 6px; border-radius: 3px; font-weight: normal; margin-left: 6px; color: #fff; }
+.pw-merge-block .pw-merge-badge { background: var(--SmartThemeQuoteColor, #e8a04a); }
+
+.pw-merge-static { padding-left: 12px; }
+.pw-merge-static pre { margin: 0; white-space: pre-wrap; font-family: inherit; font-size: 0.9em; color: var(--pw-text-main); line-height: 1.5; }
+
+.pw-merge-versions { display: flex; flex-direction: column; gap: 4px; margin-top: 4px; }
+
+.pw-merge-version { position: relative; padding: 6px 8px 6px 32px; border-radius: 4px; cursor: pointer; transition: all 0.2s; border: 1px solid transparent; }
+
+.pw-merge-vlabel { position: absolute; left: 6px; top: 6px; font-size: 0.7em; font-weight: bold; padding: 1px 4px; border-radius: 3px; color: #fff; pointer-events: none; }
+.pw-merge-old .pw-merge-vlabel { background: #e06060; }
+.pw-merge-new .pw-merge-vlabel { background: var(--SmartThemeQuoteColor, #83c168); }
+
+/* Unselected version: strikethrough + faded */
+.pw-merge-version:not(.selected) { opacity: 0.45; }
+.pw-merge-version:not(.selected) .pw-merge-content pre { text-decoration: line-through; text-decoration-color: rgba(200,60,60,0.6); }
+.pw-merge-version:not(.selected):hover { opacity: 0.7; background: rgba(128,128,128,0.1); }
+
+/* Selected version: highlighted + editable */
+.pw-merge-version.selected { opacity: 1; border-color: var(--SmartThemeQuoteColor, #83c168); background: rgba(131, 193, 104, 0.06); }
+
+.pw-merge-content pre { margin: 0; white-space: pre-wrap; font-family: inherit; font-size: 0.9em; color: var(--pw-text-main); line-height: 1.5; }
+
+.pw-merge-textarea { width: 100%; background: transparent; border: none; color: var(--pw-text-main); font-family: inherit; font-size: 0.9em; resize: none; outline: none; line-height: 1.5; min-height: 40px; padding: 0; field-sizing: content; }
+
+/* =========================================
    System & Footer
 ========================================= */
 .pw-footer { margin-top: auto; padding: 8px 4px; border-top: 1px solid var(--pw-border); display: flex; justify-content: space-between; align-items: center; gap: 4px; flex-shrink: 0; background: rgba(128,128,128,0.1); }
