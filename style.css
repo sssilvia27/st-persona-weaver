@@ -750,6 +750,7 @@
     background: rgba(128,128,128,0.04);
     border: 1px solid var(--SmartThemeBorderColor);
     transition: all 0.2s;
+    cursor: pointer;
 }
 .pw-chat-infer-row:has(#pw-chat-infer-main-toggle:checked) {
     background: linear-gradient(135deg, rgba(100,149,237,0.10), rgba(100,149,237,0.03));
@@ -777,16 +778,6 @@
     flex: 1;
     text-align: right;
     white-space: nowrap;
-}
-.pw-chat-infer-settings-link {
-    cursor: pointer;
-    opacity: 0.4;
-    transition: opacity 0.15s;
-    font-size: 0.95em;
-}
-.pw-chat-infer-settings-link:hover {
-    opacity: 1;
-    color: cornflowerblue;
 }
 
 /* Scan Results Container */
