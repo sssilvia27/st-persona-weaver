@@ -1556,13 +1556,12 @@ async function openCreatorPopup() {
                 </div>
             </div>
 
-            <div class="pw-chat-infer-row">
+            <div class="pw-chat-infer-row" id="pw-chat-infer-row">
                 <label class="pw-chat-infer-check-label" title="启用后将基于聊天记录进行人设推断/更新">
                     <input type="checkbox" id="pw-chat-infer-main-toggle" ${chatHistEnabled ? 'checked' : ''}>
                     <i class="fa-solid fa-comments"></i> 聊天记录注入
                 </label>
                 <span id="pw-chat-infer-summary" class="pw-chat-infer-summary">${chatHistEnabled ? (uiStateCache.chatHistory.preset === 'all' ? '全部' : '最近' + (uiStateCache.chatHistory.preset || '10') + '条') : '默认最近10条'}</span>
-                <span id="pw-chat-infer-settings-link" class="pw-chat-infer-settings-link" title="前往参考页设置详细选项"><i class="fa-solid fa-sliders"></i></span>
                 <span id="pw-chat-token-badge" class="pw-chat-token-badge" style="display:none;"></span>
             </div>
 
@@ -1687,7 +1686,7 @@ async function openCreatorPopup() {
                     <span style="font-size:0.72em; opacity:0.5;">在主页面勾选启用</span>
                 </div>
                 <div id="pw-chat-history-body" style="display:flex; padding-top:5px; flex-direction:column; gap:8px;">
-                    <div class="pw-row" style="gap:6px; flex-wrap:nowrap;">
+                    <div class="pw-row" style="gap:6px; flex-wrap:nowrap; justify-content:flex-start;">
                         <label style="font-size:0.85em; white-space:nowrap; opacity:0.8;">消息范围</label>
                         <select id="pw-chat-preset" class="pw-input" style="flex:0 0 auto; width:auto; padding:4px 6px; font-size:0.85em;">
                             <option value="10">最近 10 条</option>
@@ -1696,7 +1695,7 @@ async function openCreatorPopup() {
                             <option value="all">全部</option>
                             <option value="custom">自定义层数</option>
                         </select>
-                        <div id="pw-chat-custom-range" style="display:none; flex:1; align-items:center; gap:4px;">
+                        <div id="pw-chat-custom-range" style="display:none; flex:0 0 auto; align-items:center; gap:4px;">
                             <input type="number" id="pw-chat-floor-from" class="pw-input" placeholder="从" style="width:55px; padding:4px; text-align:center; font-size:0.85em;">
                             <span style="opacity:0.6;">-</span>
                             <input type="number" id="pw-chat-floor-to" class="pw-input" placeholder="到" style="width:55px; padding:4px; text-align:center; font-size:0.85em;">
@@ -1706,7 +1705,7 @@ async function openCreatorPopup() {
 
                     <div class="pw-chat-filter-section">
                         <div class="pw-chat-filter-header" id="pw-chat-filter-toggle">
-                            <span style="font-size:0.85em; opacity:0.8;"><i class="fa-solid fa-tags"></i> 标签过滤 (AI回复)</span>
+                            <span style="font-size:0.85em; opacity:0.8;"><i class="fa-solid fa-tags"></i> 标签过滤 (char回复)</span>
                             <i class="fa-solid fa-chevron-down pw-chat-filter-arrow" style="transition:0.2s; font-size:0.75em; opacity:0.5;"></i>
                         </div>
                         <div id="pw-chat-filter-body" style="display:none;">
@@ -1724,7 +1723,7 @@ async function openCreatorPopup() {
                         <button class="pw-btn primary" id="pw-chat-preview-btn" style="flex:1; padding:5px; font-size:0.85em;"><i class="fa-solid fa-eye"></i> 预览抓取内容</button>
                         <button class="pw-btn" id="pw-chat-refresh-btn" style="padding:5px 8px; font-size:0.85em;" title="刷新token估算"><i class="fa-solid fa-rotate-right"></i></button>
                     </div>
-                    <div id="pw-chat-preview-area" style="display:none; max-height:200px; overflow-y:auto; padding:8px; background:var(--pw-paper-bg); border:1px solid var(--pw-border); border-radius:6px; font-size:0.8em; white-space:pre-wrap; line-height:1.5; text-align:left; color:var(--pw-text-main);"></div>
+                    <div id="pw-chat-preview-area" style="display:none; max-height:400px; overflow-y:auto; padding:8px; background:var(--pw-paper-bg); border:1px solid var(--pw-border); border-radius:6px; font-size:0.8em; white-space:pre-wrap; line-height:1.5; text-align:left; color:var(--pw-text-main);"></div>
                 </div>
             </div>
         </div>
@@ -3284,7 +3283,8 @@ $(document).on('change.pw', '#pw-theme-select', function() {
         updateChatInferBadge();
     });
 
-    $(document).on('click.pw', '#pw-chat-infer-settings-link', function () {
+    $(document).on('click.pw', '#pw-chat-infer-row', function (e) {
+        if ($(e.target).is('input[type="checkbox"]') || $(e.target).closest('.pw-chat-infer-check-label').length) return;
         $('.pw-tab[data-tab="context"]').click();
         setTimeout(() => {
             const $section = $('#pw-chat-history-section');
@@ -3936,10 +3936,13 @@ const renderWiBooks = async () => {
             }
         });
 
-        // Set initial indeterminate state based on saved selection
+        // Set initial indeterminate state: entries exist but list not yet expanded
+        // null = using defaults (some enabled), array with items = user saved partial selection
         const initSel = loadWiSelection(book);
-        if (initSel && initSel.length > 0) {
-            const $cb = $el.find('.pw-wi-select-all');
+        const $cb = $el.find('.pw-wi-select-all');
+        if (initSel === null) {
+            $cb.prop('indeterminate', true);
+        } else if (initSel.length > 0) {
             $cb.prop('indeterminate', true);
         }
 
