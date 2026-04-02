@@ -2229,16 +2229,15 @@ function bindEvents() {
 
         // 4. Update UI Buttons
         if (mode === 'npc') {
-            $('#pw-btn-gen').html('<i class="fa-solid fa-wand-magic-sparkles"></i> 生成 NPC 设定');
             $('#pw-btn-apply').hide();
             $('#pw-load-main-template').show();
             toastr.info("已切换至 NPC 模式");
         } else {
-            $('#pw-btn-gen').html('<i class="fa-solid fa-wand-magic-sparkles"></i> 生成 User 设定');
             $('#pw-btn-apply').show();
             $('#pw-load-main-template').hide();
             toastr.info("已切换至 User 模式");
         }
+        updateChatInferBadge();
     });
 
     // --- Header Toggles (Prompt) ---
@@ -3719,6 +3718,7 @@ const renderWiBooks = async () => {
         
         $el.find('.pw-wi-select-all').on('click', async function(e) {
             e.stopPropagation();
+            $(this).removeClass('pw-indeterminate').prop('indeterminate', false);
             const checked = $(this).prop('checked');
             const $list = $el.find('.pw-wi-list');
             
@@ -3937,13 +3937,10 @@ const renderWiBooks = async () => {
         });
 
         // Set initial indeterminate state: entries exist but list not yet expanded
-        // null = using defaults (some enabled), array with items = user saved partial selection
         const initSel = loadWiSelection(book);
         const $cb = $el.find('.pw-wi-select-all');
-        if (initSel === null) {
-            $cb.prop('indeterminate', true);
-        } else if (initSel.length > 0) {
-            $cb.prop('indeterminate', true);
+        if (initSel === null || (initSel.length > 0)) {
+            $cb.prop('indeterminate', true).addClass('pw-indeterminate');
         }
 
         container.append($el);
@@ -3957,11 +3954,11 @@ function updateWiHeaderCheckbox($bookEl) {
     const checked = $checks.filter(':checked').length;
     const $header = $bookEl.find('.pw-wi-select-all');
     if (checked === 0) {
-        $header.prop('checked', false).prop('indeterminate', false);
+        $header.prop('checked', false).prop('indeterminate', false).removeClass('pw-indeterminate');
     } else if (checked === total) {
-        $header.prop('checked', true).prop('indeterminate', false);
+        $header.prop('checked', true).prop('indeterminate', false).removeClass('pw-indeterminate');
     } else {
-        $header.prop('checked', false).prop('indeterminate', true);
+        $header.prop('checked', false).prop('indeterminate', true).addClass('pw-indeterminate');
     }
 }
 
