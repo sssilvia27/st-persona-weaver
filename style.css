@@ -651,15 +651,7 @@
 /* Chat History Reference Section                  */
 /* =============================================== */
 #pw-chat-history-section {
-    border: 1px dashed var(--SmartThemeBorderColor);
-    border-radius: 8px;
-    padding: 10px 12px;
-    background: linear-gradient(135deg, rgba(100,149,237,0.04), rgba(100,149,237,0.01));
     transition: border-color 0.2s;
-}
-#pw-chat-history-section:has(#pw-chat-history-toggle:checked) {
-    border-color: rgba(100,149,237,0.5);
-    background: linear-gradient(135deg, rgba(100,149,237,0.08), rgba(100,149,237,0.02));
 }
 
 #pw-chat-history-body {
@@ -794,6 +786,7 @@
     border: 1px solid var(--pw-border);
     transition: all 0.2s;
     opacity: 0.55;
+    cursor: pointer;
 }
 .pw-context-row.active {
     opacity: 1;
