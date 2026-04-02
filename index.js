@@ -3459,12 +3459,6 @@ $(document).on('change.pw', '#pw-theme-select', function() {
         updateChatInferBadge();
     });
 
-    $(document).on('click.pw', '#pw-chat-infer-row .pw-chat-toggle-zone', function (e) {
-        e.stopPropagation();
-        const $cb = $('#pw-chat-infer-main-toggle');
-        $cb.prop('checked', !$cb.prop('checked')).trigger('change');
-    });
-
     $(document).on('click.pw', '#pw-chat-infer-row .pw-chat-settings-zone', function (e) {
         e.stopPropagation();
         const enabled = $('#pw-chat-infer-main-toggle').prop('checked');
@@ -3478,6 +3472,12 @@ $(document).on('change.pw', '#pw-theme-select', function() {
             const $cb = $('#pw-chat-infer-main-toggle');
             $cb.prop('checked', true).trigger('change');
         }
+    });
+
+    $(document).on('click.pw', '#pw-chat-infer-row', function (e) {
+        if ($(e.target).closest('.pw-chat-settings-zone').length) return;
+        const $cb = $('#pw-chat-infer-main-toggle');
+        $cb.prop('checked', !$cb.prop('checked')).trigger('change');
     });
 
     // === Avatar Reference System ===
