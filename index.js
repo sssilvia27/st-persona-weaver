@@ -1443,27 +1443,19 @@ async function openCreatorPopup() {
 
     <!-- Diff Overlay -->
     <div id="pw-diff-overlay" class="pw-diff-container" style="display:none;">
-        <div class="pw-diff-tabs-bar">
-            <div class="pw-diff-tab active" data-view="merge">
-                <div>最终预览</div><div class="pw-tab-sub">智能合并</div>
-            </div>
-            <div class="pw-diff-tab" data-view="raw">
-                <div>新版原文</div><div class="pw-tab-sub">查看/编辑</div>
-            </div>
-            <div class="pw-diff-tab" data-view="old-raw">
-                <div>原版原文</div><div class="pw-tab-sub">查看/编辑</div>
-            </div>
+        <div class="pw-diff-toolbar">
+            <button class="pw-diff-mode-btn active" data-mode="all"><i class="fa-solid fa-arrows-left-right"></i> 交互对比</button>
+            <button class="pw-diff-mode-btn" data-mode="new"><i class="fa-solid fa-file-circle-plus"></i> 只看新版</button>
+            <button class="pw-diff-mode-btn" data-mode="old"><i class="fa-solid fa-file-lines"></i> 只看原版</button>
+            <button class="pw-diff-mode-btn" data-mode="final"><i class="fa-solid fa-eye"></i> 最终预览</button>
+        </div>
+        <div id="pw-diff-hint" class="pw-diff-hint">
+            <i class="fa-solid fa-circle-info"></i> 点击<span style="color:#d9534f;">红色(旧)</span>/<span style="color:#5cb85c;">绿色(新)</span>高亮文字可切换保留哪个版本
         </div>
         
         <div class="pw-diff-content-area">
             <div id="pw-diff-merge-view" class="pw-diff-merge-view">
-                <div id="pw-diff-merge-list"></div>
-            </div>
-            <div id="pw-diff-raw-view" class="pw-diff-raw-view" style="display:none;">
-                <textarea id="pw-diff-raw-textarea" class="pw-diff-raw-textarea" spellcheck="false"></textarea>
-            </div>
-            <div id="pw-diff-old-raw-view" class="pw-diff-raw-view" style="display:none;">
-                <textarea id="pw-diff-old-raw-textarea" class="pw-diff-raw-textarea" spellcheck="false"></textarea>
+                <div id="pw-diff-merge-list" class="pw-diff-mode-all"></div>
             </div>
         </div>
 
@@ -1759,57 +1751,113 @@ const savedTheme = uiStateCache.theme || 'style.css';
 // ============================================================================
 // 新增：独立的 Diff 渲染函数 (供润色和重Roll复用)
 // ============================================================================
-function renderDiffComparison(oldText, newText) {
-    $('#pw-diff-raw-textarea').val(newText);
-    $('#pw-diff-old-raw-textarea').val(oldText);
+function _esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 
-    const oldMap = parseYamlToBlocks(oldText);
-    const newMap = parseYamlToBlocks(newText);
-    const allKeys = [...new Set([...oldMap.keys(), ...newMap.keys()])];
-
-    const $merge = $('#pw-diff-merge-list').empty();
-    let changeCount = 0;
-
-    allKeys.forEach(key => {
-        const matchedKeyInOld = findMatchingKey(key, oldMap) || key;
-        const matchedKeyInNew = findMatchingKey(key, newMap) || key;
-        const valOld = oldMap.get(matchedKeyInOld) || "";
-        const valNew = newMap.get(matchedKeyInNew) || "";
-
-        const isChanged = valOld.trim() !== valNew.trim();
-        if (isChanged) changeCount++;
-        if (!valOld && !valNew) return;
-
-        if (!isChanged) {
-            $merge.append(`<div class="pw-merge-block unchanged" data-key="${key}"><div class="pw-merge-key">${key}:</div><div class="pw-merge-static"><pre>${_esc(valNew)}</pre></div></div>`);
-            return; // skip rest for unchanged
+function computeDiffBlocks(oldText, newText) {
+    const tokenize = (text) => {
+        const tokens = [];
+        let current = '';
+        for (let i = 0; i < text.length; i++) {
+            current += text[i];
+            if (/[，。！？；\n,.!?;：]/.test(text[i])) {
+                tokens.push(current);
+                current = '';
+            }
         }
-        const badge = !valOld ? '新增' : !valNew ? '删除' : '修改';
-        $merge.append(`<div class="pw-merge-block changed" data-key="${key}"><div class="pw-merge-key">${key}: <span class="pw-merge-badge">${badge}</span></div><div class="pw-merge-versions"><div class="pw-merge-version pw-merge-old" data-role="old" title="点击使用旧版本"><span class="pw-merge-vlabel">旧</span><div class="pw-merge-content"><pre>${_esc(valOld || '(无)')}</pre></div></div><div class="pw-merge-version pw-merge-new selected" data-role="new" title="点击使用新版本"><span class="pw-merge-vlabel">新</span><textarea class="pw-merge-textarea">${valNew || '(删除)'}</textarea></div></div></div>`);
-    });
+        if (current) tokens.push(current);
+        return tokens;
+    };
 
-    // Toggle old/new selection per changed block
-    $merge.off('click.toggle').on('click.toggle', '.pw-merge-version', function() {
-        const $block = $(this).closest('.pw-merge-block');
-        if ($block.hasClass('unchanged') || $(this).hasClass('selected')) return;
-        const $cur = $block.find('.pw-merge-version.selected');
-        const curVal = $cur.find('.pw-merge-textarea').val() || $cur.find('pre').text() || '';
-        const clickVal = $(this).find('pre').text() || $(this).find('.pw-merge-textarea').val() || '';
-        $cur.removeClass('selected');
-        $cur.find('.pw-merge-textarea').remove();
-        if (!$cur.find('.pw-merge-content').length) $cur.append('<div class="pw-merge-content"><pre>' + _esc(curVal) + '</pre></div>');
-        $(this).addClass('selected');
-        $(this).find('.pw-merge-content').remove();
-        if (!$(this).find('.pw-merge-textarea').length) $(this).append('<textarea class="pw-merge-textarea">' + clickVal + '</textarea>');
-    });
+    const oldArr = tokenize(oldText);
+    const newArr = tokenize(newText);
+    let m = oldArr.length, n = newArr.length;
 
-    if (changeCount === 0 && !newText) {
-        toastr.warning('\u8fd4\u56de\u5185\u5bb9\u4e3a\u7a7a\uff0c\u8bf7\u5207\u6362\u5230\u65b0\u7248\u539f\u6587\u67e5\u770b');
-    } else if (changeCount === 0) {
-        toastr.info('\u6ca1\u6709\u68c0\u6d4b\u5230\u5185\u5bb9\u53d8\u5316');
+    let dp = Array(m + 1).fill(0).map(() => Array(n + 1).fill(0));
+    for (let i = 1; i <= m; i++) {
+        for (let j = 1; j <= n; j++) {
+            if (oldArr[i - 1] === newArr[j - 1]) dp[i][j] = dp[i - 1][j - 1] + 1;
+            else dp[i][j] = Math.max(dp[i - 1][j], dp[i][j - 1]);
+        }
     }
+
+    let i = m, j = n;
+    let result = [];
+    while (i > 0 || j > 0) {
+        if (i > 0 && j > 0 && oldArr[i - 1] === newArr[j - 1]) {
+            result.unshift({ type: 'equal', value: oldArr[i - 1] });
+            i--; j--;
+        } else if (j > 0 && (i === 0 || dp[i][j - 1] >= dp[i - 1][j])) {
+            result.unshift({ type: 'insert', value: newArr[j - 1] });
+            j--;
+        } else {
+            result.unshift({ type: 'delete', value: oldArr[i - 1] });
+            i--;
+        }
+    }
+
+    let blocks = [];
+    let currentBlock = null;
+    result.forEach(r => {
+        if (r.type === 'equal') {
+            if (currentBlock) { blocks.push(currentBlock); currentBlock = null; }
+            blocks.push({ type: 'equal', value: r.value });
+        } else {
+            if (!currentBlock) currentBlock = { type: 'diff', oldText: '', newText: '', active: 'new' };
+            if (r.type === 'delete') currentBlock.oldText += r.value;
+            if (r.type === 'insert') currentBlock.newText += r.value;
+        }
+    });
+    if (currentBlock) blocks.push(currentBlock);
+    return blocks;
 }
-function _esc(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+let currentDiffBlocks = [];
+
+function renderDiffComparison(oldText, newText) {
+    currentDiffBlocks = computeDiffBlocks(oldText, newText);
+    renderInlineDiff();
+    $('#pw-diff-merge-list').removeClass('pw-diff-mode-all pw-diff-mode-new pw-diff-mode-old pw-diff-mode-final').addClass('pw-diff-mode-all');
+    $('.pw-diff-mode-btn').removeClass('active');
+    $('.pw-diff-mode-btn[data-mode="all"]').addClass('active');
+    $('#pw-diff-hint').show();
+}
+
+function renderInlineDiff() {
+    let html = '';
+    currentDiffBlocks.forEach((block, index) => {
+        if (block.type === 'equal') {
+            html += `<span>${_esc(block.value)}</span>`;
+        } else {
+            const isActiveOld = block.active === 'old';
+            const isActiveNew = block.active === 'new';
+            html += `<span class="pw-diff-group" data-index="${index}">`;
+            if (block.oldText) {
+                html += `<span class="pw-idiff-old ${isActiveOld ? 'active' : 'inactive'}" data-idx="${index}" title="点击保留旧版">${_esc(block.oldText)}</span>`;
+            }
+            if (block.newText) {
+                html += `<span class="pw-idiff-new ${isActiveNew ? 'active' : 'inactive'}" data-idx="${index}" title="点击保留新版">${_esc(block.newText)}</span>`;
+            }
+            html += `</span>`;
+        }
+    });
+
+    const $container = $('#pw-diff-merge-list');
+    $container.html(html);
+
+    let changeCount = currentDiffBlocks.filter(b => b.type === 'diff').length;
+    if (changeCount === 0) toastr.info("没有检测到内容变化");
+}
+
+function assembleDiffResult() {
+    let text = '';
+    currentDiffBlocks.forEach(block => {
+        if (block.type === 'equal') text += block.value;
+        else if (block.active === 'old') text += block.oldText;
+        else text += block.newText;
+    });
+    return text;
+}
+
 function bindEvents() {
     if (window.stPersonaWeaverBound) return;
     window.stPersonaWeaverBound = true;
@@ -2510,21 +2558,29 @@ $(document).on('change.pw', '#pw-theme-select', function() {
         $('#pw-refine-input').removeClass('expanded');
     });
 
-    // --- Diff View Logic ---
-    $(document).on('click.pw', '.pw-diff-tab', function () {
-        $('.pw-diff-tab').removeClass('active');
+    // --- Diff View Logic (Sub-view Mode Switching) ---
+    $(document).on('click.pw', '.pw-diff-mode-btn', function () {
+        $('.pw-diff-mode-btn').removeClass('active');
         $(this).addClass('active');
-        const view = $(this).data('view');
-        
-        $('#pw-diff-merge-view, #pw-diff-raw-view, #pw-diff-old-raw-view').hide();
+        const mode = $(this).data('mode');
+        const $list = $('#pw-diff-merge-list');
+        $list.removeClass('pw-diff-mode-all pw-diff-mode-new pw-diff-mode-old pw-diff-mode-final').addClass('pw-diff-mode-' + mode);
+        $('#pw-diff-hint').toggle(mode === 'all');
+    });
 
-        if (view === 'merge') { 
-            $('#pw-diff-merge-view').show();
-        } else if (view === 'raw') { 
-            $('#pw-diff-raw-view').show();
-        } else if (view === 'old-raw') {
-            $('#pw-diff-old-raw-view').show();
-        }
+    $(document).on('click.pw', '.pw-idiff-old', function () {
+        if (!$('#pw-diff-merge-list').hasClass('pw-diff-mode-all')) return;
+        const idx = $(this).data('idx');
+        currentDiffBlocks[idx].active = 'old';
+        $(this).addClass('active').removeClass('inactive');
+        $(this).siblings('.pw-idiff-new').addClass('inactive').removeClass('active');
+    });
+    $(document).on('click.pw', '.pw-idiff-new', function () {
+        if (!$('#pw-diff-merge-list').hasClass('pw-diff-mode-all')) return;
+        const idx = $(this).data('idx');
+        currentDiffBlocks[idx].active = 'new';
+        $(this).addClass('active').removeClass('inactive');
+        $(this).siblings('.pw-idiff-old').addClass('inactive').removeClass('active');
     });
 
     // Refine (Persona)
@@ -2572,7 +2628,6 @@ $(document).on('change.pw', '#pw-theme-select', function() {
 
             $('#pw-diff-overlay').data('source', 'persona');
 
-            $('.pw-diff-tab[data-view="merge"]').click();
             $('#pw-diff-overlay').fadeIn();
             $('#pw-refine-input').val(''); // 清空输入框
         } catch (e) { 
@@ -2622,8 +2677,6 @@ $(document).on('change.pw', '#pw-theme-select', function() {
             // 复用渲染函数，原地刷新 Diff 界面
             renderDiffComparison(oldText, responseText);
             
-            // 确保切回对比面板
-            $('.pw-diff-tab[data-view="merge"]').click(); 
             toastr.success("已重新生成并更新对比！");
 
         } catch (e) {
@@ -2636,35 +2689,8 @@ $(document).on('change.pw', '#pw-theme-select', function() {
     });
 
     $(document).on('click.pw', '#pw-diff-confirm', function () {
-        const activeTab = $('.pw-diff-tab.active').data('view');
-        
-        let finalContent = "";
-
-        if (activeTab === 'raw') {
-            finalContent = $('#pw-diff-raw-textarea').val();
-        } else if (activeTab === 'old-raw') {
-            finalContent = $('#pw-diff-old-raw-textarea').val();
-        } else {
-            // Assemble from merge view: each block contributes its selected value
-            let finalLines = [];
-            $('.pw-merge-block').each(function () {
-                const key = $(this).data('key');
-                let val = '';
-                if ($(this).hasClass('unchanged')) {
-                    val = $(this).find('.pw-merge-static pre').text().trimEnd();
-                } else {
-                    const $sel = $(this).find('.pw-merge-version.selected');
-                    val = ($sel.find('.pw-merge-textarea').val() || $sel.find('pre').text() || '').trimEnd();
-                }
-                if (val && val !== "(删除)" && val !== "(无)") {
-                    if (val.includes('\n') || val.startsWith('  ')) finalLines.push(`${key}:\n${val}`);
-                    else finalLines.push(`${key}: ${val.trim()}`);
-                }
-            });
-            finalContent = finalLines.join('\n\n');
-        }
+        const finalContent = assembleDiffResult();
         $('#pw-result-text').val(finalContent).trigger('input');
-
         $('#pw-diff-overlay').fadeOut();
         saveCurrentState();
         toastr.success("修改已应用");
