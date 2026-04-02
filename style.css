@@ -738,22 +738,55 @@
 #pw-chat-preview-area::-webkit-scrollbar { width: 5px; }
 #pw-chat-preview-area::-webkit-scrollbar-thumb { background: rgba(128,128,128,0.3); border-radius: 3px; }
 
-/* Chat Infer Badge (Main View) */
-.pw-chat-infer-badge {
+/* Chat Infer Row (Main View) */
+.pw-chat-infer-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 10px;
+    margin: 6px 0;
+    border-radius: 8px;
+    font-size: 0.82em;
+    background: rgba(128,128,128,0.04);
+    border: 1px solid var(--SmartThemeBorderColor);
+    transition: all 0.2s;
+}
+.pw-chat-infer-row:has(#pw-chat-infer-main-toggle:checked) {
+    background: linear-gradient(135deg, rgba(100,149,237,0.10), rgba(100,149,237,0.03));
+    border-color: rgba(100,149,237,0.4);
+}
+.pw-chat-infer-check-label {
     display: flex;
     align-items: center;
     gap: 6px;
-    padding: 6px 12px;
-    margin-bottom: 8px;
-    border-radius: 8px;
-    font-size: 0.82em;
-    background: linear-gradient(135deg, rgba(100,149,237,0.12), rgba(100,149,237,0.04));
-    border: 1px solid rgba(100,149,237,0.3);
-    color: cornflowerblue;
-    animation: pw-fade-in 0.25s ease;
+    cursor: pointer;
+    user-select: none;
+    white-space: nowrap;
+    color: var(--SmartThemeBodyColor);
 }
-.pw-chat-infer-badge i {
+.pw-chat-infer-check-label input[type="checkbox"] {
+    transform: scale(1.15);
+    cursor: pointer;
+}
+.pw-chat-infer-check-label:has(input:checked) {
+    color: cornflowerblue;
+}
+.pw-chat-infer-summary {
+    font-size: 0.9em;
+    opacity: 0.55;
+    flex: 1;
+    text-align: right;
+    white-space: nowrap;
+}
+.pw-chat-infer-settings-link {
+    cursor: pointer;
+    opacity: 0.4;
+    transition: opacity 0.15s;
     font-size: 0.95em;
+}
+.pw-chat-infer-settings-link:hover {
+    opacity: 1;
+    color: cornflowerblue;
 }
 
 /* Scan Results Container */
