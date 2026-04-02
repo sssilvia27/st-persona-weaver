@@ -1444,13 +1444,11 @@ async function openCreatorPopup() {
     <!-- Diff Overlay -->
     <div id="pw-diff-overlay" class="pw-diff-container" style="display:none;">
         <div class="pw-diff-toolbar">
-            <button class="pw-diff-mode-btn active" data-mode="all"><i class="fa-solid fa-arrows-left-right"></i> 交互对比</button>
-            <button class="pw-diff-mode-btn" data-mode="new"><i class="fa-solid fa-file-circle-plus"></i> 只看新版</button>
-            <button class="pw-diff-mode-btn" data-mode="old"><i class="fa-solid fa-file-lines"></i> 只看原版</button>
-            <button class="pw-diff-mode-btn" data-mode="final"><i class="fa-solid fa-eye"></i> 最终预览</button>
-        </div>
-        <div id="pw-diff-hint" class="pw-diff-hint">
-            <i class="fa-solid fa-circle-info"></i> 点击<span style="color:#d9534f;">红色(旧)</span>/<span style="color:#5cb85c;">绿色(新)</span>高亮文字可切换保留哪个版本
+            <span id="pw-diff-hint" class="pw-diff-hint-inline"><i class="fa-solid fa-circle-info"></i> 点击高亮文字切换版本</span>
+            <div style="flex:1;"></div>
+            <button class="pw-diff-mode-btn" data-mode="old"><i class="fa-solid fa-file-lines"></i> 原版</button>
+            <button class="pw-diff-mode-btn" data-mode="new"><i class="fa-solid fa-file-circle-plus"></i> 新版</button>
+            <button class="pw-diff-mode-btn" data-mode="final"><i class="fa-solid fa-eye"></i> 最终</button>
         </div>
         
         <div class="pw-diff-content-area">
@@ -1816,9 +1814,8 @@ let currentDiffBlocks = [];
 function renderDiffComparison(oldText, newText) {
     currentDiffBlocks = computeDiffBlocks(oldText, newText);
     renderInlineDiff();
-    $('#pw-diff-merge-list').removeClass('pw-diff-mode-all pw-diff-mode-new pw-diff-mode-old pw-diff-mode-final').addClass('pw-diff-mode-all');
+    $('#pw-diff-merge-list').removeClass('pw-diff-mode-new pw-diff-mode-old pw-diff-mode-final').addClass('pw-diff-mode-all');
     $('.pw-diff-mode-btn').removeClass('active');
-    $('.pw-diff-mode-btn[data-mode="all"]').addClass('active');
     $('#pw-diff-hint').show();
 }
 
@@ -1832,10 +1829,10 @@ function renderInlineDiff() {
             const isActiveNew = block.active === 'new';
             html += `<span class="pw-diff-group" data-index="${index}">`;
             if (block.oldText) {
-                html += `<span class="pw-idiff-old ${isActiveOld ? 'active' : 'inactive'}" data-idx="${index}" title="点击保留旧版">${_esc(block.oldText)}</span>`;
+                html += `<span class="pw-idiff-old ${isActiveOld ? 'active' : 'inactive'}" ${isActiveOld ? 'contenteditable="true"' : ''} data-idx="${index}" title="点击保留旧版">${_esc(block.oldText)}</span>`;
             }
             if (block.newText) {
-                html += `<span class="pw-idiff-new ${isActiveNew ? 'active' : 'inactive'}" data-idx="${index}" title="点击保留新版">${_esc(block.newText)}</span>`;
+                html += `<span class="pw-idiff-new ${isActiveNew ? 'active' : 'inactive'}" ${isActiveNew ? 'contenteditable="true"' : ''} data-idx="${index}" title="点击保留新版">${_esc(block.newText)}</span>`;
             }
             html += `</span>`;
         }
@@ -2560,27 +2557,44 @@ $(document).on('change.pw', '#pw-theme-select', function() {
 
     // --- Diff View Logic (Sub-view Mode Switching) ---
     $(document).on('click.pw', '.pw-diff-mode-btn', function () {
+        const $list = $('#pw-diff-merge-list');
+        if ($(this).hasClass('active')) {
+            $(this).removeClass('active');
+            $list.removeClass('pw-diff-mode-new pw-diff-mode-old pw-diff-mode-final').addClass('pw-diff-mode-all');
+            $('#pw-diff-hint').show();
+            return;
+        }
         $('.pw-diff-mode-btn').removeClass('active');
         $(this).addClass('active');
         const mode = $(this).data('mode');
-        const $list = $('#pw-diff-merge-list');
         $list.removeClass('pw-diff-mode-all pw-diff-mode-new pw-diff-mode-old pw-diff-mode-final').addClass('pw-diff-mode-' + mode);
-        $('#pw-diff-hint').toggle(mode === 'all');
+        $('#pw-diff-hint').hide();
     });
 
     $(document).on('click.pw', '.pw-idiff-old', function () {
         if (!$('#pw-diff-merge-list').hasClass('pw-diff-mode-all')) return;
+        if ($(this).hasClass('active')) return;
         const idx = $(this).data('idx');
         currentDiffBlocks[idx].active = 'old';
-        $(this).addClass('active').removeClass('inactive');
-        $(this).siblings('.pw-idiff-new').addClass('inactive').removeClass('active');
+        $(this).addClass('active').removeClass('inactive').attr('contenteditable', 'true');
+        $(this).siblings('.pw-idiff-new').addClass('inactive').removeClass('active').removeAttr('contenteditable');
     });
     $(document).on('click.pw', '.pw-idiff-new', function () {
         if (!$('#pw-diff-merge-list').hasClass('pw-diff-mode-all')) return;
+        if ($(this).hasClass('active')) return;
         const idx = $(this).data('idx');
         currentDiffBlocks[idx].active = 'new';
-        $(this).addClass('active').removeClass('inactive');
-        $(this).siblings('.pw-idiff-old').addClass('inactive').removeClass('active');
+        $(this).addClass('active').removeClass('inactive').attr('contenteditable', 'true');
+        $(this).siblings('.pw-idiff-old').addClass('inactive').removeClass('active').removeAttr('contenteditable');
+    });
+
+    $(document).on('input.pw', '.pw-idiff-old.active[contenteditable]', function () {
+        const idx = $(this).data('idx');
+        if (idx !== undefined) currentDiffBlocks[idx].oldText = $(this).text();
+    });
+    $(document).on('input.pw', '.pw-idiff-new.active[contenteditable]', function () {
+        const idx = $(this).data('idx');
+        if (idx !== undefined) currentDiffBlocks[idx].newText = $(this).text();
     });
 
     // Refine (Persona)
