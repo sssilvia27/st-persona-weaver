@@ -288,7 +288,7 @@
     resize: vertical; outline: none; white-space: pre-wrap; margin-bottom: 0;
 }
 .pw-refine-toolbar { display: flex; flex-direction: row; gap: 0; align-items: stretch; background: rgba(128,128,128,0.1); border: 1px solid var(--pw-border); border-top: none; border-radius: 0 0 6px 6px; margin-bottom: 5px; overflow: hidden; }
-.pw-refine-input { flex: 1; border: none; background: transparent; padding: 10px; font-size: 0.95em; color: var(--pw-text-main); resize: none; overflow-y: auto; min-height: 36px; max-height: 36px; line-height: 1.5; transition: min-height 0.3s ease, max-height 0.3s ease; }
+.pw-refine-input { flex: 1; border: none; background: transparent; padding: 10px; font-size: 0.95em; color: var(--pw-text-main); resize: none; overflow-y: auto; min-height: 44px; max-height: 44px; line-height: 1.5; transition: min-height 0.3s ease, max-height 0.3s ease; }
 .pw-refine-input.expanded { min-height: 200px; max-height: none; }
 .pw-refine-btn-vertical { width: 44px; cursor: pointer; background: var(--SmartThemeQuoteColor, #83c168); border-left: none; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px; color: #fff; font-weight: bold; transition: all 0.2s; flex-shrink: 0; }
 .pw-refine-btn-vertical:hover { filter: brightness(1.1); }
@@ -323,7 +323,7 @@
 .pw-remove-book-icon { color: var(--pw-danger); cursor: pointer; transition: transform 0.2s; }
 .pw-remove-book-icon:hover { transform: scale(1.1); }
 .pw-bound-status { color: var(--pw-text-main) !important; opacity: 0.6; font-size: 0.8em; margin-left: 5px; font-weight: bold; }
-.pw-wi-desc, #pw-greetings-preview { display: none; background: rgba(128,128,128,0.1) !important; color: var(--pw-text-main) !important; border: 1px solid var(--pw-border); border-radius: 4px; padding: 8px; font-size: 0.9em; width: 100%; box-sizing: border-box; resize: vertical; line-height: 1.5; margin-top: 5px; }
+.pw-wi-desc, #pw-greetings-preview { display: none; background: rgba(128,128,128,0.1) !important; color: var(--pw-text-main) !important; border: 1px solid var(--pw-border); border-radius: 4px; padding: 8px; font-size: 0.9em; width: 100%; box-sizing: border-box; resize: vertical; line-height: 1.5; margin-top: 5px; text-align: left; white-space: pre-wrap; }
 .pw-wi-info-badge { font-size: 0.65em; background: rgba(128,128,128,0.1); padding: 1px 4px; border-radius: 3px; color: var(--pw-text-main); opacity: 0.4; margin-right: 5px; white-space: nowrap; vertical-align: middle; }
 
 /* History */
