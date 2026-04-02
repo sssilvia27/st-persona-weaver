@@ -136,9 +136,11 @@ NSFW:
 
 // 2. User 模版生成专用 Prompt
 const defaultTemplateGenPrompt = 
-`[TASK: DESIGN_USER_PROFILE_SCHEMA]
+`[TASK: DESIGN_OR_REFINE_USER_PROFILE_SCHEMA]
 [CONTEXT: The user is entering a simulation world defined by the database provided in System Context.]
-[GOAL: Create a comprehensive YAML template (Schema Only) for the **User Avatar (Protagonist)**.]
+[GOAL: Create or refine a comprehensive YAML template (Schema Only) for the **User Avatar (Protagonist)**.]
+
+{{currentTemplate}}
 
 {{userRequirements}}
 
@@ -152,6 +154,8 @@ const defaultTemplateGenPrompt =
 4. Scope: Biological, Sociological, Psychological, Special Abilities.
 5. Detail Level: High. This is for the main character.
 6. If user has provided specific requirements, prioritize fulfilling them.
+7. If an existing template is provided above, modify it according to the user's request. Preserve fields the user did not mention unless explicitly asked to restructure.
+8. If no existing template is provided, create a new one from scratch.
 </requirements>
 
 [Constraint]: Do NOT include any "Little Theater", scene descriptions, or values. STRICTLY YAML KEYS ONLY.
@@ -159,11 +163,13 @@ const defaultTemplateGenPrompt =
 [Action]:
 Output the YAML template now. No explanations.`;
 
-// 2.1 NPC 模版生成专用 Prompt
+// 2.1 NPC 模版生成/润色合并 Prompt
 const defaultNpcTemplateGenPrompt = 
-`[TASK: DESIGN_NPC_PROFILE_SCHEMA]
+`[TASK: DESIGN_OR_REFINE_NPC_PROFILE_SCHEMA]
 [CONTEXT: The user needs a supporting character for the simulation.]
-[GOAL: Create a concise YAML template (Schema Only) for a **Non-Player Character (NPC)**.]
+[GOAL: Create or refine a concise YAML template (Schema Only) for a **Non-Player Character (NPC)**.]
+
+{{currentTemplate}}
 
 {{userRequirements}}
 
@@ -177,6 +183,8 @@ const defaultNpcTemplateGenPrompt =
 4. Scope: Functional (Role/Faction), Visual (Appearance), Relational (Connection to MC).
 5. Detail Level: Moderate. Focus on identifiable traits and narrative function.
 6. If user has provided specific requirements, prioritize fulfilling them.
+7. If an existing template is provided above, modify it according to the user's request. Preserve fields the user did not mention unless explicitly asked to restructure.
+8. If no existing template is provided, create a new one from scratch.
 </requirements>
 
 [Constraint]: Do NOT include any "Little Theater", scene descriptions, or values. STRICTLY YAML KEYS ONLY.
@@ -184,62 +192,16 @@ const defaultNpcTemplateGenPrompt =
 [Action]:
 Output the YAML template now. No explanations.`;
 
-// 2.2 User 模版润色专用 Prompt
-const defaultTemplateRefinePrompt =
-`[TASK: REFINE_TEMPLATE_SCHEMA]
-[CONTEXT: Modify an existing YAML template structure for the **User Avatar**. A template defines ONLY attribute keys — NO values.]
+// 2.2 Legacy aliases — merged into gen prompts
+const defaultTemplateRefinePrompt = defaultTemplateGenPrompt;
 
-[Current Template to Refine]:
-\`\`\`yaml
-{{currentTemplate}}
-\`\`\`
-
-[User's Modification Request]:
-{{userRequirements}}
-
-<requirements>
-1. Modify the template structure according to the user's request above.
-2. Language: **Simplified Chinese (简体中文)** keys.
-3. Structure: YAML keys only. Leave ALL values empty.
-4. You may add, remove, rename, or reorganize fields as instructed.
-5. Preserve fields the user did not mention unless explicitly asked to restructure.
-</requirements>
-
-[Constraint]: This is a TEMPLATE (schema). Do NOT fill in any values. STRICTLY YAML KEYS ONLY.
-
-[Action]:
-Output the modified YAML template now. No explanations.`;
-
-// 2.3 NPC 模版润色专用 Prompt
-const defaultNpcTemplateRefinePrompt =
-`[TASK: REFINE_NPC_TEMPLATE_SCHEMA]
-[CONTEXT: Modify an existing YAML template structure for **NPC characters**. A template defines ONLY attribute keys — NO values.]
-
-[Current Template to Refine]:
-\`\`\`yaml
-{{currentTemplate}}
-\`\`\`
-
-[User's Modification Request]:
-{{userRequirements}}
-
-<requirements>
-1. Modify the template structure according to the user's request above.
-2. Language: **Simplified Chinese (简体中文)** keys.
-3. Structure: YAML keys only. Leave ALL values empty.
-4. You may add, remove, rename, or reorganize fields as instructed.
-5. Preserve fields the user did not mention unless explicitly asked to restructure.
-6. Focus on fields relevant to NPC identity: Role, Faction, Appearance, Relationship to MC.
-</requirements>
-
-[Constraint]: This is a TEMPLATE (schema). Do NOT fill in any values. STRICTLY YAML KEYS ONLY.
-
-[Action]:
-Output the modified YAML template now. No explanations.`;
+// 2.3 Legacy aliases — merged into gen prompts
+const defaultNpcTemplateRefinePrompt = defaultNpcTemplateGenPrompt;
 
 // 3. User 人设生成/润色 Prompt
+// 3. User 人设生成/润色 Prompt
 const defaultPersonaGenPrompt =
-`[Task: Generate/Refine Profile]
+`[Task: Generate/Refine User Profile]
 [Target Entity: "{{user}}"]
 
 <source_materials>
@@ -258,7 +220,7 @@ const defaultPersonaGenPrompt =
 [Action]:
 Output ONLY the YAML data matching the schema.`;
 
-// 4. NPC 生成/润色 Prompt
+// 4. NPC 人设生成/润色 Prompt
 const defaultNpcGenPrompt = 
 `[Task: Generate NPC Profile(s)]
 [Context: Create NPC(s) relevant to the current story flow. Generate one or multiple NPCs based on the user's request.]
@@ -266,7 +228,6 @@ const defaultNpcGenPrompt =
 <story_context>
 {{charInfo}}
 {{userPersona}}
-{{chatHistory}}
 </story_context>
 
 <target_schema>
@@ -275,9 +236,9 @@ const defaultNpcGenPrompt =
 
 {{input}}
 
-[Requirements]
+[Requirements]:
 1. Each NPC should fit naturally into the current story context and world setting.
-2. Relationship with {{user}} and {{char}} should be defined based on the chat history.
+2. Relationship with {{user}} and {{char}} should be defined clearly.
 3. Follow the YAML schema provided. If generating a single NPC, be detailed. If generating multiple, focus on distinguishing traits for each.
 4. If generating multiple NPCs, separate each with a line containing ONLY "---".
 
@@ -286,48 +247,16 @@ const defaultNpcGenPrompt =
 [Action]:
 Output ONLY the YAML data matching the schema.`;
 
-
+// 5. User 聊天推断/更新 Prompt
 const defaultChatInferPrompt =
-`[Task: Reverse-Engineer Character Profile from Chat History]
-[Target Entity: "{{targetName}}"]
+`[Task: Infer or Update User Profile from Chat History]
+[Target Entity: "{{user}}"]
 
 <chat_history>
 {{chatHistory}}
 </chat_history>
 
-<source_materials>
-{{charInfo}}
-</source_materials>
-
-<target_schema>
-{{template}}
-</target_schema>
-
-{{input}}
-
-[Requirements]:
-1. Carefully analyze the chat history above. Focus on how "{{targetName}}" speaks, behaves, reacts, and expresses emotions.
-2. Extract personality traits, speech patterns, values, habits, relationships, and any other characteristics revealed through the dialogue.
-3. Fill in the YAML schema based ONLY on evidence from the chat history. Do NOT invent traits that are not supported by the conversation.
-4. If certain schema fields cannot be determined from the chat, make reasonable inferences but mark them as such.
-5. Pay special attention to: tone of voice, emotional reactions, decision-making patterns, relationship dynamics, recurring themes.
-
-[Constraint]: STRICTLY YAML DATA ONLY. No explanations, no scene descriptions.
-
-[Action]:
-Output ONLY the YAML data matching the schema.`;
-
-const defaultChatUpdatePrompt =
-`[Task: Update/Enrich Existing Profile Based on Chat History]
-[Target Entity: "{{targetName}}"]
-
-<chat_history>
-{{chatHistory}}
-</chat_history>
-
-<existing_profile>
 {{currentText}}
-</existing_profile>
 
 <source_materials>
 {{charInfo}}
@@ -340,17 +269,57 @@ const defaultChatUpdatePrompt =
 {{input}}
 
 [Requirements]:
-1. Compare the existing profile against the chat history evidence.
-2. PRESERVE existing profile content that is still consistent with the chat.
-3. ADD new traits, details, or nuances revealed in the chat that are missing from the profile.
-4. UPDATE any traits that have evolved or changed based on recent chat behavior.
-5. ENRICH descriptions with specific examples or patterns observed in the conversation.
-6. Maintain the same YAML structure and keys as the existing profile.
+1. Carefully analyze the chat history. Focus on how "{{user}}" speaks, behaves, reacts, and expresses emotions.
+2. Extract personality traits, speech patterns, values, habits, relationships, and other characteristics revealed through dialogue.
+3. Base the profile ONLY on evidence from the chat history. Do NOT invent unsupported traits.
+4. If certain fields cannot be determined, make reasonable inferences.
+5. If an existing profile is provided above, PRESERVE content still consistent with the chat, ADD newly revealed traits, UPDATE evolved traits, and ENRICH with observed patterns.
+6. If no existing profile is provided, create a complete new profile from scratch.
+7. Pay special attention to: tone of voice, emotional reactions, decision-making patterns, relationship dynamics, recurring themes.
 
 [Constraint]: STRICTLY YAML DATA ONLY. No explanations, no scene descriptions.
 
 [Action]:
-Output the COMPLETE updated YAML profile.`;
+Output the COMPLETE YAML profile matching the schema.`;
+
+// 6. NPC 聊天推断/更新 Prompt
+const defaultNpcChatInferPrompt =
+`[Task: Infer or Update NPC Profile(s) from Chat History]
+[Context: Analyze the chat history to extract or update NPC character profile(s) relevant to the story.]
+
+<chat_history>
+{{chatHistory}}
+</chat_history>
+
+{{currentText}}
+
+<story_context>
+{{charInfo}}
+{{userPersona}}
+</story_context>
+
+<target_schema>
+{{template}}
+</target_schema>
+
+{{input}}
+
+[Requirements]:
+1. Analyze the chat history for NPC behavior, speech patterns, personality traits, and role in the story.
+2. Each NPC should be described in relation to the current story context and world setting.
+3. Relationship with {{user}} and {{char}} should be defined based on chat evidence.
+4. Base the profile ONLY on evidence from the chat history. Do NOT invent unsupported traits.
+5. If an existing profile is provided above, PRESERVE content still consistent with the chat, ADD newly revealed traits, UPDATE evolved traits, and ENRICH with observed patterns.
+6. If no existing profile is provided, create a complete new profile from scratch.
+7. If generating multiple NPCs, separate each with a line containing ONLY "---".
+
+[Constraint]: STRICTLY YAML DATA ONLY. No explanations, no scene descriptions.
+
+[Action]:
+Output the COMPLETE YAML profile matching the schema.`;
+
+// Legacy alias
+const defaultChatUpdatePrompt = defaultChatInferPrompt;
 
 
 const fallbackSystemPrompt =
@@ -391,7 +360,7 @@ let promptsCache = {
     personaGen: defaultPersonaGenPrompt,
     npcGen: defaultNpcGenPrompt, 
     chatInfer: defaultChatInferPrompt,
-    chatUpdate: defaultChatUpdatePrompt,
+    npcChatInfer: defaultNpcChatInferPrompt,
     initial: fallbackSystemPrompt 
 };
 let availableWorldBooks = [];
@@ -908,54 +877,42 @@ async function runGeneration(data, apiConfig, isTemplateMode = false) {
     if (isTemplateMode) {
         const isRefine = data.mode === 'refine';
 
-        if (isRefine) {
-            // Template refine: use editable prompt from promptsCache
-            let basePrompt = isNpcMode
-                ? (promptsCache.npcTemplateRefine || defaultNpcTemplateRefinePrompt)
-                : (promptsCache.templateRefine || defaultTemplateRefinePrompt);
+        let storedPrompt = isNpcMode
+            ? (promptsCache.npcTemplateGen || '')
+            : (promptsCache.templateGen || '');
+        const defaultPrompt = isNpcMode ? defaultNpcTemplateGenPrompt : defaultTemplateGenPrompt;
 
-            userMessageContent = basePrompt
-                .replace(/{{user}}/g, currentName)
-                .replace(/{{char}}/g, charName)
-                .replace(/{{currentTemplate}}/g, currentText)
-                .replace(/{{userRequirements}}/g, requestText);
-        } else {
-            // Template initial generation: use template gen prompt (no old template reference)
-            let storedPrompt = isNpcMode
-                ? (promptsCache.npcTemplateGen || '')
-                : (promptsCache.templateGen || '');
-            const defaultPrompt = isNpcMode ? defaultNpcTemplateGenPrompt : defaultTemplateGenPrompt;
+        let basePrompt = (storedPrompt && storedPrompt.includes('{{userRequirements}}'))
+            ? storedPrompt
+            : defaultPrompt;
 
-            let basePrompt = (storedPrompt && storedPrompt.includes('{{userRequirements}}'))
-                ? storedPrompt
-                : defaultPrompt;
+        const templateBlock = isRefine && currentText
+            ? `[Current Template to Refine]:\n\`\`\`yaml\n${currentText}\n\`\`\``
+            : '';
+        const reqBlock = requestText.trim()
+            ? `[User Requirements]:\n${requestText.trim()}`
+            : '';
 
-            const reqBlock = requestText.trim()
-                ? `[User Requirements]:\n${requestText.trim()}`
-                : '';
+        userMessageContent = basePrompt
+            .replace(/{{user}}/g, currentName)
+            .replace(/{{char}}/g, charName)
+            .replace(/{{charInfo}}/g, wrappedCharInfo)
+            .replace(/{{currentTemplate}}/g, templateBlock)
+            .replace(/{{userRequirements}}/g, reqBlock);
 
-            userMessageContent = basePrompt
-                .replace(/{{user}}/g, currentName)
-                .replace(/{{char}}/g, charName)
-                .replace(/{{charInfo}}/g, wrappedCharInfo)
-                .replace(/{{currentTemplate}}/g, '')
-                .replace(/{{userRequirements}}/g, reqBlock);
-
-            if (reqBlock && !userMessageContent.includes('[User Requirements]')) {
-                userMessageContent += '\n\n' + reqBlock;
-            }
+        if (reqBlock && !userMessageContent.includes('[User Requirements]')) {
+            userMessageContent += '\n\n' + reqBlock;
         }
 
         prefillContent = "```yaml\n";
     } else if (chatInferEnabled) {
-        const hasExisting = currentText && currentText.trim().length > 20;
         const targetName = isNpcMode ? charName : currentName;
-        let basePrompt;
-        if (hasExisting) {
-            basePrompt = promptsCache.chatUpdate || defaultChatUpdatePrompt;
-        } else {
-            basePrompt = promptsCache.chatInfer || defaultChatInferPrompt;
-        }
+        const existingBlock = (currentText && currentText.trim().length > 20)
+            ? wrapAsXiTaReference(currentText, `Existing Profile: ${targetName}`)
+            : '';
+        let basePrompt = isNpcMode
+            ? (promptsCache.npcChatInfer || defaultNpcChatInferPrompt)
+            : (promptsCache.chatInfer || defaultChatInferPrompt);
 
         userMessageContent = basePrompt
             .replace(/{{user}}/g, currentName)
@@ -965,11 +922,13 @@ async function runGeneration(data, apiConfig, isTemplateMode = false) {
             .replace(/{{greetings}}/g, wrappedGreetings)
             .replace(/{{template}}/g, wrappedTags)
             .replace(/{{input}}/g, wrappedInput)
-            .replace(/{{currentText}}/g, wrapAsXiTaReference(currentText, `Current Profile: ${targetName}`))
+            .replace(/{{currentText}}/g, existingBlock)
             .replace(/{{userPersona}}/g, wrappedUserPersona)
             .replace(/{{chatHistory}}/g, wrappedChatHistory);
     } else {
-        let basePrompt = isNpcMode ? (promptsCache.npcGen || defaultNpcGenPrompt) : (promptsCache.personaGen || defaultPersonaGenPrompt);
+        let basePrompt = isNpcMode
+            ? (promptsCache.npcGen || defaultNpcGenPrompt)
+            : (promptsCache.personaGen || defaultPersonaGenPrompt);
         
         userMessageContent = basePrompt
             .replace(/{{user}}/g, currentName)
@@ -1161,12 +1120,12 @@ function loadData() {
         promptsCache = {
             templateGen: migrateTemplatePrompt(p && p.templateGen, defaultTemplateGenPrompt),
             npcTemplateGen: migrateTemplatePrompt(p && p.npcTemplateGen, defaultNpcTemplateGenPrompt),
-            templateRefine: (p && p.templateRefine) ? p.templateRefine : defaultTemplateRefinePrompt,
-            npcTemplateRefine: (p && p.npcTemplateRefine) ? p.npcTemplateRefine : defaultNpcTemplateRefinePrompt,
+            templateRefine: defaultTemplateRefinePrompt,
+            npcTemplateRefine: defaultNpcTemplateRefinePrompt,
             personaGen: (p && p.personaGen) ? p.personaGen : defaultPersonaGenPrompt,
             npcGen: (p && p.npcGen) ? p.npcGen : defaultNpcGenPrompt, 
             chatInfer: (p && p.chatInfer) ? p.chatInfer : defaultChatInferPrompt,
-            chatUpdate: (p && p.chatUpdate) ? p.chatUpdate : defaultChatUpdatePrompt,
+            npcChatInfer: (p && p.npcChatInfer) ? p.npcChatInfer : defaultNpcChatInferPrompt,
             initial: (p && p.initial) ? p.initial : fallbackSystemPrompt 
         };
     } catch { 
@@ -1174,7 +1133,7 @@ function loadData() {
             templateGen: defaultTemplateGenPrompt, npcTemplateGen: defaultNpcTemplateGenPrompt,
             templateRefine: defaultTemplateRefinePrompt, npcTemplateRefine: defaultNpcTemplateRefinePrompt,
             personaGen: defaultPersonaGenPrompt, npcGen: defaultNpcGenPrompt, 
-            chatInfer: defaultChatInferPrompt, chatUpdate: defaultChatUpdatePrompt,
+            chatInfer: defaultChatInferPrompt, npcChatInfer: defaultNpcChatInferPrompt,
             initial: fallbackSystemPrompt 
         }; 
     }
@@ -1597,6 +1556,16 @@ async function openCreatorPopup() {
                 </div>
             </div>
 
+            <div class="pw-chat-infer-row">
+                <label class="pw-chat-infer-check-label" title="启用后将基于聊天记录进行人设推断/更新">
+                    <input type="checkbox" id="pw-chat-infer-main-toggle" ${chatHistEnabled ? 'checked' : ''}>
+                    <i class="fa-solid fa-comments"></i> 聊天记录注入
+                </label>
+                <span id="pw-chat-infer-summary" class="pw-chat-infer-summary">${chatHistEnabled ? (uiStateCache.chatHistory.preset === 'all' ? '全部' : '最近' + (uiStateCache.chatHistory.preset || '10') + '条') : '默认最近10条'}</span>
+                <span id="pw-chat-infer-settings-link" class="pw-chat-infer-settings-link" title="前往参考页设置详细选项"><i class="fa-solid fa-sliders"></i></span>
+                <span id="pw-chat-token-badge" class="pw-chat-token-badge" style="display:none;"></span>
+            </div>
+
             <textarea id="pw-request" class="pw-textarea pw-auto-height" placeholder="在此输入要求，或点击上方模版块插入参考结构（无需全部填满）...">${activeData.request}</textarea>
             <button id="pw-btn-gen" class="pw-btn gen"><i class="fa-solid ${chatHistEnabled ? 'fa-comments' : 'fa-wand-magic-sparkles'}"></i> ${chatHistEnabled ? '聊天推断生成' : (isNpc ? '生成 NPC 设定' : '生成 User 设定')}</button>
 
@@ -1606,10 +1575,10 @@ async function openCreatorPopup() {
                 </div>
                 
                 <div class="pw-refine-toolbar">
-                    <textarea id="pw-refine-input" class="pw-refine-input" placeholder="输入意见，或选中上方文字后点击浮窗快速修改..."></textarea>
-                    <div class="pw-refine-btn-vertical" id="pw-btn-refine" title="执行润色">
-                        <span class="pw-refine-btn-text">润色</span>
-                        <i class="fa-solid fa-magic"></i>
+                    <textarea id="pw-refine-input" class="pw-refine-input" placeholder="${chatHistEnabled ? '输入更新方向，或留空直接基于聊天记录更新...' : '输入意见，或选中上方文字后点击浮窗快速修改...'}"></textarea>
+                    <div class="pw-refine-btn-vertical" id="pw-btn-refine" title="${chatHistEnabled ? '基于聊天记录更新人设' : '执行润色'}">
+                        <span class="pw-refine-btn-text">${chatHistEnabled ? '更新' : '润色'}</span>
+                        <i class="fa-solid ${chatHistEnabled ? 'fa-rotate' : 'fa-magic'}"></i>
                     </div>
                 </div>
                 <button class="pw-btn gen" id="pw-btn-apply-template" style="display:none; margin-top:8px; width:100%;"><i class="fa-solid fa-file-import"></i> 应用到模版</button>
@@ -1713,12 +1682,11 @@ async function openCreatorPopup() {
             <div class="pw-card-section" id="pw-chat-history-section">
                 <div class="pw-row" style="margin-bottom:5px;">
                     <label class="pw-section-label" style="display:flex; align-items:center; gap:8px;">
-                        <input type="checkbox" id="pw-chat-history-toggle" style="transform:scale(1.2); cursor:pointer;">
-                        <i class="fa-solid fa-comments"></i> 聊天记录参考
+                        <i class="fa-solid fa-comments"></i> 聊天记录设置
                     </label>
-                    <span id="pw-chat-token-badge" class="pw-chat-token-badge" style="display:none;"></span>
+                    <span style="font-size:0.72em; opacity:0.5;">在主页面勾选启用</span>
                 </div>
-                <div id="pw-chat-history-body" style="display:none; padding-top:5px; flex-direction:column; gap:8px;">
+                <div id="pw-chat-history-body" style="display:flex; padding-top:5px; flex-direction:column; gap:8px;">
                     <div class="pw-row" style="gap:6px; flex-wrap:nowrap;">
                         <label style="font-size:0.85em; white-space:nowrap; opacity:0.8;">消息范围</label>
                         <select id="pw-chat-preset" class="pw-input" style="flex:0 0 auto; width:auto; padding:4px 6px; font-size:0.85em;">
@@ -1836,12 +1804,12 @@ async function openCreatorPopup() {
                     <div class="pw-row" style="margin-bottom:8px;">
                         <label>编辑目标</label>
                         <select id="pw-prompt-type" class="pw-input" style="flex:1;">
-                            <option value="personaGen">User人设生成/润色指令</option>
-                            <option value="npcGen">NPC人设生成/润色指令</option>
-                            <option value="templateGen">User模版生成指令</option>
-                            <option value="npcTemplateGen">NPC模版生成指令</option>
-                            <option value="templateRefine">User模版润色指令</option>
-                            <option value="npcTemplateRefine">NPC模版润色指令</option>
+                            <option value="personaGen">User人设生成/润色</option>
+                            <option value="npcGen">NPC人设生成/润色</option>
+                            <option value="templateGen">User模版生成/润色</option>
+                            <option value="npcTemplateGen">NPC模版生成/润色</option>
+                            <option value="chatInfer">User聊天推断/更新</option>
+                            <option value="npcChatInfer">NPC聊天推断/更新</option>
                         </select>
                     </div>
                     <div class="pw-var-btns">
@@ -1851,8 +1819,10 @@ async function openCreatorPopup() {
                         <div class="pw-var-btn" data-ins="{{greetings}}"><span>开场白</span><span class="code">{{greetings}}</span></div>
                         <div class="pw-var-btn" data-ins="{{template}}"><span>模版内容</span><span class="code">{{template}}</span></div>
                         <div class="pw-var-btn" data-ins="{{input}}"><span>用户要求</span><span class="code">{{input}}</span></div>
+                        <div class="pw-var-btn" data-ins="{{targetName}}"><span>目标名</span><span class="code">{{targetName}}</span></div>
                         <div class="pw-var-btn" data-ins="{{userPersona}}"><span>User设定</span><span class="code">{{userPersona}}</span></div>
                         <div class="pw-var-btn" data-ins="{{chatHistory}}"><span>聊天记录</span><span class="code">{{chatHistory}}</span></div>
+                        <div class="pw-var-btn" data-ins="{{currentText}}"><span>已有人设</span><span class="code">{{currentText}}</span></div>
                         <div class="pw-var-btn" data-ins="{{currentTemplate}}"><span>当前模版</span><span class="code">{{currentTemplate}}</span></div>
                         <div class="pw-var-btn" data-ins="{{userRequirements}}"><span>模版需求</span><span class="code">{{userRequirements}}</span></div>
                     </div>
@@ -1989,7 +1959,7 @@ const savedTheme = uiStateCache.theme || 'style.css';
     if (chatConf.floorFrom) $('#pw-chat-floor-from').val(chatConf.floorFrom);
     if (chatConf.floorTo) $('#pw-chat-floor-to').val(chatConf.floorTo);
     if (chatConf.enabled) {
-        $('#pw-chat-history-toggle').prop('checked', true).trigger('change');
+        $('#pw-chat-infer-main-toggle').prop('checked', true).trigger('change');
     }
 }
 
@@ -2855,18 +2825,19 @@ $(document).on('change.pw', '#pw-theme-select', function() {
         isProcessing = true;
 
         const refineReq = $('#pw-refine-input').val();
-        if (!refineReq) {
+        const chatInferOn = uiStateCache.chatHistory && uiStateCache.chatHistory.enabled && !isEditingTemplate;
+        if (!refineReq && !chatInferOn) {
             toastr.warning("请输入润色意见");
             isProcessing = false;
             return;
         }
         
-        lastRefineRequest = refineReq; // <--- 【关键】记住这次的要求
+        lastRefineRequest = refineReq || (chatInferOn ? '[基于聊天记录更新]' : '');
 
         if(!promptsCache.personaGen) loadData();
 
         const oldText = $('#pw-result-text').val();
-        const $btn = $(this).find('i').removeClass('fa-magic').addClass('fa-spinner fa-spin');
+        const $btn = $(this).find('i').removeClass('fa-magic fa-rotate').addClass('fa-spinner fa-spin');
         
         await forcePaint();
 
@@ -2896,9 +2867,9 @@ $(document).on('change.pw', '#pw-theme-select', function() {
             $('#pw-refine-input').val(''); // 清空输入框
         } catch (e) { 
             console.error(e);
-            toastr.error("润色失败: " + e.message); 
+            toastr.error((chatInferOn ? "更新" : "润色") + "失败: " + e.message); 
         } finally { 
-            $btn.removeClass('fa-spinner fa-spin').addClass('fa-magic');
+            $btn.removeClass('fa-spinner fa-spin').addClass(chatInferOn ? 'fa-rotate' : 'fa-magic');
             isProcessing = false;
         }
     });
@@ -3297,15 +3268,46 @@ $(document).on('change.pw', '#pw-theme-select', function() {
         }
     };
 
-    $(document).on('change.pw', '#pw-chat-history-toggle', function () {
+    $(document).on('change.pw', '#pw-chat-infer-main-toggle', function () {
         const enabled = $(this).prop('checked');
         uiStateCache.chatHistory.enabled = enabled;
-        $('#pw-chat-history-body').css('display', enabled ? 'flex' : 'none');
-        if (enabled) { refreshChatTokenEstimate(); renderChatTags(); }
-        else { $('#pw-chat-token-badge').hide(); $('#pw-chat-range-label').text(''); }
+        if (enabled) {
+            if (!uiStateCache.chatHistory.preset) uiStateCache.chatHistory.preset = '10';
+            refreshChatTokenEstimate();
+            renderChatTags();
+        } else {
+            $('#pw-chat-token-badge').hide();
+            $('#pw-chat-range-label').text('');
+        }
+        updateChatInferSummary();
         saveCurrentState();
         updateChatInferBadge();
     });
+
+    $(document).on('click.pw', '#pw-chat-infer-settings-link', function () {
+        $('.pw-tab[data-tab="context"]').click();
+        setTimeout(() => {
+            const $section = $('#pw-chat-history-section');
+            if ($section.length) $section[0].scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }, 200);
+    });
+
+    function updateChatInferSummary() {
+        const conf = uiStateCache.chatHistory || {};
+        const enabled = conf.enabled;
+        const preset = conf.preset || '10';
+        let text;
+        if (!enabled) {
+            text = '默认最近10条';
+        } else if (preset === 'custom' && conf.floorFrom && conf.floorTo) {
+            text = `#${conf.floorFrom}-#${conf.floorTo}`;
+        } else if (preset === 'all') {
+            text = '全部消息';
+        } else {
+            text = `最近${preset}条`;
+        }
+        $('#pw-chat-infer-summary').text(text);
+    }
 
     $(document).on('change.pw', '#pw-chat-preset', function () {
         const val = $(this).val();
@@ -3314,6 +3316,7 @@ $(document).on('change.pw', '#pw-theme-select', function() {
         if (val !== 'custom') { uiStateCache.chatHistory.floorFrom = ''; uiStateCache.chatHistory.floorTo = ''; }
         refreshChatTokenEstimate();
         updateChatInferBadge();
+        updateChatInferSummary();
         saveCurrentState();
     });
 
@@ -3321,6 +3324,7 @@ $(document).on('change.pw', '#pw-theme-select', function() {
         uiStateCache.chatHistory.floorFrom = $('#pw-chat-floor-from').val();
         uiStateCache.chatHistory.floorTo = $('#pw-chat-floor-to').val();
         refreshChatTokenEstimate();
+        updateChatInferSummary();
         saveCurrentState();
     });
 
@@ -3409,21 +3413,21 @@ $(document).on('change.pw', '#pw-theme-select', function() {
     function updateChatInferBadge() {
         const enabled = uiStateCache.chatHistory && uiStateCache.chatHistory.enabled;
         const isNpc = uiStateCache.generationMode === 'npc';
-        let $badge = $('#pw-chat-infer-status');
         const $btn = $('#pw-btn-gen');
+        const $refineBtn = $('#pw-btn-refine');
+        const $refineInput = $('#pw-refine-input');
         if (enabled) {
-            const preset = uiStateCache.chatHistory.preset;
-            const label = preset === 'custom' ? '自定义层数' : (preset === 'all' ? '全部' : `最近${preset}条`);
-            if (!$badge.length) {
-                $badge = $('<div id="pw-chat-infer-status" class="pw-chat-infer-badge"><i class="fa-solid fa-comments"></i> 聊天推断已启用 · <span id="pw-chat-infer-label"></span></div>');
-                $btn.before($badge);
-            }
-            $badge.find('#pw-chat-infer-label').text(label);
-            $badge.show();
             if (!isEditingTemplate) $btn.html('<i class="fa-solid fa-comments"></i> 聊天推断生成');
+            $refineBtn.find('.pw-refine-btn-text').text('更新');
+            $refineBtn.find('i').removeClass('fa-magic').addClass('fa-rotate');
+            $refineBtn.attr('title', '基于聊天记录更新人设');
+            $refineInput.attr('placeholder', '输入更新方向，或留空直接基于聊天记录更新...');
         } else {
-            $badge.hide();
             if (!isEditingTemplate) $btn.html(isNpc ? '<i class="fa-solid fa-wand-magic-sparkles"></i> 生成 NPC 设定' : '<i class="fa-solid fa-wand-magic-sparkles"></i> 生成 User 设定');
+            $refineBtn.find('.pw-refine-btn-text').text('润色');
+            $refineBtn.find('i').removeClass('fa-rotate').addClass('fa-magic');
+            $refineBtn.attr('title', '执行润色');
+            $refineInput.attr('placeholder', '输入意见，或选中上方文字后点击浮窗快速修改...');
         }
     }
 
@@ -3908,6 +3912,7 @@ const renderWiBooks = async () => {
                                 const checkedUids = [];
                                 $list.find('.pw-wi-check:checked').each(function() { checkedUids.push($(this).val()); });
                                 saveWiSelection(book, checkedUids);
+                                updateWiHeaderCheckbox($el);
                             });
 
                             $item.find('.pw-wi-toggle-icon').on('click', function (e) {
@@ -3926,12 +3931,36 @@ const renderWiBooks = async () => {
                         });
                     }
                     $list.data('loaded', true);
+                    updateWiHeaderCheckbox($el);
                 }
             }
         });
+
+        // Set initial indeterminate state based on saved selection
+        const initSel = loadWiSelection(book);
+        if (initSel && initSel.length > 0) {
+            const $cb = $el.find('.pw-wi-select-all');
+            $cb.prop('indeterminate', true);
+        }
+
         container.append($el);
     }
 };
+
+function updateWiHeaderCheckbox($bookEl) {
+    const $checks = $bookEl.find('.pw-wi-check');
+    if ($checks.length === 0) return;
+    const total = $checks.length;
+    const checked = $checks.filter(':checked').length;
+    const $header = $bookEl.find('.pw-wi-select-all');
+    if (checked === 0) {
+        $header.prop('checked', false).prop('indeterminate', false);
+    } else if (checked === total) {
+        $header.prop('checked', true).prop('indeterminate', false);
+    } else {
+        $header.prop('checked', false).prop('indeterminate', true);
+    }
+}
 
 const getPosAbbr = (pos) => {
     if (pos === 0 || pos === 'before_character_definition') return 'PreChar';
