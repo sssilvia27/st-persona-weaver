@@ -823,6 +823,55 @@
     white-space: nowrap;
 }
 
+/* Avatar Reference Row */
+.pw-avatar-ref-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 10px;
+    margin: 0 0 6px 0;
+    border-radius: 8px;
+    font-size: 0.82em;
+    background: rgba(128,128,128,0.04);
+    border: 1px solid var(--SmartThemeBorderColor);
+    transition: all 0.2s;
+}
+.pw-avatar-ref-row:has(#pw-avatar-ref-toggle:checked) {
+    background: linear-gradient(135deg, rgba(180,130,255,0.10), rgba(180,130,255,0.03));
+    border-color: rgba(180,130,255,0.4);
+}
+.pw-avatar-ref-label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+    user-select: none;
+    white-space: nowrap;
+    color: var(--SmartThemeBodyColor);
+}
+.pw-avatar-ref-label input[type="checkbox"] {
+    transform: scale(1.15);
+    cursor: pointer;
+}
+.pw-avatar-ref-label:has(input:checked) {
+    color: mediumpurple;
+}
+.pw-avatar-ref-status {
+    font-size: 0.85em;
+    opacity: 0.5;
+    flex: 1;
+    text-align: right;
+    white-space: nowrap;
+}
+.pw-avatar-ref-preview {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    object-fit: cover;
+    border: 2px solid rgba(180,130,255,0.5);
+    flex-shrink: 0;
+}
+
 /* Scan Results Container */
 #pw-chat-scan-results {
     display: flex;
