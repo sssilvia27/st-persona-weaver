@@ -1466,13 +1466,13 @@ async function openCreatorPopup() {
     </div>
 
     <!-- Load Persona Overlay -->
-    <div id="pw-load-overlay" class="pw-modal-backdrop">
-        <div class="pw-modal-card">
-            <div class="pw-modal-header">
-                <span class="pw-modal-title" id="pw-load-overlay-title">载入已有人设</span>
+    <div id="pw-load-overlay" class="pw-load-overlay-backdrop">
+        <div class="pw-load-overlay-card">
+            <div class="pw-load-overlay-header">
+                <span id="pw-load-overlay-title">载入已有人设</span>
                 <button class="pw-btn danger" id="pw-load-overlay-close" style="padding:4px 10px;"><i class="fa-solid fa-xmark"></i></button>
             </div>
-            <div id="pw-load-overlay-content" class="pw-modal-body"></div>
+            <div id="pw-load-overlay-content" class="pw-load-overlay-body"></div>
         </div>
     </div>
 
@@ -2773,7 +2773,7 @@ $(document).on('change.pw', '#pw-theme-select', function() {
         }
     });
 
-    $(document).on('click.pw', '#pw-load-overlay-close', () => $('#pw-load-overlay').fadeOut());
+    $(document).on('click.pw', '#pw-load-overlay-close', () => $('#pw-load-overlay').animate({opacity: 0}, 200, function() { $(this).css('display', 'none'); }));
 
     $(document).on('click.pw', '#pw-btn-load-current', async function() {
         const isNpc = uiStateCache.generationMode === 'npc';
@@ -2786,7 +2786,7 @@ $(document).on('change.pw', '#pw-theme-select', function() {
             $('#pw-result-text').val(content);
             $('#pw-result-area').fadeIn();
             $('#pw-request').addClass('minimized');
-            $overlay.fadeOut();
+            $overlay.animate({opacity: 0}, 200, function() { $(this).css('display', 'none'); });
             toastr.success(TEXT.TOAST_LOAD_CURRENT);
             saveCurrentState();
             $('#pw-result-text').trigger('input');
@@ -2814,7 +2814,7 @@ $(document).on('change.pw', '#pw-theme-select', function() {
                 if (filtered.length > 0) allEntries = filtered;
             }
 
-            if (allEntries.length === 0) { $overlay.fadeOut(); return toastr.warning("世界书中没有找到相关条目"); }
+            if (allEntries.length === 0) { $overlay.animate({opacity: 0}, 200, function() { $(this).css('display', 'none'); }); return toastr.warning("世界书中没有找到相关条目"); }
 
             const optionsHtml = allEntries.map((e, i) =>
                 `<option value="${i}">[${e.book}] ${e.displayName}</option>`
@@ -2848,7 +2848,7 @@ $(document).on('change.pw', '#pw-theme-select', function() {
         if (isNpc) {
             $('#pw-load-overlay-title').text('载入世界书 NPC 人设');
             $content.html('<div style="text-align:center; padding:20px; opacity:0.6;"><i class="fas fa-spinner fa-spin"></i> 正在读取世界书...</div>');
-            $overlay.css('display', 'flex').hide().fadeIn();
+            $overlay.css('display', 'flex').css('opacity', 0).animate({opacity: 1}, 200);
             const charName = getContext().characters[getContext().characterId]?.name || '';
             await showWiSelector(charName);
         } else {
@@ -2869,7 +2869,7 @@ $(document).on('change.pw', '#pw-theme-select', function() {
                     </div>
                 </div>`);
 
-            $overlay.css('display', 'flex').hide().fadeIn();
+            $overlay.css('display', 'flex').css('opacity', 0).animate({opacity: 1}, 200);
 
             $content.find('.pw-load-choice').on('click', async function() {
                 const choice = $(this).data('choice');
