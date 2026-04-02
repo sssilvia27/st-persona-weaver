@@ -287,6 +287,72 @@ const defaultNpcGenPrompt =
 Output ONLY the YAML data matching the schema.`;
 
 
+const defaultChatInferPrompt =
+`[Task: Reverse-Engineer Character Profile from Chat History]
+[Target Entity: "{{targetName}}"]
+
+<chat_history>
+{{chatHistory}}
+</chat_history>
+
+<source_materials>
+{{charInfo}}
+</source_materials>
+
+<target_schema>
+{{template}}
+</target_schema>
+
+{{input}}
+
+[Requirements]:
+1. Carefully analyze the chat history above. Focus on how "{{targetName}}" speaks, behaves, reacts, and expresses emotions.
+2. Extract personality traits, speech patterns, values, habits, relationships, and any other characteristics revealed through the dialogue.
+3. Fill in the YAML schema based ONLY on evidence from the chat history. Do NOT invent traits that are not supported by the conversation.
+4. If certain schema fields cannot be determined from the chat, make reasonable inferences but mark them as such.
+5. Pay special attention to: tone of voice, emotional reactions, decision-making patterns, relationship dynamics, recurring themes.
+
+[Constraint]: STRICTLY YAML DATA ONLY. No explanations, no scene descriptions.
+
+[Action]:
+Output ONLY the YAML data matching the schema.`;
+
+const defaultChatUpdatePrompt =
+`[Task: Update/Enrich Existing Profile Based on Chat History]
+[Target Entity: "{{targetName}}"]
+
+<chat_history>
+{{chatHistory}}
+</chat_history>
+
+<existing_profile>
+{{currentText}}
+</existing_profile>
+
+<source_materials>
+{{charInfo}}
+</source_materials>
+
+<target_schema>
+{{template}}
+</target_schema>
+
+{{input}}
+
+[Requirements]:
+1. Compare the existing profile against the chat history evidence.
+2. PRESERVE existing profile content that is still consistent with the chat.
+3. ADD new traits, details, or nuances revealed in the chat that are missing from the profile.
+4. UPDATE any traits that have evolved or changed based on recent chat behavior.
+5. ENRICH descriptions with specific examples or patterns observed in the conversation.
+6. Maintain the same YAML structure and keys as the existing profile.
+
+[Constraint]: STRICTLY YAML DATA ONLY. No explanations, no scene descriptions.
+
+[Action]:
+Output the COMPLETE updated YAML profile.`;
+
+
 const fallbackSystemPrompt =
 `[TASK: DATABASE_RECOVERY_OPERATION]
 [TARGET: Entity Profile]
@@ -324,6 +390,8 @@ let promptsCache = {
     npcTemplateRefine: defaultNpcTemplateRefinePrompt,
     personaGen: defaultPersonaGenPrompt,
     npcGen: defaultNpcGenPrompt, 
+    chatInfer: defaultChatInferPrompt,
+    chatUpdate: defaultChatUpdatePrompt,
     initial: fallbackSystemPrompt 
 };
 let availableWorldBooks = [];
@@ -332,7 +400,7 @@ let lastRawResponse = "";
 let isProcessing = false;
 let currentGreetingsList = []; 
 let wiSelectionCache = {};
-let uiStateCache = { templateExpanded: true, theme: 'style.css', generationMode: 'user', generationPreset: 'current' }; 
+let uiStateCache = { templateExpanded: true, theme: 'style.css', generationMode: 'user', generationPreset: 'current', chatHistory: { enabled: false, preset: '20', floorFrom: '', floorTo: '', excludeTags: [], includeTags: [] } }; 
 let hasNewVersion = false;
 let customThemes = {}; 
 let historyPage = 1; 
@@ -406,6 +474,35 @@ function getCharacterGreetingsList() {
     return list;
 }
 
+function escapeRegexPW(s) { return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+
+function applyTagFilters(text, includeTags, excludeTags) {
+    let result = String(text || "");
+    result = result.replace(/<!--[\s\S]*?-->/g, '');
+
+    if (excludeTags && excludeTags.length > 0) {
+        excludeTags.forEach(tag => {
+            const re = new RegExp(`<${escapeRegexPW(tag)}(?:\\s[^>]*)?>[\\s\\S]*?<\\/${escapeRegexPW(tag)}>`, 'gi');
+            result = result.replace(re, '');
+        });
+    }
+    if (includeTags && includeTags.length > 0) {
+        const incPattern = new RegExp(`<(${includeTags.map(escapeRegexPW).join('|')})(?:\\s[^>]*)?>([\\s\\S]*?)<\\/\\1>`, 'gi');
+        const matches = [...result.matchAll(incPattern)];
+        if (matches.length > 0) result = matches.map(m => m[2]).join('\n\n');
+    }
+    result = result.replace(/<[^>]*>/g, '');
+    return result.replace(/\n{3,}/g, '\n\n').trim();
+}
+
+function estimateTokens(text) {
+    if (!text) return 0;
+    const cjk = (text.match(/[\u4e00-\u9fff\u3040-\u309f\u30a0-\u30ff]/g) || []).length;
+    const rest = text.replace(/[\u4e00-\u9fff\u3040-\u309f\u30a0-\u30ff]/g, '');
+    const words = rest.split(/\s+/).filter(w => w.length > 0).length;
+    return Math.ceil(cjk * 1.5 + words * 1.3);
+}
+
 async function getChatHistoryText(limit = 15) {
     if (window.TavernHelper && window.TavernHelper.getChatMessages) {
         try {
@@ -421,6 +518,63 @@ async function getChatHistoryText(limit = 15) {
         }
     }
     return "";
+}
+
+async function fetchChatHistoryFiltered(opts = {}) {
+    if (!window.TavernHelper || !window.TavernHelper.getChatMessages) return { text: "", messages: [], tokenEstimate: 0 };
+
+    const chatConf = uiStateCache.chatHistory || {};
+    const floorFrom = opts.floorFrom ?? chatConf.floorFrom;
+    const floorTo = opts.floorTo ?? chatConf.floorTo;
+    const preset = opts.preset ?? chatConf.preset ?? '20';
+    const excludeTags = opts.excludeTags ?? chatConf.excludeTags ?? [];
+    const includeTags = opts.includeTags ?? chatConf.includeTags ?? [];
+
+    let messages = [];
+    try {
+        if (floorFrom !== '' && floorTo !== '' && !isNaN(floorFrom) && !isNaN(floorTo)) {
+            messages = window.TavernHelper.getChatMessages(`${floorFrom}-${floorTo}`);
+        } else {
+            const limit = preset === 'all' ? 9999 : parseInt(preset) || 20;
+            messages = window.TavernHelper.getChatMessages(`-${limit}-{{lastMessageId}}`);
+        }
+    } catch (e) {
+        console.warn("[PW] fetchChatHistoryFiltered error:", e);
+        return { text: "", messages: [], tokenEstimate: 0 };
+    }
+
+    if (!Array.isArray(messages)) return { text: "", messages: [], tokenEstimate: 0 };
+
+    const processed = messages.map(msg => {
+        const role = msg.is_user ? 'User' : (msg.name || 'Char');
+        const floorId = msg.message_id ?? '?';
+        let content = msg.message || '';
+        if (msg.is_user) {
+            content = content.replace(/<!--[\s\S]*?-->/g, '').replace(/<[^>]*>/g, '');
+        } else {
+            content = applyTagFilters(content, includeTags, excludeTags);
+        }
+        return { role, floorId, content: content.trim(), is_user: msg.is_user };
+    }).filter(m => m.content.length > 0);
+
+    const text = processed.map(m => `[#${m.floorId}] ${m.role}: ${m.content}`).join('\n\n');
+    return { text, messages: processed, tokenEstimate: estimateTokens(text) };
+}
+
+async function scanChatTags(limit = 30) {
+    if (!window.TavernHelper || !window.TavernHelper.getChatMessages) return [];
+    try {
+        const msgs = window.TavernHelper.getChatMessages(`-${limit}-{{lastMessageId}}`);
+        if (!Array.isArray(msgs)) return [];
+        const tagCounts = {};
+        msgs.forEach(msg => {
+            if (msg.is_user) return;
+            const text = String(msg.message || "");
+            const matches = [...text.matchAll(/<([a-zA-Z0-9_\-\.]+)(?:\s[^>]*)?>[\s\S]*?<\/\1>/g)];
+            matches.forEach(m => { tagCounts[m[1]] = (tagCounts[m[1]] || 0) + 1; });
+        });
+        return Object.entries(tagCounts).sort((a,b) => b[1] - a[1]).map(([tag, count]) => ({ tag, count }));
+    } catch (e) { return []; }
 }
 
 async function checkForUpdates() {
@@ -708,11 +862,17 @@ async function runGeneration(data, apiConfig, isTemplateMode = false) {
     const requestText = data.request || "";
     
     const isNpcMode = uiStateCache.generationMode === 'npc';
+    const chatHistConf = uiStateCache.chatHistory || {};
+    const chatInferEnabled = chatHistConf.enabled && !isTemplateMode;
+
     let rawUserPersona = "";
     let rawChatHistory = "";
-    if (isNpcMode && !isTemplateMode) {
+    if (chatInferEnabled) {
+        const filteredResult = await fetchChatHistoryFiltered();
+        rawChatHistory = filteredResult.text;
         rawUserPersona = getActivePersonaDescription();
-        rawChatHistory = await getChatHistoryText(20); 
+    } else if (isNpcMode && !isTemplateMode) {
+        rawUserPersona = getActivePersonaDescription();
     }
 
     const wrappedCharInfo = wrapAsXiTaReference(rawCharInfo, `Entity Profile: ${charName}`);
@@ -721,8 +881,8 @@ async function runGeneration(data, apiConfig, isTemplateMode = false) {
     const wrappedTags = wrapAsXiTaReference(getCurrentTemplate(), "Schema Definition");
     const wrappedInput = wrapInputForSafety(requestText, currentText, data.mode === 'refine');
     
-    const wrappedUserPersona = isNpcMode ? wrapAsXiTaReference(rawUserPersona, `User Profile: ${currentName}`) : "";
-    const wrappedChatHistory = isNpcMode ? wrapAsXiTaReference(rawChatHistory, `Recent Chat History`) : "";
+    const wrappedUserPersona = (isNpcMode || chatInferEnabled) ? wrapAsXiTaReference(rawUserPersona, `User Profile: ${currentName}`) : "";
+    const wrappedChatHistory = chatInferEnabled ? wrapAsXiTaReference(rawChatHistory, `Chat History Reference`) : "";
 
     // [Fix 10] Use selected preset logic
     let activeSystemPrompt = getRealSystemPrompt(uiStateCache.generationPreset);
@@ -787,6 +947,27 @@ async function runGeneration(data, apiConfig, isTemplateMode = false) {
         }
 
         prefillContent = "```yaml\n";
+    } else if (chatInferEnabled) {
+        const hasExisting = currentText && currentText.trim().length > 20;
+        const targetName = isNpcMode ? charName : currentName;
+        let basePrompt;
+        if (hasExisting) {
+            basePrompt = promptsCache.chatUpdate || defaultChatUpdatePrompt;
+        } else {
+            basePrompt = promptsCache.chatInfer || defaultChatInferPrompt;
+        }
+
+        userMessageContent = basePrompt
+            .replace(/{{user}}/g, currentName)
+            .replace(/{{char}}/g, charName)
+            .replace(/{{targetName}}/g, targetName)
+            .replace(/{{charInfo}}/g, wrappedCharInfo)
+            .replace(/{{greetings}}/g, wrappedGreetings)
+            .replace(/{{template}}/g, wrappedTags)
+            .replace(/{{input}}/g, wrappedInput)
+            .replace(/{{currentText}}/g, wrapAsXiTaReference(currentText, `Current Profile: ${targetName}`))
+            .replace(/{{userPersona}}/g, wrappedUserPersona)
+            .replace(/{{chatHistory}}/g, wrappedChatHistory);
     } else {
         let basePrompt = isNpcMode ? (promptsCache.npcGen || defaultNpcGenPrompt) : (promptsCache.personaGen || defaultPersonaGenPrompt);
         
@@ -806,7 +987,8 @@ async function runGeneration(data, apiConfig, isTemplateMode = false) {
     const updateDebugView = (messages) => {
         let debugText = `=== 发送时间: ${new Date().toLocaleTimeString()} ===\n`;
         const modeStr = isNpcMode ? 'NPC' : 'User';
-        debugText += `=== 模式: ${isTemplateMode ? `${modeStr}模版生成` : (data.mode === 'refine' ? `${modeStr}润色` : `${modeStr}人设生成`)} ===\n`;
+        const chatInferStr = chatInferEnabled ? ' [聊天推断]' : '';
+        debugText += `=== 模式: ${isTemplateMode ? `${modeStr}模版生成` : (data.mode === 'refine' ? `${modeStr}润色` : `${modeStr}人设生成`)}${chatInferStr} ===\n`;
         debugText += `=== 预设策略: ${uiStateCache.generationPreset === 'pure' ? '✨ 纯净模式 (Pure Mode)' : (uiStateCache.generationPreset === 'current' ? '跟随酒馆预设 (Default)' : uiStateCache.generationPreset)} ===\n\n`;
         messages.forEach((msg, idx) => {
             debugText += `[BLOCK ${idx + 1}: ${msg.role.toUpperCase()}]\n`;
@@ -983,6 +1165,8 @@ function loadData() {
             npcTemplateRefine: (p && p.npcTemplateRefine) ? p.npcTemplateRefine : defaultNpcTemplateRefinePrompt,
             personaGen: (p && p.personaGen) ? p.personaGen : defaultPersonaGenPrompt,
             npcGen: (p && p.npcGen) ? p.npcGen : defaultNpcGenPrompt, 
+            chatInfer: (p && p.chatInfer) ? p.chatInfer : defaultChatInferPrompt,
+            chatUpdate: (p && p.chatUpdate) ? p.chatUpdate : defaultChatUpdatePrompt,
             initial: (p && p.initial) ? p.initial : fallbackSystemPrompt 
         };
     } catch { 
@@ -990,15 +1174,18 @@ function loadData() {
             templateGen: defaultTemplateGenPrompt, npcTemplateGen: defaultNpcTemplateGenPrompt,
             templateRefine: defaultTemplateRefinePrompt, npcTemplateRefine: defaultNpcTemplateRefinePrompt,
             personaGen: defaultPersonaGenPrompt, npcGen: defaultNpcGenPrompt, 
+            chatInfer: defaultChatInferPrompt, chatUpdate: defaultChatUpdatePrompt,
             initial: fallbackSystemPrompt 
         }; 
     }
     try { wiSelectionCache = JSON.parse(localStorage.getItem(STORAGE_KEY_WI_STATE)) || {}; } catch { wiSelectionCache = {}; }
     
-    // [Updated] Load UI State with Preset info
+    // [Updated] Load UI State with Preset info + chatHistory config
+    const defaultUiState = { templateExpanded: true, theme: 'style.css', generationMode: 'user', generationPreset: 'current', chatHistory: { enabled: false, preset: '20', floorFrom: '', floorTo: '', excludeTags: [], includeTags: [] } };
     try {
-        uiStateCache = JSON.parse(localStorage.getItem(STORAGE_KEY_UI_STATE)) || { templateExpanded: true, theme: 'style.css', generationMode: 'user', generationPreset: 'current' };
-    } catch { uiStateCache = { templateExpanded: true, theme: 'style.css', generationMode: 'user', generationPreset: 'current' }; }
+        uiStateCache = JSON.parse(localStorage.getItem(STORAGE_KEY_UI_STATE)) || defaultUiState;
+        if (!uiStateCache.chatHistory) uiStateCache.chatHistory = { enabled: false, preset: '20', floorFrom: '', floorTo: '', excludeTags: [], includeTags: [] };
+    } catch { uiStateCache = defaultUiState; }
     
     try { customThemes = JSON.parse(localStorage.getItem(STORAGE_KEY_THEMES)) || {}; } catch { customThemes = {}; }
 
@@ -1312,6 +1499,7 @@ async function openCreatorPopup() {
     if (!currentName) currentName = context.powerUserSettings?.persona_selected || "User";
 
     const isNpc = uiStateCache.generationMode === 'npc';
+    const chatHistEnabled = uiStateCache.chatHistory && uiStateCache.chatHistory.enabled;
     const activeData = isNpc ? npcContext : userContext;
     
     const charName = getContext().characters[getContext().characterId]?.name || "None";
@@ -1410,7 +1598,7 @@ async function openCreatorPopup() {
             </div>
 
             <textarea id="pw-request" class="pw-textarea pw-auto-height" placeholder="在此输入要求，或点击上方模版块插入参考结构（无需全部填满）...">${activeData.request}</textarea>
-            <button id="pw-btn-gen" class="pw-btn gen"><i class="fa-solid fa-wand-magic-sparkles"></i> ${isNpc ? '生成 NPC 设定' : '生成 User 设定'}</button>
+            <button id="pw-btn-gen" class="pw-btn gen"><i class="fa-solid ${chatHistEnabled ? 'fa-comments' : 'fa-wand-magic-sparkles'}"></i> ${chatHistEnabled ? '聊天推断生成' : (isNpc ? '生成 NPC 设定' : '生成 User 设定')}</button>
 
             <div id="pw-result-area" style="display:${activeData.hasResult ? 'block' : 'none'}; margin-top:15px;">
                 <div class="pw-relative-container">
@@ -1519,6 +1707,56 @@ async function openCreatorPopup() {
                         <button id="pw-wi-add" class="pw-btn primary pw-wi-add-btn"><i class="fa-solid fa-plus"></i></button>
                     </div>
                     <div id="pw-wi-container"></div>
+                </div>
+            </div>
+
+            <div class="pw-card-section" id="pw-chat-history-section">
+                <div class="pw-row" style="margin-bottom:5px;">
+                    <label class="pw-section-label" style="display:flex; align-items:center; gap:8px;">
+                        <input type="checkbox" id="pw-chat-history-toggle" style="transform:scale(1.2); cursor:pointer;">
+                        <i class="fa-solid fa-comments"></i> 聊天记录参考
+                    </label>
+                    <span id="pw-chat-token-badge" class="pw-chat-token-badge" style="display:none;"></span>
+                </div>
+                <div id="pw-chat-history-body" style="display:none; padding-top:5px; flex-direction:column; gap:8px;">
+                    <div class="pw-row" style="gap:6px; flex-wrap:nowrap;">
+                        <label style="font-size:0.85em; white-space:nowrap; opacity:0.8;">消息范围</label>
+                        <select id="pw-chat-preset" class="pw-input" style="flex:0 0 auto; width:auto; padding:4px 6px; font-size:0.85em;">
+                            <option value="10">最近 10 条</option>
+                            <option value="20" selected>最近 20 条</option>
+                            <option value="50">最近 50 条</option>
+                            <option value="all">全部</option>
+                            <option value="custom">自定义层数</option>
+                        </select>
+                        <div id="pw-chat-custom-range" style="display:none; flex:1; align-items:center; gap:4px;">
+                            <input type="number" id="pw-chat-floor-from" class="pw-input" placeholder="从" style="width:55px; padding:4px; text-align:center; font-size:0.85em;">
+                            <span style="opacity:0.6;">-</span>
+                            <input type="number" id="pw-chat-floor-to" class="pw-input" placeholder="到" style="width:55px; padding:4px; text-align:center; font-size:0.85em;">
+                        </div>
+                        <span id="pw-chat-range-label" style="font-size:0.75em; opacity:0.6; white-space:nowrap;"></span>
+                    </div>
+
+                    <div class="pw-chat-filter-section">
+                        <div class="pw-chat-filter-header" id="pw-chat-filter-toggle">
+                            <span style="font-size:0.85em; opacity:0.8;"><i class="fa-solid fa-tags"></i> 标签过滤 (AI回复)</span>
+                            <i class="fa-solid fa-chevron-down pw-chat-filter-arrow" style="transition:0.2s; font-size:0.75em; opacity:0.5;"></i>
+                        </div>
+                        <div id="pw-chat-filter-body" style="display:none;">
+                            <div style="display:flex; gap:4px; align-items:center;">
+                                <input type="text" id="pw-chat-tag-input" class="pw-input" placeholder="输入标签名回车" style="flex:1; padding:4px 6px; font-size:0.85em;">
+                                <button class="pw-btn primary" id="pw-chat-scan-tags" style="padding:4px 8px; font-size:0.8em;"><i class="fa-solid fa-wand-magic-sparkles"></i> 扫描</button>
+                            </div>
+                            <div id="pw-chat-scan-results" style="display:none; flex-wrap:wrap; gap:4px; padding:4px; background:rgba(0,0,0,0.03); border-radius:4px;"></div>
+                            <div style="font-size:0.7em; opacity:0.6; color:#d68b1c;">点击标签切换: 保留/排除。User发言始终全部保留。</div>
+                            <div id="pw-chat-active-tags" style="display:flex; flex-wrap:wrap; gap:4px;"></div>
+                        </div>
+                    </div>
+
+                    <div style="display:flex; gap:6px;">
+                        <button class="pw-btn primary" id="pw-chat-preview-btn" style="flex:1; padding:5px; font-size:0.85em;"><i class="fa-solid fa-eye"></i> 预览抓取内容</button>
+                        <button class="pw-btn" id="pw-chat-refresh-btn" style="padding:5px 8px; font-size:0.85em;" title="刷新token估算"><i class="fa-solid fa-rotate-right"></i></button>
+                    </div>
+                    <div id="pw-chat-preview-area" style="display:none; max-height:200px; overflow-y:auto; padding:8px; background:var(--pw-paper-bg); border:1px solid var(--pw-border); border-radius:6px; font-size:0.8em; white-space:pre-wrap; line-height:1.5; text-align:left; color:var(--pw-text-main);"></div>
                 </div>
             </div>
         </div>
@@ -1742,6 +1980,16 @@ const savedTheme = uiStateCache.theme || 'style.css';
 
     if (activeData.hasResult) {
         $('#pw-request').addClass('minimized');
+    }
+
+    // Restore chat history UI state
+    const chatConf = uiStateCache.chatHistory || {};
+    if (chatConf.preset) $('#pw-chat-preset').val(chatConf.preset);
+    if (chatConf.preset === 'custom') $('#pw-chat-custom-range').css('display', 'flex');
+    if (chatConf.floorFrom) $('#pw-chat-floor-from').val(chatConf.floorFrom);
+    if (chatConf.floorTo) $('#pw-chat-floor-to').val(chatConf.floorTo);
+    if (chatConf.enabled) {
+        $('#pw-chat-history-toggle').prop('checked', true).trigger('change');
     }
 }
 
@@ -2722,9 +2970,10 @@ $(document).on('change.pw', '#pw-theme-select', function() {
         isProcessing = true;
 
         const isTemplateGen = isEditingTemplate;
-        console.log(`[PW] Gen Clicked (template=${isTemplateGen})`);
+        const chatInferOn = uiStateCache.chatHistory && uiStateCache.chatHistory.enabled && !isTemplateGen;
+        console.log(`[PW] Gen Clicked (template=${isTemplateGen}, chatInfer=${chatInferOn})`);
         const req = $('#pw-request').val();
-        if (!req && !isTemplateGen) {
+        if (!req && !isTemplateGen && !chatInferOn) {
             toastr.warning("请输入要求");
             isProcessing = false;
             return;
@@ -2740,9 +2989,11 @@ $(document).on('change.pw', '#pw-theme-select', function() {
         try {
             const contextData = await collectContextData();
             const modelVal = $('#pw-api-source').val() === 'independent' ? $('#pw-api-model-select').val() : null;
+            const existingResult = chatInferOn ? ($('#pw-result-text').data('prev-result') || '') : '';
             const config = {
                 mode: 'initial', 
                 request: req || '',
+                currentText: existingResult,
                 wiText: contextData.wi,
                 greetingsText: isTemplateGen ? '' : contextData.greetings,
                 apiSource: $('#pw-api-source').val(), 
@@ -2766,6 +3017,8 @@ $(document).on('change.pw', '#pw-theme-select', function() {
             const isNpc = uiStateCache.generationMode === 'npc';
             if (isTemplateGen) {
                 $btn.prop('disabled', false).html('<i class="fa-solid fa-wand-magic-sparkles"></i> 生成模版');
+            } else if (chatInferOn) {
+                $btn.prop('disabled', false).html('<i class="fa-solid fa-comments"></i> 聊天推断生成');
             } else {
                 $btn.prop('disabled', false).html(isNpc ? '<i class="fa-solid fa-wand-magic-sparkles"></i> 生成 NPC 设定' : '<i class="fa-solid fa-wand-magic-sparkles"></i> 生成 User 设定');
             }
@@ -2823,19 +3076,18 @@ $(document).on('change.pw', '#pw-theme-select', function() {
             $content.html(`
                 <div style="display:flex; flex-direction:column; gap:8px;">
                     <select id="pw-wi-load-select" class="pw-input" style="width:100%;">
-                        <option value="" disabled>-- 选择条目 --</option>
                         ${optionsHtml}
                     </select>
-                    <div id="pw-wi-load-preview" style="max-height:35vh; overflow-y:auto; padding:8px; background:var(--pw-paper-bg); border:1px solid var(--pw-border); border-radius:6px; font-size:0.85em; white-space:pre-wrap; line-height:1.5; text-align:left; color:var(--pw-text-main); display:none;"></div>
+                    <div id="pw-wi-load-preview" style="max-height:35vh; overflow-y:auto; padding:8px; background:var(--pw-paper-bg); border:1px solid var(--pw-border); border-radius:6px; font-size:0.85em; white-space:pre-wrap; line-height:1.5; text-align:left; color:var(--pw-text-main);"></div>
                     <button class="pw-btn gen" id="pw-wi-load-confirm" style="flex-shrink:0;"><i class="fa-solid fa-check"></i> 载入选中条目</button>
                 </div>`);
 
             $('#pw-wi-load-select').on('change', function() {
                 const idx = parseInt($(this).val());
                 if (!isNaN(idx) && allEntries[idx]) {
-                    $('#pw-wi-load-preview').text(allEntries[idx].content).show();
+                    $('#pw-wi-load-preview').text(allEntries[idx].content);
                 }
-            });
+            }).val('0').trigger('change');
 
             $('#pw-wi-load-confirm').on('click', function() {
                 const idx = parseInt($('#pw-wi-load-select').val());
@@ -3024,7 +3276,157 @@ $(document).on('change.pw', '#pw-theme-select', function() {
     });
 
     $(document).on('click.pw', '#pw-wi-add', () => { const val = $('#pw-wi-select').val(); if (val && !window.pwExtraBooks.includes(val)) { window.pwExtraBooks.push(val); renderWiBooks(); } });
-    
+
+    // === Chat History Reference Events ===
+    const refreshChatTokenEstimate = async () => {
+        if (!uiStateCache.chatHistory.enabled) { $('#pw-chat-token-badge').hide(); return; }
+        const result = await fetchChatHistoryFiltered();
+        const tokens = result.tokenEstimate;
+        const $badge = $('#pw-chat-token-badge');
+        if (tokens > 8000) {
+            $badge.text(`~${tokens} tokens`).css({background: 'rgba(255,80,80,0.2)', color: '#ff6b6b', border: '1px solid rgba(255,80,80,0.4)'}).attr('title', '警告: token 数量较大，可能影响生成质量或超出上下文限制').show();
+        } else if (tokens > 4000) {
+            $badge.text(`~${tokens} tokens`).css({background: 'rgba(240,173,78,0.15)', color: '#d68b1c', border: '1px solid rgba(240,173,78,0.3)'}).attr('title', '注意: token 数量较多').show();
+        } else {
+            $badge.text(`~${tokens} tokens`).css({background: 'rgba(92,184,92,0.1)', color: '#5cb85c', border: '1px solid rgba(92,184,92,0.3)'}).attr('title', '').show();
+        }
+        const msgs = result.messages;
+        if (msgs.length > 0) {
+            const first = msgs[0].floorId, last = msgs[msgs.length - 1].floorId;
+            $('#pw-chat-range-label').text(`(#${first} - #${last})`);
+        }
+    };
+
+    $(document).on('change.pw', '#pw-chat-history-toggle', function () {
+        const enabled = $(this).prop('checked');
+        uiStateCache.chatHistory.enabled = enabled;
+        $('#pw-chat-history-body').css('display', enabled ? 'flex' : 'none');
+        if (enabled) { refreshChatTokenEstimate(); renderChatTags(); }
+        else { $('#pw-chat-token-badge').hide(); $('#pw-chat-range-label').text(''); }
+        saveCurrentState();
+        updateChatInferBadge();
+    });
+
+    $(document).on('change.pw', '#pw-chat-preset', function () {
+        const val = $(this).val();
+        uiStateCache.chatHistory.preset = val;
+        $('#pw-chat-custom-range').css('display', val === 'custom' ? 'flex' : 'none');
+        if (val !== 'custom') { uiStateCache.chatHistory.floorFrom = ''; uiStateCache.chatHistory.floorTo = ''; }
+        refreshChatTokenEstimate();
+        updateChatInferBadge();
+        saveCurrentState();
+    });
+
+    $(document).on('change.pw', '#pw-chat-floor-from, #pw-chat-floor-to', function () {
+        uiStateCache.chatHistory.floorFrom = $('#pw-chat-floor-from').val();
+        uiStateCache.chatHistory.floorTo = $('#pw-chat-floor-to').val();
+        refreshChatTokenEstimate();
+        saveCurrentState();
+    });
+
+    let chatFilterExpanded = false;
+    $(document).on('click.pw', '#pw-chat-filter-toggle', function () {
+        chatFilterExpanded = !chatFilterExpanded;
+        const $body = $('#pw-chat-filter-body');
+        if (chatFilterExpanded) { $body.slideDown(150); }
+        else { $body.slideUp(150); }
+        $(this).find('.pw-chat-filter-arrow').css('transform', chatFilterExpanded ? 'rotate(180deg)' : 'rotate(0)');
+    });
+
+    const renderChatTags = () => {
+        const $area = $('#pw-chat-active-tags').empty();
+        const conf = uiStateCache.chatHistory;
+        const allTags = [...(conf.excludeTags || []).map(t => ({name: t, mode: 'exclude'})), ...(conf.includeTags || []).map(t => ({name: t, mode: 'include'}))];
+        allTags.forEach(t => {
+            const cls = t.mode === 'include' ? 'pw-chat-tag-include' : 'pw-chat-tag-exclude';
+            const icon = t.mode === 'include' ? '<i class="fa-solid fa-check"></i>' : '<i class="fa-solid fa-ban"></i>';
+            const $chip = $(`<div class="pw-chat-tag-chip ${cls}"><span class="pw-chat-tag-text">${icon} ${t.name}</span><span class="pw-chat-tag-del"><i class="fa-solid fa-times"></i></span></div>`);
+            $chip.find('.pw-chat-tag-text').on('click', function () {
+                if (t.mode === 'exclude') {
+                    conf.excludeTags = conf.excludeTags.filter(x => x !== t.name);
+                    if (!conf.includeTags.includes(t.name)) conf.includeTags.push(t.name);
+                } else {
+                    conf.includeTags = conf.includeTags.filter(x => x !== t.name);
+                    if (!conf.excludeTags.includes(t.name)) conf.excludeTags.push(t.name);
+                }
+                saveCurrentState(); renderChatTags(); refreshChatTokenEstimate();
+            });
+            $chip.find('.pw-chat-tag-del').on('click', function (e) {
+                e.stopPropagation();
+                conf.excludeTags = conf.excludeTags.filter(x => x !== t.name);
+                conf.includeTags = conf.includeTags.filter(x => x !== t.name);
+                saveCurrentState(); renderChatTags(); refreshChatTokenEstimate();
+            });
+            $area.append($chip);
+        });
+    };
+
+    $(document).on('keypress.pw', '#pw-chat-tag-input', function (e) {
+        if (e.which !== 13) return;
+        const val = $(this).val().trim();
+        if (!val) return;
+        const conf = uiStateCache.chatHistory;
+        if (!conf.excludeTags.includes(val) && !conf.includeTags.includes(val)) {
+            conf.excludeTags.push(val);
+            saveCurrentState(); renderChatTags(); refreshChatTokenEstimate();
+        }
+        $(this).val('');
+    });
+
+    $(document).on('click.pw', '#pw-chat-scan-tags', async function () {
+        const tags = await scanChatTags(30);
+        const $res = $('#pw-chat-scan-results').empty().css('display', 'flex');
+        if (tags.length === 0) { $res.append('<span style="font-size:0.8em; opacity:0.6;">未检测到闭合标签</span>'); return; }
+        tags.forEach(({tag, count}) => {
+            const conf = uiStateCache.chatHistory;
+            if (conf.excludeTags.includes(tag) || conf.includeTags.includes(tag)) return;
+            const $c = $(`<div class="pw-chat-tag-chip" style="cursor:pointer; opacity:0.7;">${tag} (${count})</div>`);
+            $c.on('click', function () {
+                conf.excludeTags.push(tag);
+                saveCurrentState(); renderChatTags(); refreshChatTokenEstimate();
+                $(this).fadeOut(200);
+            });
+            $res.append($c);
+        });
+    });
+
+    $(document).on('click.pw', '#pw-chat-preview-btn', async function () {
+        const $preview = $('#pw-chat-preview-area');
+        if ($preview.is(':visible')) { $preview.slideUp(150); $(this).html('<i class="fa-solid fa-eye"></i> 预览抓取内容'); return; }
+        $(this).html('<i class="fa-solid fa-spinner fa-spin"></i> 加载中...');
+        const result = await fetchChatHistoryFiltered();
+        if (result.messages.length === 0) {
+            $preview.text('未获取到聊天消息。请确认当前有活跃的聊天。').slideDown(150);
+        } else {
+            $preview.text(result.text).slideDown(150);
+        }
+        $(this).html('<i class="fa-solid fa-eye-slash"></i> 收起预览');
+        refreshChatTokenEstimate();
+    });
+
+    $(document).on('click.pw', '#pw-chat-refresh-btn', refreshChatTokenEstimate);
+
+    function updateChatInferBadge() {
+        const enabled = uiStateCache.chatHistory && uiStateCache.chatHistory.enabled;
+        const isNpc = uiStateCache.generationMode === 'npc';
+        let $badge = $('#pw-chat-infer-status');
+        const $btn = $('#pw-btn-gen');
+        if (enabled) {
+            const preset = uiStateCache.chatHistory.preset;
+            const label = preset === 'custom' ? '自定义层数' : (preset === 'all' ? '全部' : `最近${preset}条`);
+            if (!$badge.length) {
+                $badge = $('<div id="pw-chat-infer-status" class="pw-chat-infer-badge"><i class="fa-solid fa-comments"></i> 聊天推断已启用 · <span id="pw-chat-infer-label"></span></div>');
+                $btn.before($badge);
+            }
+            $badge.find('#pw-chat-infer-label').text(label);
+            $badge.show();
+            if (!isEditingTemplate) $btn.html('<i class="fa-solid fa-comments"></i> 聊天推断生成');
+        } else {
+            $badge.hide();
+            if (!isEditingTemplate) $btn.html(isNpc ? '<i class="fa-solid fa-wand-magic-sparkles"></i> 生成 NPC 设定' : '<i class="fa-solid fa-wand-magic-sparkles"></i> 生成 User 设定');
+        }
+    }
+
     $(document).on('input.pw', '#pw-history-search', function() { historyPage = 1; renderHistoryList(); });
     $(document).on('click.pw', '#pw-history-search-clear', function () { $('#pw-history-search').val('').trigger('input'); });
     $(document).on('click.pw', '#pw-history-clear-all', function () { if (confirm("清空?")) { historyCache = []; saveData(); renderHistoryList(); } });
