@@ -603,3 +603,171 @@
     /* diff responsive: no card overrides needed for inline diff */
     .pw-footer { flex-wrap: wrap; }
 }
+
+/* =============================================== */
+/* Chat History Reference Section                  */
+/* =============================================== */
+#pw-chat-history-section {
+    border: 1px dashed var(--SmartThemeBorderColor);
+    border-radius: 8px;
+    padding: 10px 12px;
+    background: linear-gradient(135deg, rgba(100,149,237,0.04), rgba(100,149,237,0.01));
+    transition: border-color 0.2s;
+}
+#pw-chat-history-section:has(#pw-chat-history-toggle:checked) {
+    border-color: rgba(100,149,237,0.5);
+    background: linear-gradient(135deg, rgba(100,149,237,0.08), rgba(100,149,237,0.02));
+}
+
+#pw-chat-history-body {
+    display: none;
+    flex-direction: column !important;
+    gap: 8px;
+    animation: pw-fade-in 0.2s ease;
+}
+
+@keyframes pw-fade-in {
+    from { opacity: 0; transform: translateY(-4px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+/* Token Badge */
+.pw-chat-token-badge {
+    font-size: 0.72em;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-family: monospace;
+    letter-spacing: 0.3px;
+    white-space: nowrap;
+    margin-left: auto;
+    transition: all 0.2s;
+}
+
+/* Custom Range Inputs */
+#pw-chat-custom-range {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+#pw-chat-custom-range input[type="number"] {
+    -moz-appearance: textfield;
+    appearance: textfield;
+}
+#pw-chat-custom-range input[type="number"]::-webkit-inner-spin-button,
+#pw-chat-custom-range input[type="number"]::-webkit-outer-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
+
+/* Filter Section */
+.pw-chat-filter-section {
+    border: 1px solid var(--SmartThemeBorderColor);
+    border-radius: 6px;
+    overflow: hidden;
+}
+.pw-chat-filter-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 6px 10px;
+    cursor: pointer;
+    user-select: none;
+    transition: background 0.15s;
+}
+.pw-chat-filter-header:hover {
+    background: rgba(100,149,237,0.06);
+}
+#pw-chat-filter-body {
+    padding: 6px 10px;
+    border-top: 1px solid var(--SmartThemeBorderColor);
+    flex-direction: column;
+    gap: 6px;
+}
+
+/* Tag Chips */
+.pw-chat-tag-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-size: 0.78em;
+    border: 1px solid var(--SmartThemeBorderColor);
+    background: rgba(128,128,128,0.08);
+    transition: all 0.15s;
+    cursor: pointer;
+    user-select: none;
+}
+.pw-chat-tag-chip:hover {
+    border-color: rgba(100,149,237,0.5);
+    background: rgba(100,149,237,0.08);
+}
+.pw-chat-tag-text {
+    cursor: pointer;
+}
+.pw-chat-tag-del {
+    cursor: pointer;
+    opacity: 0.5;
+    font-size: 0.85em;
+    transition: opacity 0.15s;
+}
+.pw-chat-tag-del:hover {
+    opacity: 1;
+    color: #ff6b6b;
+}
+.pw-chat-tag-include {
+    border-color: rgba(92,184,92,0.5);
+    background: rgba(92,184,92,0.1);
+    color: #5cb85c;
+}
+.pw-chat-tag-include .pw-chat-tag-text i { color: #5cb85c; }
+.pw-chat-tag-exclude {
+    border-color: rgba(255,107,107,0.4);
+    background: rgba(255,107,107,0.08);
+    color: #ff6b6b;
+}
+.pw-chat-tag-exclude .pw-chat-tag-text i { color: #ff6b6b; }
+
+/* Chat Preview Area */
+#pw-chat-preview-area {
+    font-family: var(--mainFontFamily, sans-serif);
+    word-break: break-word;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(128,128,128,0.3) transparent;
+}
+#pw-chat-preview-area::-webkit-scrollbar { width: 5px; }
+#pw-chat-preview-area::-webkit-scrollbar-thumb { background: rgba(128,128,128,0.3); border-radius: 3px; }
+
+/* Chat Infer Badge (Main View) */
+.pw-chat-infer-badge {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    margin-bottom: 8px;
+    border-radius: 8px;
+    font-size: 0.82em;
+    background: linear-gradient(135deg, rgba(100,149,237,0.12), rgba(100,149,237,0.04));
+    border: 1px solid rgba(100,149,237,0.3);
+    color: cornflowerblue;
+    animation: pw-fade-in 0.25s ease;
+}
+.pw-chat-infer-badge i {
+    font-size: 0.95em;
+}
+
+/* Scan Results Container */
+#pw-chat-scan-results {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    max-height: 100px;
+    overflow-y: auto;
+}
+
+/* Responsive adjustments */
+@media (max-width: 600px) {
+    #pw-chat-history-section { padding: 8px; }
+    .pw-chat-token-badge { font-size: 0.65em; }
+    #pw-chat-custom-range input { width: 45px !important; }
+}
