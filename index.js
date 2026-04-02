@@ -1466,13 +1466,13 @@ async function openCreatorPopup() {
     </div>
 
     <!-- Load Persona Overlay -->
-    <div id="pw-load-overlay" style="display:none; position:absolute; top:0; left:0; width:100%; height:100%; z-index:2001; background:var(--SmartThemeBlurTintColor, rgba(0,0,0,0.85)); flex-direction:column; justify-content:center; align-items:center;">
-        <div style="width:92%; max-width:500px; max-height:80vh; background:var(--smart-theme-bg, #1a1a1a); border:1px solid var(--pw-border); border-radius:8px; display:flex; flex-direction:column; overflow:hidden;">
-            <div style="padding:10px 15px; border-bottom:1px solid var(--pw-border); display:flex; align-items:center; justify-content:space-between; flex-shrink:0;">
-                <span style="font-weight:bold; font-size:1em;" id="pw-load-overlay-title">载入已有人设</span>
+    <div id="pw-load-overlay" class="pw-modal-backdrop">
+        <div class="pw-modal-card">
+            <div class="pw-modal-header">
+                <span class="pw-modal-title" id="pw-load-overlay-title">载入已有人设</span>
                 <button class="pw-btn danger" id="pw-load-overlay-close" style="padding:4px 10px;"><i class="fa-solid fa-xmark"></i></button>
             </div>
-            <div id="pw-load-overlay-content" style="flex:1; overflow-y:auto; padding:12px; min-height:0;"></div>
+            <div id="pw-load-overlay-content" class="pw-modal-body"></div>
         </div>
     </div>
 
