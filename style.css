@@ -366,38 +366,43 @@
     flex-direction: column;
 }
 
-.pw-diff-tabs-bar {
-    background-color: rgba(0,0,0,0.15);
-    border-bottom: 1px solid var(--pw-border);
-    padding: 0;
-    gap: 0;
+.pw-diff-toolbar {
     display: flex;
+    flex-wrap: nowrap;
+    gap: 4px;
+    padding: 6px 8px;
+    background: rgba(0,0,0,0.15);
+    border-bottom: 1px solid var(--pw-border);
+    flex-shrink: 0;
+    overflow-x: auto;
 }
 
-.pw-diff-tab {
-    padding: 10px 20px;
-    cursor: pointer;
-    border: none;
-    border-right: 1px solid var(--pw-border);
-    border-bottom: 1px solid var(--pw-border);
-    background: transparent;
-    color: var(--pw-text-main);
-    opacity: 0.6;
-    font-size: 0.9em;
+.pw-diff-mode-btn {
+    flex: 1 1 auto;
+    min-width: 0;
     display: flex;
-    flex-direction: column;
     align-items: center;
     justify-content: center;
+    gap: 5px;
+    padding: 7px 6px;
+    border-radius: 4px;
+    border: 1px solid var(--pw-border);
+    background: rgba(0,0,0,0.05);
+    color: var(--pw-text-main);
+    cursor: pointer;
+    font-size: 0.85em;
+    font-weight: bold;
+    white-space: nowrap;
+    transition: 0.2s;
+    opacity: 0.65;
 }
-
-.pw-diff-tab.active {
-    background-color: var(--pw-paper-bg);
-    color: var(--pw-text-main) !important;
+.pw-diff-mode-btn:hover { opacity: 0.9; background: rgba(128,128,128,0.15); }
+.pw-diff-mode-btn.active {
+    background: var(--SmartThemeQuoteColor, #5b8db8) !important;
+    color: #fff !important;
+    border-color: transparent !important;
     opacity: 1;
-    border-bottom: 1px solid var(--pw-paper-bg);
 }
-
-.pw-tab-sub { font-size: 0.75em; opacity: 0.7; font-weight: normal; margin-top: 2px; }
 
 .pw-diff-content-area {
     flex: 1;
@@ -406,88 +411,7 @@
     background-color: var(--pw-paper-bg);
 }
 
-.pw-diff-list-view { overflow-y: auto; height: 100%; padding-right: 5px; }
-
-.pw-diff-row {
-    background: rgba(0,0,0,0.08);
-    border: 1px solid var(--pw-border);
-    border-radius: 8px;
-    padding: 0;
-    margin-bottom: 15px;
-    overflow: hidden;
-}
-
-.pw-diff-attr-name {
-    background: rgba(0,0,0,0.12);
-    color: var(--pw-text-main);
-    padding: 8px;
-    font-weight: bold;
-    text-align: center;
-    border-bottom: 1px solid var(--pw-border);
-    font-size: 1em;
-    margin: 0;
-}
-
-.pw-diff-cards {
-    display: flex;
-    padding: 10px;
-    gap: 10px;
-    background: transparent;
-}
-
-.pw-diff-card {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    border: 1px solid var(--pw-border);
-    border-radius: 6px;
-    background: rgba(0,0,0,0.06);
-    overflow: hidden;
-    cursor: pointer;
-    opacity: 0.6;
-    transition: all 0.2s;
-}
-
-.pw-diff-card:hover { opacity: 0.9; }
-
-/* Highlight Selected Card */
-.pw-diff-card.selected {
-    border: 2px solid var(--SmartThemeQuoteColor, #83c168) !important;
-    opacity: 1 !important;
-    box-shadow: 0 0 10px rgba(131, 193, 104, 0.15);
-}
-
-.pw-diff-label {
-    text-align: center;
-    font-size: 0.8em;
-    padding: 5px;
-    background: rgba(0,0,0,0.1);
-    color: var(--pw-text-main);
-    opacity: 0.7;
-    border-bottom: 1px solid var(--pw-border);
-    font-weight: bold;
-}
-
-.pw-diff-card.selected .pw-diff-label {
-    background: rgba(131, 193, 104, 0.15);
-    color: var(--SmartThemeQuoteColor, #83c168) !important;
-    opacity: 1;
-    border-bottom: 1px solid var(--SmartThemeQuoteColor, #83c168);
-}
-
-.pw-diff-textarea {
-    width: 100%;
-    background: transparent;
-    border: none;
-    color: var(--pw-text-main);
-    padding: 10px;
-    font-family: inherit;
-    font-size: 0.95em;
-    resize: none;
-    outline: none;
-    line-height: 1.5;
-    min-height: 80px;
-}
+/* (old card-based diff styles removed — replaced by inline LCS diff) */
 
 .pw-diff-actions {
     background: rgba(0,0,0,0.1);
@@ -502,56 +426,110 @@
 #pw-diff-cancel { background: transparent; border: 1px solid var(--pw-danger); color: var(--pw-danger); }
 #pw-diff-cancel:hover { background: rgba(255, 107, 107, 0.1); }
 
-.pw-diff-raw-view { display: none; height: 100%; }
-.pw-diff-raw-textarea {
-    width: 100%; height: 100%;
-    background: rgba(0,0,0,0.08);
-    color: var(--pw-text-main);
-    border: 1px solid var(--pw-border);
-    padding: 10px;
-    font-family: monospace;
-    resize: none;
-    outline: none;
-    font-size: 0.85em;
-    line-height: 1.4;
-}
-
 /* =========================================
-   Merge Diff View (Inline)
+   Inline LCS Diff View + Sub-view Modes
 ========================================= */
 .pw-diff-merge-view { overflow-y: auto; height: 100%; padding-right: 5px; }
-#pw-diff-merge-list { display: flex; flex-direction: column; gap: 2px; }
+#pw-diff-merge-list {
+    line-height: 1.8;
+    word-break: break-word;
+    overflow-wrap: break-word;
+    white-space: pre-wrap;
+    font-size: 0.95em;
+    color: var(--pw-text-main);
+}
 
-.pw-merge-block { border-radius: 4px; padding: 4px 8px; }
-.pw-merge-block.unchanged { opacity: 0.75; }
-.pw-merge-block.changed { background: rgba(128,128,128,0.08); border: 1px solid var(--pw-border); border-radius: 6px; padding: 8px; margin: 4px 0; }
+.pw-diff-hint {
+    padding: 6px 10px;
+    font-size: 0.8em;
+    color: #d68b1c;
+    background: rgba(240, 173, 78, 0.1);
+    border-bottom: 1px dashed rgba(240, 173, 78, 0.3);
+    text-align: left;
+    flex-shrink: 0;
+}
 
-.pw-merge-key { font-weight: bold; color: var(--SmartThemeQuoteColor, #83c168); font-size: 0.95em; margin-bottom: 2px; }
-.pw-merge-badge { font-size: 0.7em; padding: 1px 6px; border-radius: 3px; font-weight: normal; margin-left: 6px; color: #fff; }
-.pw-merge-block .pw-merge-badge { background: var(--SmartThemeQuoteColor, #e8a04a); }
+.pw-diff-group { display: inline; }
 
-.pw-merge-static { padding-left: 12px; }
-.pw-merge-static pre { margin: 0; white-space: pre-wrap; font-family: inherit; font-size: 0.9em; color: var(--pw-text-main); line-height: 1.5; }
+.pw-idiff-old {
+    color: #d9534f;
+    cursor: pointer;
+    background: rgba(217,83,79,0.12);
+    border-radius: 3px;
+    margin: 0 1px;
+    padding: 0 2px;
+    transition: 0.2s;
+    display: inline;
+    -webkit-box-decoration-break: clone;
+    box-decoration-break: clone;
+}
 
-.pw-merge-versions { display: flex; flex-direction: column; gap: 4px; margin-top: 4px; }
+.pw-idiff-new {
+    color: #5cb85c;
+    cursor: pointer;
+    background: rgba(92,184,92,0.12);
+    border-radius: 3px;
+    margin: 0 1px;
+    padding: 0 2px;
+    transition: 0.2s;
+    display: inline;
+    -webkit-box-decoration-break: clone;
+    box-decoration-break: clone;
+}
 
-.pw-merge-version { position: relative; padding: 6px 8px 6px 32px; border-radius: 4px; cursor: pointer; transition: all 0.2s; border: 1px solid transparent; }
+.pw-idiff-old:hover, .pw-idiff-new:hover { filter: brightness(0.85); }
 
-.pw-merge-vlabel { position: absolute; left: 6px; top: 6px; font-size: 0.7em; font-weight: bold; padding: 1px 4px; border-radius: 3px; color: #fff; pointer-events: none; }
-.pw-merge-old .pw-merge-vlabel { background: #e06060; }
-.pw-merge-new .pw-merge-vlabel { background: var(--SmartThemeQuoteColor, #83c168); }
+.pw-idiff-old.inactive {
+    text-decoration: line-through;
+    opacity: 0.35;
+    background: transparent;
+    font-weight: normal;
+}
+.pw-idiff-new.inactive {
+    text-decoration: line-through;
+    opacity: 0.35;
+    background: transparent;
+    font-weight: normal;
+}
 
-/* Unselected version: strikethrough + faded */
-.pw-merge-version:not(.selected) { opacity: 0.45; }
-.pw-merge-version:not(.selected) .pw-merge-content pre { text-decoration: line-through; text-decoration-color: rgba(200,60,60,0.6); }
-.pw-merge-version:not(.selected):hover { opacity: 0.7; background: rgba(128,128,128,0.1); }
+.pw-idiff-old.active {
+    font-weight: bold;
+    background: rgba(217,83,79,0.28);
+    color: #c9302c;
+    box-shadow: inset 0 0 0 1px rgba(217,83,79,0.5);
+}
+.pw-idiff-new.active {
+    font-weight: bold;
+    background: rgba(92,184,92,0.28);
+    color: #449d44;
+    box-shadow: inset 0 0 0 1px rgba(92,184,92,0.5);
+}
 
-/* Selected version: highlighted + editable */
-.pw-merge-version.selected { opacity: 1; border-color: var(--SmartThemeQuoteColor, #83c168); background: rgba(131, 193, 104, 0.06); }
+/* Sub-view: Old Only — hide new, show old as plain */
+.pw-diff-mode-old .pw-idiff-new { display: none; }
+.pw-diff-mode-old .pw-idiff-old {
+    background: none; color: inherit; padding: 0; margin: 0;
+    text-decoration: none; font-weight: normal; opacity: 1;
+    pointer-events: none; box-shadow: none; cursor: default;
+}
 
-.pw-merge-content pre { margin: 0; white-space: pre-wrap; font-family: inherit; font-size: 0.9em; color: var(--pw-text-main); line-height: 1.5; }
+/* Sub-view: New Only — hide old, show new as plain */
+.pw-diff-mode-new .pw-idiff-old { display: none; }
+.pw-diff-mode-new .pw-idiff-new {
+    background: none; color: inherit; padding: 0; margin: 0;
+    text-decoration: none; font-weight: normal; opacity: 1;
+    pointer-events: none; box-shadow: none; cursor: default;
+}
 
-.pw-merge-textarea { width: 100%; background: transparent; border: none; color: var(--pw-text-main); font-family: inherit; font-size: 0.9em; resize: none; outline: none; line-height: 1.5; min-height: 40px; padding: 0; field-sizing: content; }
+/* Sub-view: Final Preview — hide inactive, show active as plain */
+.pw-diff-mode-final .pw-idiff-old.inactive,
+.pw-diff-mode-final .pw-idiff-new.inactive { display: none; }
+.pw-diff-mode-final .pw-idiff-old.active,
+.pw-diff-mode-final .pw-idiff-new.active {
+    background: none; color: inherit; padding: 0; margin: 0;
+    text-decoration: none; font-weight: normal; opacity: 1;
+    pointer-events: none; box-shadow: none; cursor: default;
+}
 
 /* =========================================
    System & Footer
@@ -584,7 +562,6 @@
     .pw-depth-input { flex: 1; min-width: 0; padding: 4px 2px; text-align: center; font-size: 0.8em; }
     .pw-wi-filter-row span { font-size: 0.8em; align-self: center; }
     #d-reset { margin-left: 2px; padding: 4px 6px; font-size: 0.8em; white-space: nowrap; }
-    .pw-diff-cards { flex-direction: column; }
-    .pw-diff-card { width: 100%; }
+    /* diff responsive: no card overrides needed for inline diff */
     .pw-footer { flex-wrap: wrap; }
 }
