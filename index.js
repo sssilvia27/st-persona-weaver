@@ -1861,9 +1861,9 @@ async function openCreatorPopup() {
             </div>
 
             <div class="pw-card-section" id="pw-avatar-mgmt-section">
-                <div class="pw-row" style="margin-bottom:5px;">
-                    <label class="pw-section-label">头像参考</label>
-                    <div style="display:flex; gap:6px; align-items:center;">
+                <div class="pw-row" style="margin-bottom:5px; flex-wrap:nowrap;">
+                    <label class="pw-section-label" style="flex-shrink:0;">头像参考</label>
+                    <div style="display:flex; gap:6px; align-items:center; margin-left:auto; flex-shrink:0;">
                         <label class="pw-mini-btn" style="cursor:pointer; display:inline-flex; align-items:center; gap:4px; padding:3px 10px; font-size:0.8em;">
                             <i class="fa-solid fa-upload"></i> 上传
                             <input type="file" id="pw-avatar-upload" accept="image/*" multiple style="display:none;">
@@ -1993,11 +1993,40 @@ async function openCreatorPopup() {
             <div class="pw-card-section">
                 <div class="pw-row" style="margin-bottom:4px;">
                     <label style="color: var(--SmartThemeQuoteColor); font-weight:bold;"><i class="fa-solid fa-box-archive"></i> 数据迁移</label>
+                    <label style="font-size:0.75em; cursor:pointer; opacity:0.6; margin-left:auto;" id="pw-migrate-toggle-all">全选/取消</label>
                 </div>
-                <div style="font-size:0.8em; opacity:0.7; margin-bottom:6px;">一键导出/导入头像、历史记录、模版等全部数据</div>
+                <div class="pw-migrate-checks" style="display:flex; flex-wrap:wrap; gap:6px 14px; font-size:0.85em; margin-bottom:8px;">
+                    <label style="display:flex; align-items:center; gap:4px; cursor:pointer;">
+                        <input type="checkbox" class="pw-migrate-chk" data-key="avatars" checked> 头像 <span style="opacity:0.5; font-size:0.85em;">(${avatarImagesCache.length}张)</span>
+                    </label>
+                    <label style="display:flex; align-items:center; gap:4px; cursor:pointer;">
+                        <input type="checkbox" class="pw-migrate-chk" data-key="history" checked> 历史记录 <span style="opacity:0.5; font-size:0.85em;">(${historyCache.length}条)</span>
+                    </label>
+                    <label style="display:flex; align-items:center; gap:4px; cursor:pointer;">
+                        <input type="checkbox" class="pw-migrate-chk" data-key="userData" checked> User数据
+                    </label>
+                    <label style="display:flex; align-items:center; gap:4px; cursor:pointer;">
+                        <input type="checkbox" class="pw-migrate-chk" data-key="npcData" checked> NPC数据
+                    </label>
+                    <label style="display:flex; align-items:center; gap:4px; cursor:pointer;">
+                        <input type="checkbox" class="pw-migrate-chk" data-key="prompts"> Prompt设置
+                    </label>
+                    <label style="display:flex; align-items:center; gap:4px; cursor:pointer;">
+                        <input type="checkbox" class="pw-migrate-chk" data-key="themes"> 自定义主题
+                    </label>
+                </div>
+                <div class="pw-row" style="gap:6px; margin-bottom:6px; font-size:0.82em; align-items:center;">
+                    <span style="opacity:0.7;">导入模式:</span>
+                    <label style="display:flex; align-items:center; gap:3px; cursor:pointer;">
+                        <input type="radio" name="pw-import-mode" value="merge" checked> 合并(追加不重复)
+                    </label>
+                    <label style="display:flex; align-items:center; gap:3px; cursor:pointer;">
+                        <input type="radio" name="pw-import-mode" value="overwrite"> 覆盖(替换全部)
+                    </label>
+                </div>
                 <div class="pw-row" style="gap:8px;">
-                    <button class="pw-btn primary" id="pw-btn-export-data" style="flex:1;"><i class="fa-solid fa-file-export"></i> 导出全部数据</button>
-                    <button class="pw-btn primary" id="pw-btn-import-data" style="flex:1;"><i class="fa-solid fa-file-import"></i> 导入数据</button>
+                    <button class="pw-btn primary" id="pw-btn-export-data" style="flex:1;"><i class="fa-solid fa-file-export"></i> 导出选中</button>
+                    <button class="pw-btn primary" id="pw-btn-import-data" style="flex:1;"><i class="fa-solid fa-file-import"></i> 导入选中</button>
                     <input type="file" id="pw-data-import-file" accept=".json" style="display:none;">
                 </div>
             </div>
@@ -2105,6 +2134,37 @@ async function openCreatorPopup() {
 `;
 
     callPopup(html, 'text', '', { wide: true, large: true, okButton: "Close" });
+
+    // Force popup to use maximum screen space
+    requestAnimationFrame(() => {
+        const $wrapper = $('.pw-wrapper');
+        if ($wrapper.length) {
+            const $popup = $wrapper.closest('.dialogue_popup, .dialogue_popup_large, [class*="popup"]');
+            if ($popup.length) {
+                $popup.css({
+                    'width': '95vw', 'max-width': '95vw',
+                    'height': '95vh', 'max-height': '95vh',
+                    'margin': 'auto'
+                });
+                $popup.find('.dialogue_popup_text, .popup-body, .popup_text').css({
+                    'max-height': 'none', 'height': '100%', 'overflow': 'hidden'
+                });
+                $popup.addClass('pw-fullscreen-popup');
+            }
+            // Also try shadow_popup parent structure
+            const $shadow = $wrapper.closest('#dialogue_popup');
+            if ($shadow.length) {
+                $shadow.css({
+                    'width': '95vw', 'max-width': '95vw',
+                    'height': '95vh', 'max-height': '95vh',
+                    'margin': 'auto'
+                });
+                $shadow.find('.dialogue_popup_text').css({
+                    'max-height': 'none', 'height': '100%', 'overflow': 'hidden'
+                });
+            }
+        }
+    });
 
     updatePromise.then(updateInfo => {
         hasNewVersion = !!updateInfo;
@@ -2561,22 +2621,30 @@ function bindEvents() {
         URL.revokeObjectURL(url);
     });
 
+    // --- Data Migration: Toggle All ---
+    $(document).on('click.pw', '#pw-migrate-toggle-all', function() {
+        const $chks = $('.pw-migrate-chk');
+        const allChecked = $chks.toArray().every(c => c.checked);
+        $chks.prop('checked', !allChecked);
+    });
+
+    function getSelectedMigrateKeys() {
+        return $('.pw-migrate-chk:checked').map(function() { return $(this).data('key'); }).get();
+    }
+
     // --- Data Migration: Export ---
     $(document).on('click.pw', '#pw-btn-export-data', function() {
+        const keys = getSelectedMigrateKeys();
+        if (keys.length === 0) { toastr.warning('请至少勾选一项要导出的数据'); return; }
         try {
-            const exportData = {
-                _pw_export: true,
-                version: CURRENT_VERSION,
-                exportedAt: new Date().toISOString(),
-                avatars: avatarImagesCache || [],
-                history: historyCache || [],
-                userData: (() => { try { return JSON.parse(localStorage.getItem(STORAGE_KEY_DATA_USER)) || {}; } catch { return {}; } })(),
-                npcData: (() => { try { return JSON.parse(localStorage.getItem(STORAGE_KEY_DATA_NPC)) || {}; } catch { return {}; } })(),
-                prompts: (() => { try { return JSON.parse(localStorage.getItem(STORAGE_KEY_PROMPTS)) || null; } catch { return null; } })(),
-                uiState: uiStateCache,
-                themes: customThemes || {},
-                pinnedBooks: (() => { try { return JSON.parse(localStorage.getItem(STORAGE_KEY_PINNED_BOOKS)) || []; } catch { return []; } })(),
-            };
+            const exportData = { _pw_export: true, version: CURRENT_VERSION, exportedAt: new Date().toISOString() };
+            const parts = [];
+            if (keys.includes('avatars')) { exportData.avatars = avatarImagesCache || []; parts.push(`${exportData.avatars.length} 头像`); }
+            if (keys.includes('history')) { exportData.history = historyCache || []; parts.push(`${exportData.history.length} 历史`); }
+            if (keys.includes('userData')) { exportData.userData = (() => { try { return JSON.parse(localStorage.getItem(STORAGE_KEY_DATA_USER)) || {}; } catch { return {}; } })(); parts.push('User数据'); }
+            if (keys.includes('npcData')) { exportData.npcData = (() => { try { return JSON.parse(localStorage.getItem(STORAGE_KEY_DATA_NPC)) || {}; } catch { return {}; } })(); parts.push('NPC数据'); }
+            if (keys.includes('prompts')) { exportData.prompts = (() => { try { return JSON.parse(localStorage.getItem(STORAGE_KEY_PROMPTS)) || null; } catch { return null; } })(); parts.push('Prompt'); }
+            if (keys.includes('themes')) { exportData.themes = customThemes || {}; parts.push('主题'); }
             const blob = new Blob([JSON.stringify(exportData)], { type: 'application/json' });
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
@@ -2584,7 +2652,7 @@ function bindEvents() {
             a.download = `persona_weaver_backup_${new Date().toISOString().slice(0,10)}.json`;
             document.body.appendChild(a); a.click(); document.body.removeChild(a);
             URL.revokeObjectURL(url);
-            toastr.success(`已导出: ${(exportData.avatars || []).length} 头像, ${(exportData.history || []).length} 历史记录`);
+            toastr.success(`已导出: ${parts.join(', ')}`);
         } catch (e) {
             console.error('[PW] Export failed:', e);
             toastr.error('导出失败: ' + e.message);
@@ -2596,41 +2664,85 @@ function bindEvents() {
     $(document).on('change.pw', '#pw-data-import-file', function() {
         const file = this.files?.[0];
         if (!file) return;
+        const keys = getSelectedMigrateKeys();
+        if (keys.length === 0) { toastr.warning('请至少勾选一项要导入的数据'); $(this).val(''); return; }
+        const isMerge = $('input[name="pw-import-mode"]:checked').val() === 'merge';
         const reader = new FileReader();
         reader.onload = (ev) => {
             try {
                 const data = JSON.parse(ev.target.result);
                 if (!data._pw_export) { toastr.error('无效的备份文件'); return; }
                 const parts = [];
-                if (data.avatars?.length) {
-                    avatarImagesCache = data.avatars;
+
+                if (keys.includes('avatars') && data.avatars?.length) {
+                    if (isMerge) {
+                        const existingIds = new Set(avatarImagesCache.map(a => a.id));
+                        let added = 0;
+                        for (const av of data.avatars) {
+                            if (!existingIds.has(av.id)) { avatarImagesCache.push(av); added++; }
+                        }
+                        parts.push(`头像 +${added}张(已有${avatarImagesCache.length - added}张跳过)`);
+                    } else {
+                        avatarImagesCache = data.avatars;
+                        parts.push(`头像 ${data.avatars.length}张(覆盖)`);
+                    }
                     saveAvatarImages();
-                    parts.push(`${data.avatars.length} 头像`);
                 }
-                if (data.history?.length) {
-                    historyCache = data.history;
+                if (keys.includes('history') && data.history?.length) {
+                    if (isMerge) {
+                        const existingIds = new Set(historyCache.map(h => h.id || (h.charName + '_' + h.timestamp)));
+                        let added = 0;
+                        for (const h of data.history) {
+                            const hid = h.id || (h.charName + '_' + h.timestamp);
+                            if (!existingIds.has(hid)) { historyCache.push(h); added++; }
+                        }
+                        parts.push(`历史 +${added}条(已有${data.history.length - added}条跳过)`);
+                    } else {
+                        historyCache = data.history;
+                        parts.push(`历史 ${data.history.length}条(覆盖)`);
+                    }
                     safeLocalStorageSet(STORAGE_KEY_HISTORY, JSON.stringify(historyCache));
-                    parts.push(`${data.history.length} 历史`);
                 }
-                if (data.userData && Object.keys(data.userData).length) {
-                    safeLocalStorageSet(STORAGE_KEY_DATA_USER, JSON.stringify(data.userData));
-                    parts.push('User数据');
+                if (keys.includes('userData') && data.userData && Object.keys(data.userData).length) {
+                    if (isMerge) {
+                        try {
+                            const existing = JSON.parse(localStorage.getItem(STORAGE_KEY_DATA_USER)) || {};
+                            Object.keys(data.userData).forEach(k => { if (!existing[k]) existing[k] = data.userData[k]; });
+                            safeLocalStorageSet(STORAGE_KEY_DATA_USER, JSON.stringify(existing));
+                        } catch { safeLocalStorageSet(STORAGE_KEY_DATA_USER, JSON.stringify(data.userData)); }
+                        parts.push('User数据(合并)');
+                    } else {
+                        safeLocalStorageSet(STORAGE_KEY_DATA_USER, JSON.stringify(data.userData));
+                        parts.push('User数据(覆盖)');
+                    }
                 }
-                if (data.npcData && Object.keys(data.npcData).length) {
-                    safeLocalStorageSet(STORAGE_KEY_DATA_NPC, JSON.stringify(data.npcData));
-                    parts.push('NPC数据');
+                if (keys.includes('npcData') && data.npcData && Object.keys(data.npcData).length) {
+                    if (isMerge) {
+                        try {
+                            const existing = JSON.parse(localStorage.getItem(STORAGE_KEY_DATA_NPC)) || {};
+                            Object.keys(data.npcData).forEach(k => { if (!existing[k]) existing[k] = data.npcData[k]; });
+                            safeLocalStorageSet(STORAGE_KEY_DATA_NPC, JSON.stringify(existing));
+                        } catch { safeLocalStorageSet(STORAGE_KEY_DATA_NPC, JSON.stringify(data.npcData)); }
+                        parts.push('NPC数据(合并)');
+                    } else {
+                        safeLocalStorageSet(STORAGE_KEY_DATA_NPC, JSON.stringify(data.npcData));
+                        parts.push('NPC数据(覆盖)');
+                    }
                 }
-                if (data.prompts) {
+                if (keys.includes('prompts') && data.prompts) {
                     safeLocalStorageSet(STORAGE_KEY_PROMPTS, JSON.stringify(data.prompts));
-                    parts.push('Prompt');
+                    parts.push('Prompt(覆盖)');
                 }
-                if (data.themes && Object.keys(data.themes).length) {
-                    Object.assign(customThemes, data.themes);
+                if (keys.includes('themes') && data.themes && Object.keys(data.themes).length) {
+                    if (isMerge) {
+                        const before = Object.keys(customThemes).length;
+                        Object.keys(data.themes).forEach(k => { if (!customThemes[k]) customThemes[k] = data.themes[k]; });
+                        parts.push(`主题 +${Object.keys(customThemes).length - before}个`);
+                    } else {
+                        Object.assign(customThemes, data.themes);
+                        parts.push('主题(覆盖)');
+                    }
                     safeLocalStorageSet(STORAGE_KEY_THEMES, JSON.stringify(customThemes));
-                    parts.push('主题');
-                }
-                if (data.pinnedBooks?.length) {
-                    safeLocalStorageSet(STORAGE_KEY_PINNED_BOOKS, JSON.stringify(data.pinnedBooks));
                 }
                 toastr.success(`已导入: ${parts.join(', ')}`);
                 renderAvatarMgmt();
