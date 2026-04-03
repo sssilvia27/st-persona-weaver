@@ -1861,15 +1861,13 @@ async function openCreatorPopup() {
             </div>
 
             <div class="pw-card-section" id="pw-avatar-mgmt-section">
-                <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:5px;">
-                    <label class="pw-section-label" style="min-width:0; overflow:hidden; text-overflow:ellipsis;">头像参考</label>
-                    <div style="display:flex; gap:4px; align-items:center; flex-shrink:0;">
-                        <label class="pw-mini-btn" style="cursor:pointer; display:inline-flex; align-items:center; gap:3px; padding:2px 7px; font-size:0.75em; white-space:nowrap;">
-                            <i class="fa-solid fa-upload"></i> 上传
-                            <input type="file" id="pw-avatar-upload" accept="image/*" multiple style="display:none;">
-                        </label>
-                        <span id="pw-avatar-mgmt-collapse" style="cursor:pointer; opacity:0.5; font-size:0.85em; padding:2px;" title="展开/收起"><i class="fa-solid fa-chevron-down"></i></span>
-                    </div>
+                <div style="display:flex; align-items:center; gap:8px; margin-bottom:5px;">
+                    <label class="pw-section-label" style="flex:1; min-width:0;">头像参考</label>
+                    <label class="pw-mini-btn" style="cursor:pointer; display:inline-flex; align-items:center; gap:3px; padding:2px 8px; font-size:0.75em; white-space:nowrap; flex-shrink:0;">
+                        <i class="fa-solid fa-upload"></i> 上传
+                        <input type="file" id="pw-avatar-upload" accept="image/*" multiple style="display:none;">
+                    </label>
+                    <span id="pw-avatar-mgmt-collapse" style="cursor:pointer; opacity:0.5; font-size:0.85em; padding:2px 4px; flex-shrink:0;" title="展开/收起"><i class="fa-solid fa-chevron-down"></i></span>
                 </div>
                 <div id="pw-avatar-mgmt-body" class="pw-avatar-mgmt-body">
                     <div id="pw-avatar-mgmt-grid" class="pw-avatar-mgmt-grid"></div>
@@ -2111,24 +2109,6 @@ async function openCreatorPopup() {
 `;
 
     callPopup(html, 'text', '', { wide: true, large: true, okButton: "Close" });
-
-    // Force popup to fill screen via JS (CSS :has() unreliable in WebView)
-    setTimeout(() => {
-        const wrapper = document.querySelector('.pw-wrapper');
-        if (!wrapper) return;
-        let popup = wrapper.parentElement;
-        while (popup && !popup.classList.contains('dialogue_popup_large') && !popup.classList.contains('dialogue_popup') && popup !== document.body) {
-            popup = popup.parentElement;
-        }
-        if (!popup || popup === document.body) return;
-        const isMobile = window.innerWidth <= 600;
-        const s = isMobile ? '100' : '95';
-        popup.style.cssText += `; width:${s}vw !important; max-width:${s}vw !important; height:${s}vh !important; max-height:${s}vh !important; left:${isMobile ? '0' : '50%'} !important; top:${isMobile ? '0' : '50%'} !important; transform:${isMobile ? 'none' : 'translate(-50%,-50%)'} !important; margin:0 !important; position:fixed !important;`;
-        const textEl = popup.querySelector('.dialogue_popup_text');
-        if (textEl) textEl.style.cssText += '; max-height:none !important; height:100% !important; overflow:hidden !important;';
-        const ctrlEl = popup.querySelector('.dialogue_popup_controls');
-        if (ctrlEl) ctrlEl.style.cssText += '; padding:4px 8px !important;';
-    }, 100);
 
     updatePromise.then(updateInfo => {
         hasNewVersion = !!updateInfo;
