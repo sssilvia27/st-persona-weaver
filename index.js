@@ -1994,12 +1994,12 @@ async function openCreatorPopup() {
                 <div class="pw-row" style="margin-bottom:4px;">
                     <label class="pw-section-label">数据迁移</label>
                 </div>
-                <div style="font-size:0.8em; opacity:0.7; margin-bottom:6px;">勾选要导出/导入的内容</div>
+                <div style="font-size:0.8em; opacity:0.7; margin-bottom:6px; text-align:left;">勾选要导出/导入的内容</div>
                 <div class="pw-migration-checks" style="display:flex; flex-wrap:wrap; gap:6px 14px; margin-bottom:8px; font-size:0.85em;">
-                    <label style="display:flex; align-items:center; gap:4px; cursor:pointer;"><input type="checkbox" class="pw-migrate-opt" value="avatars" checked> 头像</label>
+                    <label style="display:flex; align-items:center; gap:4px; cursor:pointer;"><input type="checkbox" class="pw-migrate-opt" value="avatars" checked> 参考头像</label>
                     <label style="display:flex; align-items:center; gap:4px; cursor:pointer;"><input type="checkbox" class="pw-migrate-opt" value="history" checked> 存档记录</label>
                     <label style="display:flex; align-items:center; gap:4px; cursor:pointer;"><input type="checkbox" class="pw-migrate-opt" value="prompts" checked> Prompt</label>
-                    <label style="display:flex; align-items:center; gap:4px; cursor:pointer;"><input type="checkbox" class="pw-migrate-opt" value="themes" checked> 主题</label>
+                    <label style="display:flex; align-items:center; gap:4px; cursor:pointer;"><input type="checkbox" class="pw-migrate-opt" value="themes" checked> 界面主题</label>
                 </div>
                 <div class="pw-row" style="gap:8px;">
                     <button class="pw-btn primary" id="pw-btn-export-data" style="flex:1;"><i class="fa-solid fa-file-export"></i> 导出</button>
@@ -2113,26 +2113,22 @@ async function openCreatorPopup() {
     callPopup(html, 'text', '', { wide: true, large: true, okButton: "Close" });
 
     // Force popup to fill screen via JS (CSS :has() unreliable in WebView)
-    requestAnimationFrame(() => {
-        const $wrapper = $('.pw-wrapper');
-        if ($wrapper.length) {
-            const $popup = $wrapper.closest('.dialogue_popup_large, .dialogue_popup, [class*="popup"]');
-            if ($popup.length) {
-                const isMobile = window.innerWidth <= 600;
-                const size = isMobile ? '100' : '95';
-                $popup.css({
-                    'width': size + 'vw', 'max-width': size + 'vw',
-                    'height': size + 'vh', 'max-height': size + 'vh',
-                    'margin': isMobile ? '0' : 'auto',
-                    'border-radius': isMobile ? '0' : '',
-                });
-                $popup.find('.dialogue_popup_text, .popup_text, [class*="popup_text"]').css({
-                    'max-height': 'none', 'height': '100%', 'overflow': 'hidden'
-                });
-                $popup.find('.dialogue_popup_controls, .popup_controls').css('padding', '4px 8px');
-            }
+    setTimeout(() => {
+        const wrapper = document.querySelector('.pw-wrapper');
+        if (!wrapper) return;
+        let popup = wrapper.parentElement;
+        while (popup && !popup.classList.contains('dialogue_popup_large') && !popup.classList.contains('dialogue_popup') && popup !== document.body) {
+            popup = popup.parentElement;
         }
-    });
+        if (!popup || popup === document.body) return;
+        const isMobile = window.innerWidth <= 600;
+        const s = isMobile ? '100' : '95';
+        popup.style.cssText += `; width:${s}vw !important; max-width:${s}vw !important; height:${s}vh !important; max-height:${s}vh !important; left:${isMobile ? '0' : '50%'} !important; top:${isMobile ? '0' : '50%'} !important; transform:${isMobile ? 'none' : 'translate(-50%,-50%)'} !important; margin:0 !important; position:fixed !important;`;
+        const textEl = popup.querySelector('.dialogue_popup_text');
+        if (textEl) textEl.style.cssText += '; max-height:none !important; height:100% !important; overflow:hidden !important;';
+        const ctrlEl = popup.querySelector('.dialogue_popup_controls');
+        if (ctrlEl) ctrlEl.style.cssText += '; padding:4px 8px !important;';
+    }, 100);
 
     updatePromise.then(updateInfo => {
         hasNewVersion = !!updateInfo;
