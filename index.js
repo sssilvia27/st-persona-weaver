@@ -1677,13 +1677,13 @@ async function openCreatorPopup() {
 <div class="pw-wrapper">
     <div class="pw-header">
         <div class="pw-top-bar"><div class="pw-title">${headerTitle}</div></div>
-    </div>
-    <div class="pw-tabs">
-        <div class="pw-tab active" data-tab="editor">人设</div>
-        <div class="pw-tab" data-tab="context">参考</div> 
-        <div class="pw-tab" data-tab="api">API</div>
-        <div class="pw-tab" data-tab="system">系统</div>
-        <div class="pw-tab" data-tab="history">记录</div>
+        <div class="pw-tabs">
+            <div class="pw-tab active" data-tab="editor">人设</div>
+            <div class="pw-tab" data-tab="context">参考</div> 
+            <div class="pw-tab" data-tab="api">API</div>
+            <div class="pw-tab" data-tab="system">系统</div>
+            <div class="pw-tab" data-tab="history">记录</div>
+        </div>
     </div>
 
     <!-- Editor View -->
@@ -1864,11 +1864,11 @@ async function openCreatorPopup() {
                 <div class="pw-row" style="margin-bottom:5px; flex-wrap:nowrap;">
                     <label class="pw-section-label" style="flex-shrink:0;">头像参考</label>
                     <div style="display:flex; gap:6px; align-items:center; margin-left:auto; flex-shrink:0;">
-                        <label class="pw-mini-btn" style="cursor:pointer; display:inline-flex; align-items:center; gap:4px; padding:3px 10px; font-size:0.8em;">
+                        <label class="pw-mini-btn" style="cursor:pointer; display:inline-flex; align-items:center; gap:3px; padding:2px 8px; font-size:0.75em; white-space:nowrap;">
                             <i class="fa-solid fa-upload"></i> 上传
                             <input type="file" id="pw-avatar-upload" accept="image/*" multiple style="display:none;">
                         </label>
-                        <span id="pw-avatar-mgmt-collapse" style="cursor:pointer; opacity:0.5; font-size:0.85em;" title="展开/收起"><i class="fa-solid fa-chevron-down"></i></span>
+                        <span id="pw-avatar-mgmt-collapse" style="cursor:pointer; opacity:0.5; font-size:0.85em; padding:2px 4px;" title="展开/收起"><i class="fa-solid fa-chevron-down"></i></span>
                     </div>
                 </div>
                 <div id="pw-avatar-mgmt-body" class="pw-avatar-mgmt-body">
@@ -1965,7 +1965,7 @@ async function openCreatorPopup() {
             <!-- 1. 新版本检查区域 -->
             <div class="pw-card-section">
                 <div class="pw-row" style="margin-bottom:8px; border-bottom:1px solid var(--SmartThemeBorderColor); padding-bottom:5px;">
-                    <label style="color: var(--SmartThemeQuoteColor);"><i class="fa-solid fa-circle-info"></i> 插件版本</label>
+                    <label class="pw-section-label">插件版本</label>
                     <span style="opacity:0.8; font-family:monospace;">当前: v${CURRENT_VERSION}</span>
                 </div>
                 ${updateUiHtml}
@@ -1974,7 +1974,7 @@ async function openCreatorPopup() {
             <!-- Theme Selector -->
             <div class="pw-card-section">
                 <div class="pw-row">
-                    <label style="color: var(--SmartThemeQuoteColor); font-weight:bold;"><i class="fa-solid fa-palette"></i> 界面主题</label>
+                    <label class="pw-section-label">界面主题</label>
                     <div style="flex:1; display:flex; gap:5px;">
                         <select id="pw-theme-select" class="pw-input" style="flex:1;">
                             <option value="style.css" selected>默认 (Native)</option>
@@ -1992,12 +1992,20 @@ async function openCreatorPopup() {
             <!-- Data Migration -->
             <div class="pw-card-section">
                 <div class="pw-row" style="margin-bottom:4px;">
-                    <label style="color: var(--SmartThemeQuoteColor); font-weight:bold;"><i class="fa-solid fa-box-archive"></i> 数据迁移</label>
+                    <label class="pw-section-label">数据迁移</label>
                 </div>
-                <div style="font-size:0.8em; opacity:0.7; margin-bottom:6px;">一键导出/导入头像、历史记录、模版等全部数据</div>
+                <div style="font-size:0.8em; opacity:0.7; margin-bottom:6px;">勾选要导出/导入的内容</div>
+                <div class="pw-migration-checks" style="display:flex; flex-wrap:wrap; gap:6px 14px; margin-bottom:8px; font-size:0.85em;">
+                    <label style="display:flex; align-items:center; gap:4px; cursor:pointer;"><input type="checkbox" class="pw-migrate-opt" value="avatars" checked> 头像</label>
+                    <label style="display:flex; align-items:center; gap:4px; cursor:pointer;"><input type="checkbox" class="pw-migrate-opt" value="history" checked> 历史记录</label>
+                    <label style="display:flex; align-items:center; gap:4px; cursor:pointer;"><input type="checkbox" class="pw-migrate-opt" value="prompts" checked> Prompt</label>
+                    <label style="display:flex; align-items:center; gap:4px; cursor:pointer;"><input type="checkbox" class="pw-migrate-opt" value="userData" checked> User数据</label>
+                    <label style="display:flex; align-items:center; gap:4px; cursor:pointer;"><input type="checkbox" class="pw-migrate-opt" value="npcData" checked> NPC数据</label>
+                    <label style="display:flex; align-items:center; gap:4px; cursor:pointer;"><input type="checkbox" class="pw-migrate-opt" value="themes" checked> 主题</label>
+                </div>
                 <div class="pw-row" style="gap:8px;">
-                    <button class="pw-btn primary" id="pw-btn-export-data" style="flex:1;"><i class="fa-solid fa-file-export"></i> 导出全部数据</button>
-                    <button class="pw-btn primary" id="pw-btn-import-data" style="flex:1;"><i class="fa-solid fa-file-import"></i> 导入数据</button>
+                    <button class="pw-btn primary" id="pw-btn-export-data" style="flex:1;"><i class="fa-solid fa-file-export"></i> 导出</button>
+                    <button class="pw-btn primary" id="pw-btn-import-data" style="flex:1;"><i class="fa-solid fa-file-import"></i> 导入</button>
                     <input type="file" id="pw-data-import-file" accept=".json" style="display:none;">
                 </div>
             </div>
@@ -2561,22 +2569,26 @@ function bindEvents() {
         URL.revokeObjectURL(url);
     });
 
+    // --- Data Migration: helpers ---
+    function getCheckedMigrateOpts() {
+        const opts = {};
+        $('.pw-migrate-opt').each(function() { opts[$(this).val()] = $(this).is(':checked'); });
+        return opts;
+    }
+
     // --- Data Migration: Export ---
     $(document).on('click.pw', '#pw-btn-export-data', function() {
         try {
-            const exportData = {
-                _pw_export: true,
-                version: CURRENT_VERSION,
-                exportedAt: new Date().toISOString(),
-                avatars: avatarImagesCache || [],
-                history: historyCache || [],
-                userData: (() => { try { return JSON.parse(localStorage.getItem(STORAGE_KEY_DATA_USER)) || {}; } catch { return {}; } })(),
-                npcData: (() => { try { return JSON.parse(localStorage.getItem(STORAGE_KEY_DATA_NPC)) || {}; } catch { return {}; } })(),
-                prompts: (() => { try { return JSON.parse(localStorage.getItem(STORAGE_KEY_PROMPTS)) || null; } catch { return null; } })(),
-                uiState: uiStateCache,
-                themes: customThemes || {},
-                pinnedBooks: (() => { try { return JSON.parse(localStorage.getItem(STORAGE_KEY_PINNED_BOOKS)) || []; } catch { return []; } })(),
-            };
+            const sel = getCheckedMigrateOpts();
+            if (!Object.values(sel).some(v => v)) { toastr.warning('请至少勾选一项'); return; }
+            const exportData = { _pw_export: true, version: CURRENT_VERSION, exportedAt: new Date().toISOString() };
+            const parts = [];
+            if (sel.avatars)  { exportData.avatars = avatarImagesCache || []; parts.push(`${exportData.avatars.length} 头像`); }
+            if (sel.history)  { exportData.history = historyCache || []; parts.push(`${exportData.history.length} 历史`); }
+            if (sel.prompts)  { try { exportData.prompts = JSON.parse(localStorage.getItem(STORAGE_KEY_PROMPTS)); } catch {} parts.push('Prompt'); }
+            if (sel.userData) { try { exportData.userData = JSON.parse(localStorage.getItem(STORAGE_KEY_DATA_USER)); } catch {} parts.push('User数据'); }
+            if (sel.npcData)  { try { exportData.npcData = JSON.parse(localStorage.getItem(STORAGE_KEY_DATA_NPC)); } catch {} parts.push('NPC数据'); }
+            if (sel.themes)   { exportData.themes = customThemes || {}; parts.push('主题'); }
             const blob = new Blob([JSON.stringify(exportData)], { type: 'application/json' });
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
@@ -2584,7 +2596,7 @@ function bindEvents() {
             a.download = `persona_weaver_backup_${new Date().toISOString().slice(0,10)}.json`;
             document.body.appendChild(a); a.click(); document.body.removeChild(a);
             URL.revokeObjectURL(url);
-            toastr.success(`已导出: ${(exportData.avatars || []).length} 头像, ${(exportData.history || []).length} 历史记录`);
+            toastr.success(`已导出: ${parts.join(', ')}`);
         } catch (e) {
             console.error('[PW] Export failed:', e);
             toastr.error('导出失败: ' + e.message);
@@ -2596,42 +2608,42 @@ function bindEvents() {
     $(document).on('change.pw', '#pw-data-import-file', function() {
         const file = this.files?.[0];
         if (!file) return;
+        const sel = getCheckedMigrateOpts();
+        if (!Object.values(sel).some(v => v)) { toastr.warning('请至少勾选一项'); return; }
         const reader = new FileReader();
         reader.onload = (ev) => {
             try {
                 const data = JSON.parse(ev.target.result);
                 if (!data._pw_export) { toastr.error('无效的备份文件'); return; }
                 const parts = [];
-                if (data.avatars?.length) {
+                if (sel.avatars && data.avatars?.length) {
                     avatarImagesCache = data.avatars;
                     saveAvatarImages();
                     parts.push(`${data.avatars.length} 头像`);
                 }
-                if (data.history?.length) {
+                if (sel.history && data.history?.length) {
                     historyCache = data.history;
                     safeLocalStorageSet(STORAGE_KEY_HISTORY, JSON.stringify(historyCache));
                     parts.push(`${data.history.length} 历史`);
                 }
-                if (data.userData && Object.keys(data.userData).length) {
+                if (sel.userData && data.userData && Object.keys(data.userData).length) {
                     safeLocalStorageSet(STORAGE_KEY_DATA_USER, JSON.stringify(data.userData));
                     parts.push('User数据');
                 }
-                if (data.npcData && Object.keys(data.npcData).length) {
+                if (sel.npcData && data.npcData && Object.keys(data.npcData).length) {
                     safeLocalStorageSet(STORAGE_KEY_DATA_NPC, JSON.stringify(data.npcData));
                     parts.push('NPC数据');
                 }
-                if (data.prompts) {
+                if (sel.prompts && data.prompts) {
                     safeLocalStorageSet(STORAGE_KEY_PROMPTS, JSON.stringify(data.prompts));
                     parts.push('Prompt');
                 }
-                if (data.themes && Object.keys(data.themes).length) {
+                if (sel.themes && data.themes && Object.keys(data.themes).length) {
                     Object.assign(customThemes, data.themes);
                     safeLocalStorageSet(STORAGE_KEY_THEMES, JSON.stringify(customThemes));
                     parts.push('主题');
                 }
-                if (data.pinnedBooks?.length) {
-                    safeLocalStorageSet(STORAGE_KEY_PINNED_BOOKS, JSON.stringify(data.pinnedBooks));
-                }
+                if (parts.length === 0) { toastr.info('备份中无匹配的勾选内容'); return; }
                 toastr.success(`已导入: ${parts.join(', ')}`);
                 renderAvatarMgmt();
                 renderAvatarStrip();
