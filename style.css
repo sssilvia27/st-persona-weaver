@@ -54,12 +54,12 @@
 /* =========================================
    Header & Navigation
 ========================================= */
-.pw-header { flex-shrink: 0; margin-bottom: 0; padding-bottom: 5px; }
+.pw-header { flex-shrink: 0; margin-bottom: 8px; border-bottom: 1px solid var(--pw-border); padding-bottom: 5px; }
 .pw-top-bar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
 .pw-title { font-size: 1.2em; font-weight: bold; display: flex; align-items: center; gap: 8px; color: var(--pw-text-main); }
 .pw-header-subtitle { font-size: 0.65em; opacity: 0.6; font-weight: normal; margin-left: 10px; color: var(--pw-text-main); }
 
-.pw-tabs { display: flex; flex-direction: row; gap: 5px; overflow-x: auto; flex-shrink: 0; padding: 0 8px; margin-bottom: 8px; border-bottom: 1px solid var(--pw-border); }
+.pw-tabs { display: flex; flex-direction: row; gap: 5px; overflow-x: auto; }
 .pw-tab {
     padding: 6px 12px; cursor: pointer; border-radius: 6px 6px 0 0;
     opacity: 0.6; transition: all 0.2s; white-space: nowrap; 
@@ -946,10 +946,10 @@
     max-height: 240px;
     overflow-y: auto;
     overflow-x: hidden;
-    overscroll-behavior: contain;
-    touch-action: pan-y;
     scrollbar-width: thin;
     scrollbar-color: rgba(128,128,128,0.3) transparent;
+    touch-action: pan-y;
+    overscroll-behavior-x: none;
 }
 .pw-avatar-mgmt-body::-webkit-scrollbar { width: 4px; }
 .pw-avatar-mgmt-body::-webkit-scrollbar-thumb { background: rgba(128,128,128,0.3); border-radius: 2px; }
@@ -959,8 +959,7 @@
     gap: 10px;
     padding: 4px 0;
     justify-items: center;
-    width: 100%;
-    box-sizing: border-box;
+    overflow-x: hidden;
 }
 .pw-avatar-card {
     width: 100%;
