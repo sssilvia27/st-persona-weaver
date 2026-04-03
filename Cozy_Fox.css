@@ -77,12 +77,12 @@
     content: '';
     position: absolute;
     top: 5px;      
-    right: 35px;    
-    width: 170px;   
+    right: 0px;    
+    width: 180px;   
     height: 170px;
     background-image: url('https://i.postimg.cc/SRXZPmZK/275E9B02-34EB-4829-8F3C-A93F06F2B085.png');
-    background-size: 190%; 
-    background-position: 45% 65%; 
+    background-size: 180%; 
+    background-position: 50% 65%; 
     background-repeat: no-repeat;
     pointer-events: none;
     z-index: 0;
