@@ -1,6 +1,6 @@
 /* =========================================
    File: style_cozy_fox_cottage_v4.css
-   Theme: Cozy Fox Cottage (终极完结版)
+   Theme: Cozy Fox Cottage
    Description: Fixes raw text view black background (pre/code blocks).
 ========================================= */
 
@@ -178,10 +178,10 @@
 .pw-card-section { 
     background: var(--cozy-card); 
     border: 2px solid var(--cozy-border-color);
-    border-radius: 16px; 
-    padding: 15px;
-    display: flex; flex-direction: column; gap: 10px; 
-    box-shadow: 4px 4px 0px var(--cozy-beige);
+    border-radius: 14px; 
+    padding: 12px;
+    display: flex; flex-direction: column; gap: 8px; 
+    box-shadow: 3px 3px 0px var(--cozy-beige);
 }
 
 .pw-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; flex-wrap: wrap; }
@@ -268,48 +268,48 @@
     color: var(--cozy-text);
 }
 
-/* --- Buttons --- */
+/* --- Buttons (compact) --- */
 .pw-btn {
-    display: flex; align-items: center; justify-content: center; gap: 6px;
-    padding: 10px 18px; 
-    border-radius: 14px; 
+    display: flex; align-items: center; justify-content: center; gap: 5px;
+    padding: 7px 14px; 
+    border-radius: 12px; 
     border: 2px solid var(--cozy-border-color);
     background: #fff; 
     color: var(--cozy-text);
     cursor: pointer; font-weight: 800; width: auto; 
-    font-size: 0.95em;
-    box-shadow: 0 4px 0 var(--cozy-border-color);
+    font-size: 0.9em;
+    box-shadow: 0 3px 0 var(--cozy-border-color);
     transition: all 0.1s;
 }
 .pw-btn:active { 
-    transform: translateY(4px); 
+    transform: translateY(3px); 
     box-shadow: 0 0 0 var(--cozy-border-color); 
 }
 
 .pw-btn.gen { 
     background: var(--cozy-orange); 
     color: var(--cozy-text); 
-    margin-top: 10px; padding: 12px;
-    font-size: 1.1em;
+    margin-top: 8px; padding: 10px;
+    font-size: 1em;
     border-color: #c49b43;
-    box-shadow: 0 5px 0 #c49b43;
+    box-shadow: 0 4px 0 #c49b43;
 }
-.pw-btn.gen:active { transform: translateY(5px); box-shadow: 0 0 0 #c49b43; }
+.pw-btn.gen:active { transform: translateY(4px); box-shadow: 0 0 0 #c49b43; }
 
 .pw-btn.save { 
     background: var(--cozy-olive); 
     color: #fff; 
     border-color: #5e7550;
-    box-shadow: 0 4px 0 #5e7550;
+    box-shadow: 0 3px 0 #5e7550;
 }
-.pw-btn.save:active { transform: translateY(4px); box-shadow: none; }
+.pw-btn.save:active { transform: translateY(3px); box-shadow: none; }
 
-.pw-btn.danger { background: #fff; color: var(--pw-danger); border-color: var(--pw-danger); box-shadow: 0 4px 0 #ffcccc; }
-.pw-btn.wi { background: var(--cozy-mint); border-color: #9cb5a3; box-shadow: 0 4px 0 #9cb5a3; color: var(--cozy-text); }
+.pw-btn.danger { background: #fff; color: var(--pw-danger); border-color: var(--pw-danger); box-shadow: 0 3px 0 #ffcccc; }
+.pw-btn.wi { background: var(--cozy-mint); border-color: #9cb5a3; box-shadow: 0 3px 0 #9cb5a3; color: var(--cozy-text); }
 
 .pw-mini-btn { 
-    font-size: 0.8em; font-weight: 800; padding: 6px 12px; 
-    border-radius: 12px; border: 2px solid var(--cozy-border-color); 
+    font-size: 0.78em; font-weight: 800; padding: 5px 10px; 
+    border-radius: 10px; border: 2px solid var(--cozy-border-color); 
     background: #fff; color: var(--cozy-text); 
     box-shadow: 0 2px 0 var(--cozy-border-color);
     transition: all 0.1s;
@@ -413,15 +413,16 @@
 .pw-footer-group:last-child { flex-grow: 1; justify-content: space-between; }
 
 .pw-compact-btn {
-    width: 38px; height: 38px;
+    width: 34px; height: 34px;
     border: 2px solid var(--cozy-border-color);
     background: #fff;
     color: var(--cozy-text);
-    border-radius: 10px;
-    box-shadow: 0 3px 0 var(--cozy-border-color);
+    border-radius: 9px;
+    box-shadow: 0 2px 0 var(--cozy-border-color);
     flex-shrink: 0;
+    font-size: 0.85em;
 }
-.pw-compact-btn:active { transform: translateY(3px); box-shadow: none; }
+.pw-compact-btn:active { transform: translateY(2px); box-shadow: none; }
 
 .pw-btn.wi, .pw-btn.save {
     flex: 1;
@@ -565,14 +566,18 @@
 ========================================= */
 .pw-context-row {
     background: var(--cozy-card);
-    border: 2px solid var(--cozy-beige);
+    border: 2px dashed var(--cozy-beige);
     border-radius: 14px;
     padding: 8px 12px;
-    box-shadow: 3px 3px 0 var(--cozy-beige);
+    box-shadow: none;
+    opacity: 0.7;
+    transition: all 0.2s;
 }
 .pw-context-row.active {
-    border-color: var(--cozy-border-color);
-    box-shadow: 3px 3px 0 var(--cozy-border-color);
+    border: 2px solid var(--cozy-olive);
+    box-shadow: 3px 3px 0 var(--cozy-olive);
+    opacity: 1;
+    background: #f5faf0;
 }
 .pw-context-row-label {
     color: var(--cozy-text);
@@ -587,12 +592,24 @@
 
 /* Avatar strip highlight */
 .pw-avatar-strip-img {
-    border: 2px solid transparent;
+    border: 2px dashed var(--cozy-beige);
     border-radius: 50%;
+    opacity: 0.5;
+    filter: grayscale(30%);
+}
+.pw-avatar-strip-img:hover {
+    opacity: 0.85;
+    border-style: solid;
+    border-color: var(--cozy-border-color);
+    filter: none;
 }
 .pw-avatar-strip-img.selected {
-    border-color: var(--cozy-orange) !important;
+    border: 3px solid var(--cozy-orange) !important;
+    border-style: solid !important;
     box-shadow: 0 0 0 2px var(--cozy-orange), 3px 3px 0 rgba(0,0,0,0.1);
+    opacity: 1;
+    filter: none;
+    transform: scale(1.05);
 }
 .pw-avatar-add-btn {
     border: 2px dashed var(--cozy-beige);
@@ -603,6 +620,15 @@
     color: var(--cozy-orange);
 }
 
+/* Context badge */
+.pw-context-badge {
+    background: var(--cozy-orange);
+    color: var(--cozy-text);
+    border: 1px solid #c49b43;
+    font-family: 'Nunito', sans-serif;
+    font-weight: 800;
+}
+
 /* Token badge */
 .pw-chat-token-badge {
     font-family: 'Nunito', monospace;
@@ -611,10 +637,14 @@
 }
 
 /* Avatar Management (Context Tab) */
-.pw-avatar-mgmt-grid { gap: 10px; }
+.pw-avatar-mgmt-grid { gap: 8px; }
 .pw-avatar-card-img {
     border: 2px solid var(--cozy-beige);
     border-radius: 10px;
+    width: 100%;
+    height: auto;
+    aspect-ratio: 1;
+    object-fit: cover;
 }
 .pw-avatar-card-name {
     color: var(--cozy-text);
@@ -671,32 +701,52 @@
 ========================================= */
 @media screen and (max-width: 600px) {
     .pw-wrapper { border: none; border-radius: 0; box-shadow: none; max-height: 100vh; padding: 0; }
-    .pw-header { padding: 10px; }
+    .pw-header { padding: 8px 10px; }
     
-    .pw-title { font-size: 1.4em; }
+    .pw-title { font-size: 1.3em; }
     
     /* Fox Adjustment for mobile */
     .pw-header::after {
-        width: 130px;    
-        height: 130px;
-        right: 15px;     
+        width: 110px;    
+        height: 110px;
+        right: 10px;     
         top: 5px;        
         background-size: 190%; 
         background-position: 45% 65%; 
     }
     
     .pw-top-bar { 
-        padding-right: 90px; 
+        padding-right: 80px; 
     }
     
-    .pw-scroll-area { padding: 10px; gap: 10px; }
-    .pw-card-section { padding: 12px; border-radius: 12px; box-shadow: 3px 3px 0px var(--cozy-beige); }
+    .pw-scroll-area { padding: 8px; gap: 8px; }
+    .pw-card-section { padding: 10px; border-radius: 12px; box-shadow: 2px 2px 0px var(--cozy-beige); }
     
-    .pw-footer-group .pw-btn { padding: 8px 14px; font-size: 0.85em; }
-    .pw-btn.gen { margin-top: 5px; padding: 12px; font-size: 1em; }
+    .pw-footer-group .pw-btn { padding: 6px 10px; font-size: 0.8em; }
+    .pw-btn { padding: 6px 10px; font-size: 0.85em; box-shadow: 0 2px 0 var(--cozy-border-color); }
+    .pw-btn:active { transform: translateY(2px); }
+    .pw-btn.gen { margin-top: 5px; padding: 10px; font-size: 0.95em; box-shadow: 0 3px 0 #c49b43; }
+    .pw-btn.gen:active { transform: translateY(3px); }
+    .pw-btn.save { box-shadow: 0 2px 0 #5e7550; }
+    .pw-btn.wi { box-shadow: 0 2px 0 #9cb5a3; }
     
     #pw-request.minimized { height: 60px !important; min-height: 60px; }
     
-    .pw-tabs { gap: 4px; }
-    .pw-tab { padding: 5px 12px; font-size: 0.9em; }
+    .pw-tabs { gap: 3px; }
+    .pw-tab { padding: 4px 10px; font-size: 0.85em; }
+
+    .pw-compact-btn { width: 30px; height: 30px; font-size: 0.8em; }
+    .pw-mini-btn { padding: 4px 8px; font-size: 0.75em; }
+
+    /* Avatar grid: 3 per row */
+    .pw-avatar-mgmt-grid { grid-template-columns: repeat(3, 1fr); gap: 8px; }
+    .pw-avatar-card { max-width: none; }
+    .pw-avatar-card-img { width: 100% !important; height: auto !important; aspect-ratio: 1; }
+
+    /* Context rows compact */
+    .pw-context-row { padding: 6px 10px; border-radius: 10px; }
+    .pw-context-row-label { font-size: 0.9em; }
+
+    .pw-mode-item { padding: 5px 14px; font-size: 0.85em; }
+    .pw-section-label { font-size: 1em; }
 }
