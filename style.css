@@ -288,8 +288,7 @@
     resize: vertical; outline: none; white-space: pre-wrap; margin-bottom: 0;
 }
 .pw-refine-toolbar { display: flex; flex-direction: row; gap: 0; align-items: stretch; background: rgba(128,128,128,0.1); border: 1px solid var(--pw-border); border-top: none; border-radius: 0 0 6px 6px; margin-bottom: 5px; overflow: hidden; }
-.pw-refine-input { flex: 1; border: none; background: transparent; padding: 10px; font-size: 0.95em; color: var(--pw-text-main); resize: none; overflow-y: auto; min-height: 56px; max-height: 56px; line-height: 1.5; transition: min-height 0.3s ease, max-height 0.3s ease; }
-.pw-refine-input.expanded { min-height: 200px; max-height: none; }
+.pw-refine-input { flex: 1; border: none; background: transparent; padding: 10px; font-size: 0.95em; color: var(--pw-text-main); resize: none; overflow-y: auto; min-height: 56px; max-height: 56px; line-height: 1.5; }
 .pw-refine-btn-vertical { width: 44px; cursor: pointer; background: var(--SmartThemeQuoteColor, #83c168); border-left: none; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px; color: #fff; font-weight: bold; transition: all 0.2s; flex-shrink: 0; }
 .pw-refine-btn-vertical:hover { filter: brightness(1.1); }
 .pw-refine-btn-text { writing-mode: vertical-rl; text-orientation: upright; letter-spacing: 2px; }
@@ -643,8 +642,31 @@
     .pw-depth-input { flex: 1; min-width: 0; padding: 4px 2px; text-align: center; font-size: 0.8em; }
     .pw-wi-filter-row span { font-size: 0.8em; align-self: center; }
     #d-reset { margin-left: 2px; padding: 4px 6px; font-size: 0.8em; white-space: nowrap; }
-    /* diff responsive: no card overrides needed for inline diff */
     .pw-footer { flex-wrap: wrap; }
+
+    /* Avatar grid: fixed 3 per row on mobile */
+    .pw-avatar-mgmt-grid { grid-template-columns: repeat(3, 1fr); gap: 8px; }
+    .pw-avatar-card { max-width: none; }
+    .pw-avatar-card-img { width: 100%; height: auto; aspect-ratio: 1; }
+    .pw-avatar-card-top { width: 100%; height: auto; aspect-ratio: 1; }
+    .pw-avatar-card-name { max-width: 100%; }
+
+    /* Chat history settings: wrap message range */
+    #pw-chat-history-body .pw-row { flex-wrap: wrap !important; }
+    #pw-chat-history-body .pw-row > label { width: auto; flex-shrink: 0; }
+    #pw-chat-preset { width: 100% !important; flex: 1 1 auto !important; }
+    #pw-chat-custom-range { width: 100%; justify-content: center; }
+    #pw-chat-custom-range input { width: 60px !important; }
+
+    /* Diff toolbar: compact on mobile */
+    .pw-diff-toolbar { flex-wrap: wrap; gap: 4px; padding: 6px 8px; }
+    .pw-diff-mode-btn { padding: 3px 8px; font-size: 0.75em; }
+    .pw-diff-hint-inline { font-size: 0.7em; }
+    .pw-diff-actions { flex-wrap: wrap; gap: 6px; padding: 10px; }
+    .pw-diff-actions .pw-btn { flex: 1; min-width: 80px; font-size: 0.85em; padding: 8px 10px; }
+
+    /* System page: theme buttons row */
+    #pw-view-system .pw-row > div[style*="display:flex"] { flex-wrap: wrap; }
 }
 
 /* =============================================== */
@@ -791,6 +813,7 @@
 .pw-context-row.active {
     opacity: 1;
     border-color: var(--SmartThemeQuoteColor, var(--pw-border));
+    box-shadow: 0 0 0 1px var(--SmartThemeQuoteColor, var(--pw-border)), 0 2px 8px rgba(128,128,128,0.15);
 }
 .pw-context-row-label {
     user-select: none;
@@ -832,20 +855,27 @@
     height: 36px;
     border-radius: 50%;
     object-fit: cover;
-    border: 2px solid transparent;
+    border: 2px dashed rgba(128,128,128,0.3);
     cursor: pointer;
     flex-shrink: 0;
-    transition: border-color 0.15s, box-shadow 0.15s, transform 0.1s;
-    opacity: 0.7;
+    transition: border-color 0.15s, box-shadow 0.15s, transform 0.1s, opacity 0.15s;
+    opacity: 0.5;
+    filter: grayscale(30%);
 }
 .pw-avatar-strip-img:hover {
-    opacity: 1;
-    transform: scale(1.1);
+    opacity: 0.85;
+    border-style: solid;
+    border-color: rgba(128,128,128,0.5);
+    transform: scale(1.08);
+    filter: none;
 }
 .pw-avatar-strip-img.selected {
-    border-color: var(--SmartThemeQuoteColor, #83c168);
-    box-shadow: 0 0 6px rgba(128,128,128,0.4);
+    border: 3px solid var(--SmartThemeQuoteColor, #83c168);
+    border-style: solid;
+    box-shadow: 0 0 0 2px var(--SmartThemeQuoteColor, #83c168), 0 2px 8px rgba(128,128,128,0.3);
     opacity: 1;
+    filter: none;
+    transform: scale(1.05);
 }
 .pw-avatar-add-btn {
     width: 32px;
@@ -866,6 +896,22 @@
     opacity: 0.8;
     border-color: var(--SmartThemeQuoteColor, #83c168);
 }
+.pw-context-badge {
+    display: none;
+    min-width: 16px;
+    height: 16px;
+    padding: 0 4px;
+    border-radius: 8px;
+    background: var(--SmartThemeQuoteColor, #83c168);
+    color: #fff;
+    font-size: 0.65em;
+    font-weight: bold;
+    line-height: 16px;
+    text-align: center;
+    flex-shrink: 0;
+    margin-left: 4px;
+}
+.pw-context-badge.visible { display: inline-block; }
 
 /* Avatar Management (Context Tab) */
 .pw-avatar-mgmt-body {
@@ -877,13 +923,15 @@
 .pw-avatar-mgmt-body::-webkit-scrollbar { width: 4px; }
 .pw-avatar-mgmt-body::-webkit-scrollbar-thumb { background: rgba(128,128,128,0.3); border-radius: 2px; }
 .pw-avatar-mgmt-grid {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(72px, 1fr));
+    gap: 10px;
     padding: 4px 0;
+    justify-items: center;
 }
 .pw-avatar-card {
-    width: 72px;
+    width: 100%;
+    max-width: 90px;
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -892,12 +940,12 @@
 }
 .pw-avatar-card-top {
     position: relative;
-    width: 56px;
-    height: 56px;
+    width: 100%;
+    aspect-ratio: 1;
 }
 .pw-avatar-card-img {
-    width: 56px;
-    height: 56px;
+    width: 100%;
+    height: 100%;
     border-radius: 8px;
     object-fit: cover;
 }
@@ -966,5 +1014,8 @@
 @media (max-width: 600px) {
     #pw-chat-history-section { padding: 8px; }
     .pw-chat-token-badge { font-size: 0.65em; }
-    #pw-chat-custom-range input { width: 45px !important; }
+    #pw-chat-custom-range input { width: 55px !important; }
+    .pw-avatar-strip-img { width: 32px; height: 32px; }
+    .pw-avatar-add-btn { width: 28px; height: 28px; }
+    .pw-context-row { padding: 6px 8px; font-size: 0.9em; }
 }
