@@ -1640,7 +1640,7 @@ async function openCreatorPopup() {
     const charName = getContext().characters[getContext().characterId]?.name || "None";
     
     const newBadge = `<span id="pw-new-badge" title="点击查看更新" style="display:none; cursor:pointer; color:#ff4444; font-size:0.6em; font-weight:bold; vertical-align: super; margin-left: 2px;">NEW</span>`;
-    const headerTitle = `${TEXT.PANEL_TITLE}${newBadge}<span class="pw-header-subtitle">${currentName} & ${charName}</span>`;
+    const headerTitle = `${TEXT.PANEL_TITLE}${newBadge}<span class="pw-header-subtitle">User:${currentName} & Char:${charName}</span>`;
 
     const chipsDisplay = uiStateCache.templateExpanded ? 'flex' : 'none';
     const chipsIcon = uiStateCache.templateExpanded ? 'fa-angle-up' : 'fa-angle-down';
@@ -1798,8 +1798,8 @@ async function openCreatorPopup() {
         <div class="pw-diff-actions">
             <button class="pw-btn primary" id="pw-diff-reroll" title="使用相同的提示词重新生成"><i class="fa-solid fa-rotate-right"></i> 重新生成</button>
             <div style="flex:1;"></div>
-            <button class="pw-btn danger" id="pw-diff-cancel"><i class="fa-solid fa-xmark"></i> 放弃</button>
-            <button class="pw-btn gen" id="pw-diff-confirm" style="width:auto;"><i class="fa-solid fa-check"></i> 保存并应用</button>
+            <button class="pw-btn danger" id="pw-diff-cancel" style="font-size:1.05em; padding:10px 20px;"><i class="fa-solid fa-xmark"></i> 放弃</button>
+            <button class="pw-btn gen" id="pw-diff-confirm" style="width:auto; font-size:1.05em; padding:10px 20px;"><i class="fa-solid fa-check"></i> 应用</button>
         </div>
     </div>
 
@@ -1974,7 +1974,7 @@ async function openCreatorPopup() {
             <!-- Theme Selector -->
             <div class="pw-card-section">
                 <div class="pw-row">
-                    <label style="color: var(--SmartThemeQuoteColor); font-weight:bold;">界面主题</label>
+                    <label style="color: var(--SmartThemeQuoteColor); font-weight:bold;"><i class="fa-solid fa-palette"></i> 界面主题</label>
                     <div style="flex:1; display:flex; gap:5px;">
                         <select id="pw-theme-select" class="pw-input" style="flex:1;">
                             <option value="style.css" selected>默认 (Native)</option>
