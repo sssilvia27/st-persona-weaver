@@ -1733,7 +1733,7 @@ async function openCreatorPopup() {
             </div>
 
             <div class="pw-context-row ${(uiStateCache.avatarRef.selectedIds || []).length > 0 ? 'active' : ''}" id="pw-avatar-ref-row">
-                <span class="pw-context-row-label">头像参考<span id="pw-avatar-count-badge" class="pw-context-badge ${(uiStateCache.avatarRef.selectedIds || []).length > 0 ? 'visible' : ''}">${(uiStateCache.avatarRef.selectedIds || []).length || ''}</span></span>
+                <span class="pw-context-row-label">形象参考<span id="pw-avatar-count-badge" class="pw-context-badge ${(uiStateCache.avatarRef.selectedIds || []).length > 0 ? 'visible' : ''}">${(uiStateCache.avatarRef.selectedIds || []).length || ''}</span></span>
                 <div id="pw-avatar-strip" class="pw-avatar-strip"></div>
                 <span id="pw-avatar-add-btn" class="pw-avatar-add-btn" title="管理头像"><i class="fa-solid fa-plus"></i></span>
             </div>
@@ -1862,7 +1862,7 @@ async function openCreatorPopup() {
 
             <div class="pw-card-section" id="pw-avatar-mgmt-section">
                 <div style="display:flex; align-items:center; gap:8px; margin-bottom:5px;">
-                    <label class="pw-section-label" style="flex:1; min-width:0;">头像参考</label>
+                    <label class="pw-section-label" style="flex:1; min-width:0; text-align:left;">形象参考</label>
                     <label class="pw-mini-btn" style="cursor:pointer; display:inline-flex; align-items:center; gap:3px; padding:2px 8px; font-size:0.75em; white-space:nowrap; flex-shrink:0;">
                         <i class="fa-solid fa-upload"></i> 上传
                         <input type="file" id="pw-avatar-upload" accept="image/*" multiple style="display:none;">
@@ -1994,7 +1994,7 @@ async function openCreatorPopup() {
                 </div>
                 <div style="font-size:0.8em; opacity:0.7; margin-bottom:6px; text-align:left;">勾选要导出/导入的内容</div>
                 <div class="pw-migration-checks" style="display:flex; flex-wrap:wrap; gap:6px 14px; margin-bottom:8px; font-size:0.85em;">
-                    <label style="display:flex; align-items:center; gap:4px; cursor:pointer;"><input type="checkbox" class="pw-migrate-opt" value="avatars" checked> 参考头像</label>
+                    <label style="display:flex; align-items:center; gap:4px; cursor:pointer;"><input type="checkbox" class="pw-migrate-opt" value="avatars" checked> 参考图片</label>
                     <label style="display:flex; align-items:center; gap:4px; cursor:pointer;"><input type="checkbox" class="pw-migrate-opt" value="history" checked> 存档记录</label>
                     <label style="display:flex; align-items:center; gap:4px; cursor:pointer;"><input type="checkbox" class="pw-migrate-opt" value="prompts" checked> Prompt</label>
                     <label style="display:flex; align-items:center; gap:4px; cursor:pointer;"><input type="checkbox" class="pw-migrate-opt" value="themes" checked> 界面主题</label>
