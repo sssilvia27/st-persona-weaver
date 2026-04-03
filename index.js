@@ -1861,14 +1861,14 @@ async function openCreatorPopup() {
             </div>
 
             <div class="pw-card-section" id="pw-avatar-mgmt-section">
-                <div class="pw-row" style="margin-bottom:5px; flex-wrap:nowrap;">
-                    <label class="pw-section-label" style="flex-shrink:0;">头像参考</label>
-                    <div style="display:flex; gap:6px; align-items:center; margin-left:auto; flex-shrink:0;">
-                        <label class="pw-mini-btn" style="cursor:pointer; display:inline-flex; align-items:center; gap:3px; padding:2px 8px; font-size:0.75em; white-space:nowrap;">
+                <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:5px;">
+                    <label class="pw-section-label" style="min-width:0; overflow:hidden; text-overflow:ellipsis;">头像参考</label>
+                    <div style="display:flex; gap:4px; align-items:center; flex-shrink:0;">
+                        <label class="pw-mini-btn" style="cursor:pointer; display:inline-flex; align-items:center; gap:3px; padding:2px 7px; font-size:0.75em; white-space:nowrap;">
                             <i class="fa-solid fa-upload"></i> 上传
                             <input type="file" id="pw-avatar-upload" accept="image/*" multiple style="display:none;">
                         </label>
-                        <span id="pw-avatar-mgmt-collapse" style="cursor:pointer; opacity:0.5; font-size:0.85em; padding:2px 4px;" title="展开/收起"><i class="fa-solid fa-chevron-down"></i></span>
+                        <span id="pw-avatar-mgmt-collapse" style="cursor:pointer; opacity:0.5; font-size:0.85em; padding:2px;" title="展开/收起"><i class="fa-solid fa-chevron-down"></i></span>
                     </div>
                 </div>
                 <div id="pw-avatar-mgmt-body" class="pw-avatar-mgmt-body">
@@ -1997,10 +1997,8 @@ async function openCreatorPopup() {
                 <div style="font-size:0.8em; opacity:0.7; margin-bottom:6px;">勾选要导出/导入的内容</div>
                 <div class="pw-migration-checks" style="display:flex; flex-wrap:wrap; gap:6px 14px; margin-bottom:8px; font-size:0.85em;">
                     <label style="display:flex; align-items:center; gap:4px; cursor:pointer;"><input type="checkbox" class="pw-migrate-opt" value="avatars" checked> 头像</label>
-                    <label style="display:flex; align-items:center; gap:4px; cursor:pointer;"><input type="checkbox" class="pw-migrate-opt" value="history" checked> 历史记录</label>
+                    <label style="display:flex; align-items:center; gap:4px; cursor:pointer;"><input type="checkbox" class="pw-migrate-opt" value="history" checked> 存档记录</label>
                     <label style="display:flex; align-items:center; gap:4px; cursor:pointer;"><input type="checkbox" class="pw-migrate-opt" value="prompts" checked> Prompt</label>
-                    <label style="display:flex; align-items:center; gap:4px; cursor:pointer;"><input type="checkbox" class="pw-migrate-opt" value="userData" checked> User数据</label>
-                    <label style="display:flex; align-items:center; gap:4px; cursor:pointer;"><input type="checkbox" class="pw-migrate-opt" value="npcData" checked> NPC数据</label>
                     <label style="display:flex; align-items:center; gap:4px; cursor:pointer;"><input type="checkbox" class="pw-migrate-opt" value="themes" checked> 主题</label>
                 </div>
                 <div class="pw-row" style="gap:8px;">
@@ -2113,6 +2111,28 @@ async function openCreatorPopup() {
 `;
 
     callPopup(html, 'text', '', { wide: true, large: true, okButton: "Close" });
+
+    // Force popup to fill screen via JS (CSS :has() unreliable in WebView)
+    requestAnimationFrame(() => {
+        const $wrapper = $('.pw-wrapper');
+        if ($wrapper.length) {
+            const $popup = $wrapper.closest('.dialogue_popup_large, .dialogue_popup, [class*="popup"]');
+            if ($popup.length) {
+                const isMobile = window.innerWidth <= 600;
+                const size = isMobile ? '100' : '95';
+                $popup.css({
+                    'width': size + 'vw', 'max-width': size + 'vw',
+                    'height': size + 'vh', 'max-height': size + 'vh',
+                    'margin': isMobile ? '0' : 'auto',
+                    'border-radius': isMobile ? '0' : '',
+                });
+                $popup.find('.dialogue_popup_text, .popup_text, [class*="popup_text"]').css({
+                    'max-height': 'none', 'height': '100%', 'overflow': 'hidden'
+                });
+                $popup.find('.dialogue_popup_controls, .popup_controls').css('padding', '4px 8px');
+            }
+        }
+    });
 
     updatePromise.then(updateInfo => {
         hasNewVersion = !!updateInfo;
@@ -2584,10 +2604,8 @@ function bindEvents() {
             const exportData = { _pw_export: true, version: CURRENT_VERSION, exportedAt: new Date().toISOString() };
             const parts = [];
             if (sel.avatars)  { exportData.avatars = avatarImagesCache || []; parts.push(`${exportData.avatars.length} 头像`); }
-            if (sel.history)  { exportData.history = historyCache || []; parts.push(`${exportData.history.length} 历史`); }
+            if (sel.history)  { exportData.history = historyCache || []; parts.push(`${exportData.history.length} 存档`); }
             if (sel.prompts)  { try { exportData.prompts = JSON.parse(localStorage.getItem(STORAGE_KEY_PROMPTS)); } catch {} parts.push('Prompt'); }
-            if (sel.userData) { try { exportData.userData = JSON.parse(localStorage.getItem(STORAGE_KEY_DATA_USER)); } catch {} parts.push('User数据'); }
-            if (sel.npcData)  { try { exportData.npcData = JSON.parse(localStorage.getItem(STORAGE_KEY_DATA_NPC)); } catch {} parts.push('NPC数据'); }
             if (sel.themes)   { exportData.themes = customThemes || {}; parts.push('主题'); }
             const blob = new Blob([JSON.stringify(exportData)], { type: 'application/json' });
             const url = URL.createObjectURL(blob);
@@ -2624,15 +2642,7 @@ function bindEvents() {
                 if (sel.history && data.history?.length) {
                     historyCache = data.history;
                     safeLocalStorageSet(STORAGE_KEY_HISTORY, JSON.stringify(historyCache));
-                    parts.push(`${data.history.length} 历史`);
-                }
-                if (sel.userData && data.userData && Object.keys(data.userData).length) {
-                    safeLocalStorageSet(STORAGE_KEY_DATA_USER, JSON.stringify(data.userData));
-                    parts.push('User数据');
-                }
-                if (sel.npcData && data.npcData && Object.keys(data.npcData).length) {
-                    safeLocalStorageSet(STORAGE_KEY_DATA_NPC, JSON.stringify(data.npcData));
-                    parts.push('NPC数据');
+                    parts.push(`${data.history.length} 存档`);
                 }
                 if (sel.prompts && data.prompts) {
                     safeLocalStorageSet(STORAGE_KEY_PROMPTS, JSON.stringify(data.prompts));
