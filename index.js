@@ -1329,6 +1329,27 @@ function loadState() { try { return JSON.parse(localStorage.getItem(STORAGE_KEY_
 function saveAvatarImages() { safeLocalStorageSet(STORAGE_KEY_AVATAR_IMAGES, JSON.stringify(avatarImagesCache)); }
 function generateId() { return Date.now().toString(36) + Math.random().toString(36).substr(2, 5); }
 
+function compressImage(base64, maxSize = 512, quality = 0.7) {
+    return new Promise((resolve) => {
+        const img = new Image();
+        img.onload = () => {
+            let w = img.width, h = img.height;
+            if (w > maxSize || h > maxSize) {
+                const ratio = Math.min(maxSize / w, maxSize / h);
+                w = Math.round(w * ratio);
+                h = Math.round(h * ratio);
+            }
+            const canvas = document.createElement('canvas');
+            canvas.width = w;
+            canvas.height = h;
+            canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+            resolve(canvas.toDataURL('image/jpeg', quality));
+        };
+        img.onerror = () => resolve(base64);
+        img.src = base64;
+    });
+}
+
 async function forceSavePersona(name, description) {
     const context = getContext();
     if (!context.powerUserSettings.personas) context.powerUserSettings.personas = {};
@@ -1619,7 +1640,7 @@ async function openCreatorPopup() {
     const charName = getContext().characters[getContext().characterId]?.name || "None";
     
     const newBadge = `<span id="pw-new-badge" title="点击查看更新" style="display:none; cursor:pointer; color:#ff4444; font-size:0.6em; font-weight:bold; vertical-align: super; margin-left: 2px;">NEW</span>`;
-    const headerTitle = `${TEXT.PANEL_TITLE}${newBadge}<span class="pw-header-subtitle">User: ${currentName} & Char: ${charName}</span>`;
+    const headerTitle = `${TEXT.PANEL_TITLE}${newBadge}<span class="pw-header-subtitle">${currentName} & ${charName}</span>`;
 
     const chipsDisplay = uiStateCache.templateExpanded ? 'flex' : 'none';
     const chipsIcon = uiStateCache.templateExpanded ? 'fa-angle-up' : 'fa-angle-down';
@@ -1712,7 +1733,7 @@ async function openCreatorPopup() {
             </div>
 
             <div class="pw-context-row ${(uiStateCache.avatarRef.selectedIds || []).length > 0 ? 'active' : ''}" id="pw-avatar-ref-row">
-                <span class="pw-context-row-label">头像参考</span>
+                <span class="pw-context-row-label">头像参考<span id="pw-avatar-count-badge" class="pw-context-badge ${(uiStateCache.avatarRef.selectedIds || []).length > 0 ? 'visible' : ''}">${(uiStateCache.avatarRef.selectedIds || []).length || ''}</span></span>
                 <div id="pw-avatar-strip" class="pw-avatar-strip"></div>
                 <span id="pw-avatar-add-btn" class="pw-avatar-add-btn" title="管理头像"><i class="fa-solid fa-plus"></i></span>
             </div>
@@ -1965,6 +1986,19 @@ async function openCreatorPopup() {
                         
                         <button class="pw-btn primary" id="pw-btn-download-template" title="下载主题模版" style="padding:6px 10px;"><i class="fa-solid fa-download"></i></button>
                     </div>
+                </div>
+            </div>
+
+            <!-- Data Migration -->
+            <div class="pw-card-section">
+                <div class="pw-row" style="margin-bottom:4px;">
+                    <label style="color: var(--SmartThemeQuoteColor); font-weight:bold;"><i class="fa-solid fa-box-archive"></i> 数据迁移</label>
+                </div>
+                <div style="font-size:0.8em; opacity:0.7; margin-bottom:6px;">一键导出/导入头像、历史记录、模版等全部数据</div>
+                <div class="pw-row" style="gap:8px;">
+                    <button class="pw-btn primary" id="pw-btn-export-data" style="flex:1;"><i class="fa-solid fa-file-export"></i> 导出全部数据</button>
+                    <button class="pw-btn primary" id="pw-btn-import-data" style="flex:1;"><i class="fa-solid fa-file-import"></i> 导入数据</button>
+                    <input type="file" id="pw-data-import-file" accept=".json" style="display:none;">
                 </div>
             </div>
 
@@ -2527,7 +2561,91 @@ function bindEvents() {
         URL.revokeObjectURL(url);
     });
 
-$(document).on('change.pw', '#pw-theme-select', function() {
+    // --- Data Migration: Export ---
+    $(document).on('click.pw', '#pw-btn-export-data', function() {
+        try {
+            const exportData = {
+                _pw_export: true,
+                version: CURRENT_VERSION,
+                exportedAt: new Date().toISOString(),
+                avatars: avatarImagesCache || [],
+                history: historyCache || [],
+                userData: (() => { try { return JSON.parse(localStorage.getItem(STORAGE_KEY_DATA_USER)) || {}; } catch { return {}; } })(),
+                npcData: (() => { try { return JSON.parse(localStorage.getItem(STORAGE_KEY_DATA_NPC)) || {}; } catch { return {}; } })(),
+                prompts: (() => { try { return JSON.parse(localStorage.getItem(STORAGE_KEY_PROMPTS)) || null; } catch { return null; } })(),
+                uiState: uiStateCache,
+                themes: customThemes || {},
+                pinnedBooks: (() => { try { return JSON.parse(localStorage.getItem(STORAGE_KEY_PINNED_BOOKS)) || []; } catch { return []; } })(),
+            };
+            const blob = new Blob([JSON.stringify(exportData)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `persona_weaver_backup_${new Date().toISOString().slice(0,10)}.json`;
+            document.body.appendChild(a); a.click(); document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            toastr.success(`已导出: ${(exportData.avatars || []).length} 头像, ${(exportData.history || []).length} 历史记录`);
+        } catch (e) {
+            console.error('[PW] Export failed:', e);
+            toastr.error('导出失败: ' + e.message);
+        }
+    });
+
+    // --- Data Migration: Import ---
+    $(document).on('click.pw', '#pw-btn-import-data', () => $('#pw-data-import-file').click());
+    $(document).on('change.pw', '#pw-data-import-file', function() {
+        const file = this.files?.[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = (ev) => {
+            try {
+                const data = JSON.parse(ev.target.result);
+                if (!data._pw_export) { toastr.error('无效的备份文件'); return; }
+                const parts = [];
+                if (data.avatars?.length) {
+                    avatarImagesCache = data.avatars;
+                    saveAvatarImages();
+                    parts.push(`${data.avatars.length} 头像`);
+                }
+                if (data.history?.length) {
+                    historyCache = data.history;
+                    safeLocalStorageSet(STORAGE_KEY_HISTORY, JSON.stringify(historyCache));
+                    parts.push(`${data.history.length} 历史`);
+                }
+                if (data.userData && Object.keys(data.userData).length) {
+                    safeLocalStorageSet(STORAGE_KEY_DATA_USER, JSON.stringify(data.userData));
+                    parts.push('User数据');
+                }
+                if (data.npcData && Object.keys(data.npcData).length) {
+                    safeLocalStorageSet(STORAGE_KEY_DATA_NPC, JSON.stringify(data.npcData));
+                    parts.push('NPC数据');
+                }
+                if (data.prompts) {
+                    safeLocalStorageSet(STORAGE_KEY_PROMPTS, JSON.stringify(data.prompts));
+                    parts.push('Prompt');
+                }
+                if (data.themes && Object.keys(data.themes).length) {
+                    Object.assign(customThemes, data.themes);
+                    safeLocalStorageSet(STORAGE_KEY_THEMES, JSON.stringify(customThemes));
+                    parts.push('主题');
+                }
+                if (data.pinnedBooks?.length) {
+                    safeLocalStorageSet(STORAGE_KEY_PINNED_BOOKS, JSON.stringify(data.pinnedBooks));
+                }
+                toastr.success(`已导入: ${parts.join(', ')}`);
+                renderAvatarMgmt();
+                renderAvatarStrip();
+                renderHistoryList();
+            } catch (e) {
+                console.error('[PW] Import failed:', e);
+                toastr.error('导入失败: ' + e.message);
+            }
+        };
+        reader.readAsText(file);
+        $(this).val('');
+    });
+
+    $(document).on('change.pw', '#pw-theme-select', function() {
         const theme = $(this).val();
         uiStateCache.theme = theme;
         saveData();
@@ -2606,6 +2724,7 @@ $(document).on('change.pw', '#pw-theme-select', function() {
             $('#pw-request').attr('placeholder', '输入模版需求，如：添加修仙相关属性、简化外貌字段...');
             $('#pw-btn-gen').html('<i class="fa-solid fa-wand-magic-sparkles"></i> 生成模版');
             $('#pw-btn-apply-template').show();
+            $('#pw-avatar-ref-row, #pw-chat-infer-row').slideUp(200);
         } else {
             $('#pw-template-editor').hide();
             $('#pw-template-chips').css('display', 'flex');
@@ -2614,6 +2733,7 @@ $(document).on('change.pw', '#pw-theme-select', function() {
             $('#pw-request').attr('placeholder', '在此输入要求，或点击上方模版块插入参考结构（无需全部填满）...');
             $('#pw-btn-gen').html(`<i class="fa-solid fa-wand-magic-sparkles"></i> ${isNpc ? '生成 NPC 设定' : '生成 User 设定'}`);
             $('#pw-btn-apply-template').hide();
+            $('#pw-avatar-ref-row, #pw-chat-infer-row').slideDown(200);
         }
     });
 
@@ -2844,13 +2964,16 @@ $(document).on('change.pw', '#pw-theme-select', function() {
         }
     });
 
+    let _ahTimer = null;
     const adjustHeight = (el) => {
-        requestAnimationFrame(() => {
+        if (_ahTimer) return;
+        _ahTimer = requestAnimationFrame(() => {
+            _ahTimer = null;
             el.style.height = 'auto';
             el.style.height = (el.scrollHeight) + 'px';
         });
     };
-    $(document).on('input.pw', '.pw-auto-height, #pw-refine-input, .pw-card-refine-input', function () { adjustHeight(this); });
+    $(document).on('input.pw', '.pw-auto-height', function () { adjustHeight(this); });
 
     let saveTimeout;
     const saveCurrentState = () => {
@@ -2909,7 +3032,7 @@ $(document).on('change.pw', '#pw-theme-select', function() {
                 currentSaved.localConfig = currentLc;
                 saveState(currentSaved);
             }
-        }, 500); 
+        }, 1200); 
     };           
     
     $(document).on('input.pw change.pw', '#pw-request, #pw-result-text, #pw-wi-toggle, .pw-input, .pw-select', saveCurrentState);
@@ -2919,7 +3042,6 @@ $(document).on('change.pw', '#pw-theme-select', function() {
         if ($('#pw-result-area').is(':visible')) {
             $(this).removeClass('minimized');
             $('#pw-result-text').addClass('minimized');
-            $('#pw-refine-input').removeClass('expanded');
             $('#pw-template-text').removeClass('expanded').addClass('minimized');
         }
     });
@@ -2927,16 +3049,7 @@ $(document).on('change.pw', '#pw-theme-select', function() {
         if ($('#pw-result-area').is(':visible')) {
             $(this).removeClass('minimized');
             $('#pw-request').addClass('minimized');
-            $('#pw-refine-input').removeClass('expanded');
             $('#pw-template-text').removeClass('expanded').addClass('minimized');
-        }
-    });
-    $(document).on('focus.pw', '#pw-refine-input', function() {
-        if ($('#pw-result-area').is(':visible')) {
-            $(this).addClass('expanded');
-            $('#pw-result-text').addClass('minimized');
-            $('#pw-request').addClass('minimized');
-            $('#pw-template-text').addClass('minimized');
         }
     });
 
@@ -2946,7 +3059,6 @@ $(document).on('change.pw', '#pw-theme-select', function() {
         if ($('#pw-result-area').is(':visible')) {
             $('#pw-result-text').addClass('minimized');
         }
-        $('#pw-refine-input').removeClass('expanded');
     });
 
     // --- Diff View Logic (Sub-view Mode Switching) ---
@@ -3489,21 +3601,26 @@ $(document).on('change.pw', '#pw-theme-select', function() {
         if (idx >= 0) { sel.splice(idx, 1); $(this).removeClass('selected'); }
         else { sel.push(id); $(this).addClass('selected'); }
         $('#pw-avatar-ref-row').toggleClass('active', sel.length > 0);
+        const $badge = $('#pw-avatar-count-badge');
+        if (sel.length > 0) { $badge.text(sel.length).addClass('visible'); }
+        else { $badge.removeClass('visible'); }
         saveCurrentState();
     });
 
     $(document).on('change.pw', '#pw-avatar-upload', async function () {
         const files = this.files;
         if (!files || files.length === 0) return;
+        let addedCount = 0;
         for (const file of files) {
             if (!file.type.startsWith('image/')) continue;
             try {
-                const base64 = await new Promise((resolve, reject) => {
+                const rawBase64 = await new Promise((resolve, reject) => {
                     const reader = new FileReader();
                     reader.onloadend = () => resolve(reader.result);
                     reader.onerror = reject;
                     reader.readAsDataURL(file);
                 });
+                const base64 = await compressImage(rawBase64, 512, 0.7);
                 avatarImagesCache.push({
                     id: generateId(),
                     name: file.name.replace(/\.[^.]+$/, ''),
@@ -3511,12 +3628,13 @@ $(document).on('change.pw', '#pw-theme-select', function() {
                     tags: ['user', 'npc'],
                     addedAt: Date.now()
                 });
+                addedCount++;
             } catch (e) { console.warn("[PW] Failed to read image:", e); }
         }
         saveAvatarImages();
         renderAvatarMgmt();
         renderAvatarStrip();
-        toastr.success(`已添加 ${files.length} 张图片`);
+        toastr.success(`已添加 ${addedCount} 张图片（已压缩）`);
         $(this).val('');
     });
 
