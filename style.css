@@ -29,6 +29,8 @@
 .dialogue_popup_large .dialogue_popup_text:has(.pw-wrapper) {
     max-height: none !important;
     height: 100% !important;
+    overflow: visible !important;
+    padding: 4px !important;
 }
 .dialogue_popup_large:has(.pw-wrapper) {
     width: 95vw !important;
@@ -36,6 +38,7 @@
     height: 95vh !important;
     max-height: 95vh !important;
     margin: auto !important;
+    overflow: visible !important;
 }
 .dialogue_popup_large:has(.pw-wrapper) .dialogue_popup_controls {
     padding: 4px 8px !important;
