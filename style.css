@@ -675,7 +675,11 @@
 }
 .pw-opening-textarea:focus { background: rgba(0,0,0,0.25); border-color: var(--pw-text-main); }
 
-.pw-opening-actions { display: flex; gap: 10px; justify-content: flex-end; align-items: center; margin-top: 5px; flex-wrap: wrap; }
+.pw-opening-actions { display: flex; justify-content: space-between; align-items: center; margin-top: 5px; }
+.pw-opening-actions-left { display: flex; gap: 6px; }
+.pw-opening-actions-right { display: flex; gap: 8px; }
+.pw-opening-actions-left .pw-btn { padding: 6px 8px; min-width: auto; }
+.pw-opening-actions-right .pw-btn { white-space: nowrap; }
 .pw-carousel-nav {
     display: flex; align-items: center; justify-content: center;
     gap: 15px; margin-top: 15px; padding-top: 10px; border-top: 1px dashed var(--pw-border);
@@ -693,11 +697,14 @@
     display: none; flex-direction: column; gap: 8px;
     background: rgba(0,0,0,0.2); padding: 10px; border-radius: 6px;
     border: 1px dashed var(--pw-border); margin-top: 5px;
+    align-items: flex-end;
 }
 .pw-card-refine-input {
     width: 100%; background: rgba(255,255,255,0.05);
     border: 1px solid var(--pw-border); color: var(--pw-text-main);
     padding: 8px; border-radius: 4px; resize: vertical; min-height: 60px;
+    align-self: stretch;
+    box-sizing: border-box;
 }
 
 /* =========================================
@@ -1276,12 +1283,10 @@
 
 /* Auto-Update Confirm Overlay */
 .pw-auto-confirm-overlay {
-    position: fixed !important;
-    top: 0 !important; left: 0 !important; right: 0 !important; bottom: 0 !important;
-    width: 100vw !important;
-    height: 100vh !important;
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
     background: rgba(0, 0, 0, 0.5);
-    z-index: 2147483646 !important;
+    z-index: 99999;
     display: flex;
     align-items: flex-start;
     justify-content: center;
@@ -1289,14 +1294,13 @@
     padding-top: max(10px, env(safe-area-inset-top, 10px));
     overflow-y: auto;
     -webkit-overflow-scrolling: touch;
-    transform: none !important;
 }
 .pw-auto-confirm-card {
     background: var(--SmartThemeBlurTintColor, #fff);
     border-radius: 12px;
     width: 100%;
     max-width: 620px;
-    max-height: 90vh;
+    max-height: none;
     margin: auto 0;
     display: flex;
     flex-direction: column;
@@ -1624,19 +1628,16 @@
 
 /* Snapshot Detail / Restore Overlay */
 .pw-snapshot-overlay {
-    position: fixed !important;
-    top: 0 !important; left: 0 !important; right: 0 !important; bottom: 0 !important;
-    width: 100vw !important;
-    height: 100vh !important;
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
     background: rgba(0, 0, 0, 0.5);
-    z-index: 2147483646 !important;
+    z-index: 99999;
     display: flex;
     align-items: flex-start;
     justify-content: center;
     padding: 10px;
     padding-top: max(10px, env(safe-area-inset-top, 10px));
     overflow-y: auto;
-    transform: none !important;
     -webkit-overflow-scrolling: touch;
 }
 .pw-snapshot-detail-card {
