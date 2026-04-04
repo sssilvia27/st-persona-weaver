@@ -1814,7 +1814,7 @@ function showAutoUpdateConfirm(results, floor) {
 
     const html = `
     <div id="pw-auto-update-confirm" class="pw-auto-confirm-overlay" style="display:none;">
-        <div class="pw-auto-confirm-card" style="max-width:620px;">
+        <div class="pw-auto-confirm-card">
             <div class="pw-auto-confirm-header">
                 <span><i class="fa-solid fa-rotate"></i> 人设自动更新 · 第${floor}楼</span>
                 <button class="pw-auto-confirm-close pw-mini-btn"><i class="fa-solid fa-xmark"></i></button>
@@ -1824,10 +1824,9 @@ function showAutoUpdateConfirm(results, floor) {
                 <div id="pw-auc-diff-area" class="pw-auc-diff-area"></div>
             </div>
             <div class="pw-auto-confirm-actions">
-                <button class="pw-btn danger pw-auto-confirm-reject" style="padding:8px 14px;"><i class="fa-solid fa-xmark"></i> 放弃</button>
-                <button class="pw-btn pw-auc-reroll" style="padding:8px 14px;"><i class="fa-solid fa-rotate-right"></i> 重Roll</button>
-                <button class="pw-btn pw-auc-edit-toggle" style="padding:8px 14px;"><i class="fa-solid fa-pen"></i> 编辑</button>
-                <button class="pw-btn gen pw-auto-confirm-accept" style="padding:8px 14px;"><i class="fa-solid fa-check"></i> 应用</button>
+                <button class="pw-btn danger pw-auto-confirm-reject"><i class="fa-solid fa-xmark"></i> 放弃</button>
+                <button class="pw-btn pw-auc-reroll"><i class="fa-solid fa-rotate-right"></i> 重Roll</button>
+                <button class="pw-btn gen pw-auto-confirm-accept"><i class="fa-solid fa-check"></i> 应用</button>
             </div>
         </div>
     </div>`;
@@ -1842,8 +1841,7 @@ function showAutoUpdateConfirm(results, floor) {
         diffStates[mode] = {
             oldText,
             newText: results[mode],
-            blocks: computeDiffBlocks(oldText, results[mode]),
-            editing: false
+            blocks: computeDiffBlocks(oldText, results[mode])
         };
     }
 
@@ -1851,27 +1849,22 @@ function showAutoUpdateConfirm(results, floor) {
 
     function renderActiveTab() {
         const st = diffStates[activeMode];
-        const $area = $('#pw-auc-diff-area');
-        if (st.editing) {
-            $area.html(`<textarea class="pw-auto-confirm-text pw-auc-edit-text">${_esc(st.newText)}</textarea>`);
-        } else {
-            let diffHtml = '';
-            st.blocks.forEach((block, idx) => {
-                if (block.type === 'equal') {
-                    diffHtml += `<span>${_esc(block.value)}</span>`;
-                } else {
-                    const isNew = block.active === 'new';
-                    const isOld = block.active === 'old';
-                    diffHtml += `<span class="pw-diff-group" data-aidx="${idx}">`;
-                    if (block.oldText) diffHtml += `<span class="pw-idiff-old ${isOld ? 'active' : 'inactive'}" data-aidx="${idx}" title="点击保留旧版">${_esc(block.oldText)}</span>`;
-                    if (block.newText) diffHtml += `<span class="pw-idiff-new ${isNew ? 'active' : 'inactive'}" data-aidx="${idx}" title="点击保留新版">${_esc(block.newText)}</span>`;
-                    diffHtml += `</span>`;
-                }
-            });
-            const changeCount = st.blocks.filter(b => b.type === 'diff').length;
-            $area.html(`<div class="pw-auc-diff-view">${diffHtml}</div>
-                <div class="pw-auc-diff-info">${changeCount} 处变更</div>`);
-        }
+        let diffHtml = '';
+        st.blocks.forEach((block, idx) => {
+            if (block.type === 'equal') {
+                diffHtml += `<span>${_esc(block.value)}</span>`;
+            } else {
+                const isOld = block.active === 'old';
+                const isNew = block.active === 'new';
+                diffHtml += `<span class="pw-diff-group" data-aidx="${idx}">`;
+                if (block.oldText) diffHtml += `<span class="pw-idiff-old ${isOld ? 'active' : 'inactive'}" ${isOld ? 'contenteditable="true"' : ''} data-aidx="${idx}" title="点击保留旧版">${_esc(block.oldText)}</span>`;
+                if (block.newText) diffHtml += `<span class="pw-idiff-new ${isNew ? 'active' : 'inactive'}" ${isNew ? 'contenteditable="true"' : ''} data-aidx="${idx}" title="点击保留新版">${_esc(block.newText)}</span>`;
+                diffHtml += `</span>`;
+            }
+        });
+        const changeCount = st.blocks.filter(b => b.type === 'diff').length;
+        $('#pw-auc-diff-area').html(`<div class="pw-auc-diff-view">${diffHtml}</div>
+            <div class="pw-auc-diff-info">${changeCount} 处变更</div>`);
     }
 
     renderActiveTab();
@@ -1883,27 +1876,32 @@ function showAutoUpdateConfirm(results, floor) {
         renderActiveTab();
     });
 
-    $overlay.on('click', '.pw-auc-diff-view .pw-idiff-old, .pw-auc-diff-view .pw-idiff-new', function () {
+    $overlay.on('click', '.pw-auc-diff-view .pw-idiff-old', function () {
+        if ($(this).hasClass('active')) return;
         const idx = parseInt($(this).data('aidx'), 10);
         const block = diffStates[activeMode].blocks[idx];
         if (!block || block.type !== 'diff') return;
-        block.active = $(this).hasClass('pw-idiff-old') ? 'old' : 'new';
-        renderActiveTab();
+        block.active = 'old';
+        $(this).addClass('active').removeClass('inactive').attr('contenteditable', 'true');
+        $(this).siblings('.pw-idiff-new').addClass('inactive').removeClass('active').removeAttr('contenteditable');
+    });
+    $overlay.on('click', '.pw-auc-diff-view .pw-idiff-new', function () {
+        if ($(this).hasClass('active')) return;
+        const idx = parseInt($(this).data('aidx'), 10);
+        const block = diffStates[activeMode].blocks[idx];
+        if (!block || block.type !== 'diff') return;
+        block.active = 'new';
+        $(this).addClass('active').removeClass('inactive').attr('contenteditable', 'true');
+        $(this).siblings('.pw-idiff-old').addClass('inactive').removeClass('active').removeAttr('contenteditable');
     });
 
-    $overlay.on('click', '.pw-auc-edit-toggle', function () {
-        const st = diffStates[activeMode];
-        if (st.editing) {
-            st.newText = $overlay.find('.pw-auc-edit-text').val();
-            st.blocks = computeDiffBlocks(st.oldText, st.newText);
-            st.editing = false;
-            $(this).html('<i class="fa-solid fa-pen"></i> 编辑');
-        } else {
-            st.newText = assembleAutoConfirmResult(st);
-            st.editing = true;
-            $(this).html('<i class="fa-solid fa-code-compare"></i> 对比');
-        }
-        renderActiveTab();
+    $overlay.on('input', '.pw-auc-diff-view .pw-idiff-old.active[contenteditable]', function () {
+        const idx = parseInt($(this).data('aidx'), 10);
+        if (diffStates[activeMode].blocks[idx]) diffStates[activeMode].blocks[idx].oldText = $(this).text();
+    });
+    $overlay.on('input', '.pw-auc-diff-view .pw-idiff-new.active[contenteditable]', function () {
+        const idx = parseInt($(this).data('aidx'), 10);
+        if (diffStates[activeMode].blocks[idx]) diffStates[activeMode].blocks[idx].newText = $(this).text();
     });
 
     $overlay.on('click', '.pw-auc-reroll', async function () {
@@ -1918,8 +1916,6 @@ function showAutoUpdateConfirm(results, floor) {
             const st = diffStates[activeMode];
             st.newText = newResult;
             st.blocks = computeDiffBlocks(st.oldText, newResult);
-            st.editing = false;
-            $overlay.find('.pw-auc-edit-toggle').html('<i class="fa-solid fa-pen"></i> 编辑');
             renderActiveTab();
         } catch (e) {
             toastr.error('重Roll失败: ' + e.message);
@@ -1933,10 +1929,7 @@ function showAutoUpdateConfirm(results, floor) {
         btn.prop('disabled', true).html('<i class="fa-solid fa-spinner fa-spin"></i> 应用中...');
         try {
             for (const mode of modes) {
-                const st = diffStates[mode];
-                const finalText = st.editing
-                    ? $overlay.find('.pw-auc-edit-text').val()
-                    : assembleAutoConfirmResult(st);
+                const finalText = assembleAutoConfirmResult(diffStates[mode]);
                 await applyAutoUpdateResult(mode, finalText);
             }
             const labels = modes.map(m => m === 'user' ? 'User' : 'NPC').join(' + ');
@@ -2134,7 +2127,10 @@ function renderSnapshotList() {
                     ${isCurrent ? '<i class="fa-solid fa-star" style="color:var(--pw-accent,#8b6cc1);font-size:0.7em;"></i> ' : ''}
                     ${_esc(branch.name)}
                 </span>
-                <span class="pw-snap-branch-count">${snaps.length}</span>
+                <span style="display:flex;align-items:center;gap:4px;">
+                    <span class="pw-snap-branch-count">${snaps.length}</span>
+                    ${!isCurrent ? `<button class="pw-snap-branch-delete" data-branch-key="${branch.key}" title="删除此分支快照"><i class="fa-solid fa-trash-can"></i></button>` : ''}
+                </span>
             </div>
             <div class="pw-snap-branch-items" ${isCurrent ? '' : 'style="display:none;"'}>`;
 
@@ -4329,8 +4325,21 @@ function bindEvents() {
         $body.slideToggle(200);
         $chev.toggleClass('pw-rotated');
     });
-    $(document).on('click.pw', '.pw-snap-branch-header', function () {
+    $(document).on('click.pw', '.pw-snap-branch-header', function (e) {
+        if ($(e.target).closest('.pw-snap-branch-delete').length) return;
         $(this).next('.pw-snap-branch-items').slideToggle(150);
+    });
+    $(document).on('click.pw', '.pw-snap-branch-delete', function (e) {
+        e.stopPropagation();
+        const branchKey = $(this).data('branch-key');
+        const state = autoUpdateConfig.chatStates[branchKey];
+        if (!state) return;
+        const name = getBranchNameFromChatKey(branchKey);
+        if (!confirm(`确定删除分支 "${name}" 的所有快照 (${state.snapshots?.length || 0} 条)？`)) return;
+        delete autoUpdateConfig.chatStates[branchKey];
+        saveAutoUpdateConfig();
+        renderSnapshotList();
+        toastr.success(`已删除分支 "${name}" 的快照`);
     });
     $(document).on('click.pw', '.pw-snap-type-badge', function (e) {
         e.stopPropagation();
