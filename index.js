@@ -459,6 +459,8 @@ let hasNewVersion = false;
 let customThemes = {}; 
 let historyPage = 1; 
 let lastRefineRequest = ""; 
+let lastOpeningRefineRequest = "";
+let lastOpeningOldText = "";
 
 const defaultAutoUpdateConfig = {
     enabled: false, interval: 50, delay: 3, contextRange: 30,
@@ -1955,7 +1957,7 @@ function showAutoUpdateConfirm(results, floor) {
         </div>
     </div>`;
 
-    $(document.documentElement).append(html);
+    $('body').append(html);
     const $overlay = $('#pw-auto-update-confirm');
 
     const diffStates = {};
@@ -2058,7 +2060,7 @@ function showAutoUpdateConfirm(results, floor) {
             }
             const labels = modes.map(m => m === 'user' ? 'User' : 'NPC').join(' + ');
             toastr.success(`${labels} 人设已更新（第${floor}楼）`);
-            $overlay.fadeOut(200, () => $overlay.remove());
+            $overlay.animate({ opacity: 0 }, 200, () => $overlay.remove());
             updateAutoUpdateStatus();
         } catch (e) {
             toastr.error('应用失败: ' + e.message);
@@ -2070,10 +2072,10 @@ function showAutoUpdateConfirm(results, floor) {
         const chatState = getAutoUpdateChatState();
         chatState.lastUpdateFloor = floor - autoUpdateConfig.delay;
         saveAutoUpdateConfig();
-        $overlay.fadeOut(200, () => $overlay.remove());
+        $overlay.animate({ opacity: 0 }, 200, () => $overlay.remove());
     });
 
-    $overlay.fadeIn(200);
+    $overlay.css({ display: 'flex', opacity: 0 }).animate({ opacity: 1 }, 200);
 }
 
 function assembleAutoConfirmResult(state) {
@@ -2239,22 +2241,26 @@ function renderOpeningResults(rawText) {
 
     matches.forEach((content, i) => {
         slidesHtml += `
-        <div class="pw-opening-card">
+        <div class="pw-opening-card" data-slide-index="${i}">
             <div class="pw-opening-header">
                 <span>开场白选项 ${i + 1}</span>
             </div>
             <textarea class="pw-opening-textarea">${content.trim()}</textarea>
             <div class="pw-card-refine-box">
-                <textarea class="pw-card-refine-input pw-input" rows="2" placeholder="润色要求"></textarea>
-                <button class="pw-btn pw-btn-primary refine-confirm-btn" style="align-self:flex-end;">
-                    <i class="fa-solid fa-check"></i> 确认润色
+                <textarea class="pw-card-refine-input pw-input" rows="2" placeholder="润色要求（如：更细腻、加入天气描写、语气更甜...）"></textarea>
+                <button class="pw-btn pw-btn-primary refine-confirm-btn">
+                    <i class="fa-solid fa-wand-magic-sparkles"></i> 开始润色
                 </button>
             </div>
             <div class="pw-opening-actions">
-                <button class="pw-btn copy-opening-btn"><i class="fa-solid fa-copy"></i> 复制</button>
-                <button class="pw-btn toggle-refine-btn"><i class="fa-solid fa-wand-magic-sparkles"></i> 润色</button>
-                <button class="pw-btn pw-save-draft-btn"><i class="fa-solid fa-floppy-disk"></i> 保存</button>
-                <button class="pw-btn pw-btn-primary apply-btn"><i class="fa-solid fa-plus"></i> 加入开场白列表</button>
+                <div class="pw-opening-actions-left">
+                    <button class="pw-btn copy-opening-btn" title="复制"><i class="fa-solid fa-copy"></i></button>
+                    <button class="pw-btn pw-save-draft-btn" title="保存到记录"><i class="fa-solid fa-floppy-disk"></i></button>
+                </div>
+                <div class="pw-opening-actions-right">
+                    <button class="pw-btn toggle-refine-btn"><i class="fa-solid fa-wand-magic-sparkles"></i> 润色</button>
+                    <button class="pw-btn pw-btn-primary apply-btn"><i class="fa-solid fa-plus"></i> 加入开场白</button>
+                </div>
             </div>
         </div>
         `;
@@ -3909,11 +3915,11 @@ function bindEvents() {
     $(document).on('click.pw', '.refine-confirm-btn', async function() {
         const $card = $(this).closest('.pw-opening-card');
         const refineInput = $card.find('.pw-card-refine-input').val();
-        if (!refineInput) return toastr.warning("请输入要求");
+        if (!refineInput) return toastr.warning("请输入润色要求");
 
         const oldContent = $card.find('.pw-opening-textarea').val();
         const btn = $(this);
-        btn.prop('disabled', true).html('<i class="fa-solid fa-spinner fa-spin"></i> 处理中');
+        btn.prop('disabled', true).html('<i class="fa-solid fa-spinner fa-spin"></i> 润色中...');
 
         try {
             const contextData = await collectContextData();
@@ -3934,14 +3940,20 @@ function bindEvents() {
                 indepApiModel: modelVal,
             };
             const refinedText = await runGeneration(config, config);
-            $card.find('.pw-opening-textarea').val(refinedText);
+
+            currentRefiningCard = $card;
+            lastOpeningRefineRequest = refineInput;
+            lastOpeningOldText = oldContent;
+            renderDiffComparison(oldContent, refinedText);
+            $('#pw-diff-overlay').data('source', 'opening');
+            $('#pw-diff-overlay').fadeIn();
+
             $card.find('.pw-card-refine-box').slideUp();
-            toastr.success("润色完成");
         } catch (e) {
             console.error("[PW] Opening refine failed:", e);
             toastr.error("润色失败: " + e.message);
         } finally {
-            btn.prop('disabled', false).html('<i class="fa-solid fa-check"></i> 确认润色');
+            btn.prop('disabled', false).html('<i class="fa-solid fa-wand-magic-sparkles"></i> 开始润色');
         }
     });
 
@@ -4868,9 +4880,13 @@ function bindEvents() {
     $(document).on('click.pw', '#pw-diff-reroll', async function (e) {
         e.preventDefault();
         if (isProcessing) return;
-        if (!lastRefineRequest) {
-            toastr.warning("未找到上一次的润色要求");
-            return;
+
+        const isOpeningSource = $('#pw-diff-overlay').data('source') === 'opening';
+
+        if (isOpeningSource) {
+            if (!lastOpeningRefineRequest) { toastr.warning("未找到润色要求"); return; }
+        } else {
+            if (!lastRefineRequest) { toastr.warning("未找到上一次的润色要求"); return; }
         }
 
         isProcessing = true;
@@ -4878,32 +4894,46 @@ function bindEvents() {
         const originalHtml = $btn.html();
         $btn.html('<i class="fa-solid fa-spinner fa-spin"></i> 生成中...');
 
-        // 只要没点确认保存，旧文本就一直是 result-text 里的内容
-        const oldText = $('#pw-result-text').val(); 
-
         try {
-            const contextData = await collectContextData();
-            const modelVal = $('#pw-api-source').val() === 'independent' ? $('#pw-api-model-select').val() : null;
-            const isTemplateRefine = isEditingTemplate;
-            const config = {
-                mode: 'refine', 
-                request: lastRefineRequest,
-                currentText: oldText, 
-                wiText: contextData.wi,           
-                greetingsText: isTemplateRefine ? '' : contextData.greetings,
-                apiSource: $('#pw-api-source').val(), 
-                indepApiUrl: $('#pw-api-url').val(),
-                indepApiKey: $('#pw-api-key').val(), 
-                indepApiModel: modelVal
-            };
-            
-            const responseText = await runGeneration(config, config, isTemplateRefine);
-
-            // 复用渲染函数，原地刷新 Diff 界面
-            renderDiffComparison(oldText, responseText);
-            
+            if (isOpeningSource) {
+                const contextData = await collectContextData();
+                const charPersona = getCharacterPersonaString();
+                const userPersona = getActivePersonaDescription() || "User";
+                const modelVal = $('#pw-api-source').val() === 'independent' ? $('#pw-api-model-select').val() : null;
+                const config = {
+                    mode: 'opening_refine',
+                    request: lastOpeningRefineRequest,
+                    currentText: lastOpeningOldText,
+                    wiText: contextData.wi,
+                    charPersona: charPersona,
+                    userPersona: userPersona,
+                    apiSource: $('#pw-api-source').val(),
+                    indepApiUrl: $('#pw-api-url').val(),
+                    indepApiKey: $('#pw-api-key').val(),
+                    indepApiModel: modelVal,
+                };
+                const responseText = await runGeneration(config, config);
+                renderDiffComparison(lastOpeningOldText, responseText);
+            } else {
+                const oldText = $('#pw-result-text').val();
+                const contextData = await collectContextData();
+                const modelVal = $('#pw-api-source').val() === 'independent' ? $('#pw-api-model-select').val() : null;
+                const isTemplateRefine = isEditingTemplate;
+                const config = {
+                    mode: 'refine',
+                    request: lastRefineRequest,
+                    currentText: oldText,
+                    wiText: contextData.wi,
+                    greetingsText: isTemplateRefine ? '' : contextData.greetings,
+                    apiSource: $('#pw-api-source').val(),
+                    indepApiUrl: $('#pw-api-url').val(),
+                    indepApiKey: $('#pw-api-key').val(),
+                    indepApiModel: modelVal
+                };
+                const responseText = await runGeneration(config, config, isTemplateRefine);
+                renderDiffComparison(oldText, responseText);
+            }
             toastr.success("已重新生成并更新对比！");
-
         } catch (e) {
             console.error(e);
             toastr.error("重Roll失败: " + e.message);
@@ -4915,13 +4945,25 @@ function bindEvents() {
 
     $(document).on('click.pw', '#pw-diff-confirm', function () {
         const finalContent = assembleDiffResult();
-        $('#pw-result-text').val(finalContent).trigger('input');
-        $('#pw-diff-overlay').fadeOut();
-        saveCurrentState();
-        toastr.success("修改已应用");
+        const source = $('#pw-diff-overlay').data('source');
+
+        if (source === 'opening' && currentRefiningCard && currentRefiningCard.length) {
+            currentRefiningCard.find('.pw-opening-textarea').val(finalContent);
+            $('#pw-diff-overlay').fadeOut();
+            currentRefiningCard = null;
+            toastr.success("润色已应用到开场白");
+        } else {
+            $('#pw-result-text').val(finalContent).trigger('input');
+            $('#pw-diff-overlay').fadeOut();
+            saveCurrentState();
+            toastr.success("修改已应用");
+        }
     });
 
-    $(document).on('click.pw', '#pw-diff-cancel', () => $('#pw-diff-overlay').fadeOut());
+    $(document).on('click.pw', '#pw-diff-cancel', () => {
+        $('#pw-diff-overlay').fadeOut();
+        if ($('#pw-diff-overlay').data('source') === 'opening') currentRefiningCard = null;
+    });
 
     // Generate Persona / Template
     $(document).on('click.pw', '#pw-btn-gen', async function (e) {
