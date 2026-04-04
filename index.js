@@ -19,6 +19,7 @@ const STORAGE_KEY_DATA_USER = 'pw_data_user_v1';
 const STORAGE_KEY_DATA_NPC = 'pw_data_npc_v1';
 const STORAGE_KEY_PINNED_BOOKS = 'pw_pinned_books_v1';
 const STORAGE_KEY_AVATAR_IMAGES = 'pw_avatar_images_v1';
+const STORAGE_KEY_AUTO_UPDATE = 'pw_auto_update_v1';
 
 const BUTTON_ID = 'pw_persona_tool_btn';
 const HISTORY_PER_PAGE = 20;
@@ -378,6 +379,19 @@ let customThemes = {};
 let historyPage = 1; 
 let lastRefineRequest = ""; 
 
+const defaultAutoUpdateConfig = {
+    enabled: false, interval: 50, delay: 3, contextRange: 30,
+    useManualTags: false,
+    targets: {
+        user: { enabled: true, applyPersona: true, syncWorldBook: true },
+        npc: { enabled: true, syncWorldBook: true }
+    },
+    confirmMode: 'confirm',
+    chatStates: {}
+};
+let autoUpdateConfig = JSON.parse(JSON.stringify(defaultAutoUpdateConfig));
+let autoUpdateLock = false;
+
 let userContext = { template: defaultYamlTemplate, request: "", result: "", hasResult: false };
 let npcContext = { template: defaultNpcTemplate, request: "", result: "", hasResult: false };
 
@@ -547,6 +561,47 @@ async function scanChatTags(limit = 30) {
         });
         return Object.entries(tagCounts).sort((a,b) => b[1] - a[1]).map(([tag, count]) => ({ tag, count }));
     } catch (e) { return []; }
+}
+
+// ============================================================================
+// 自动更新 - 辅助函数
+// ============================================================================
+function getCurrentFloorCount() {
+    try {
+        if (window.TavernHelper && window.TavernHelper.getChatMessages) {
+            const msgs = window.TavernHelper.getChatMessages('0-99999');
+            return Array.isArray(msgs) ? msgs.length : 0;
+        }
+        const context = getContext();
+        return context.chat ? context.chat.length : 0;
+    } catch { return 0; }
+}
+
+function getAutoUpdateChatKey() {
+    try {
+        const context = getContext();
+        const charId = context.characterId ?? 'none';
+        const chatMeta = context.chatMetadata || {};
+        const chatFile = chatMeta.chat_file_name || chatMeta.chat_id || 'default';
+        return `${charId}_${chatFile}`;
+    } catch { return 'unknown'; }
+}
+
+function getAutoUpdateChatState() {
+    const key = getAutoUpdateChatKey();
+    if (!autoUpdateConfig.chatStates[key]) {
+        autoUpdateConfig.chatStates[key] = {
+            lastUpdateFloor: null,
+            userUpdateCount: 0,
+            npcUpdateCount: 0,
+            lastUpdateTime: null
+        };
+    }
+    return autoUpdateConfig.chatStates[key];
+}
+
+function saveAutoUpdateConfig() {
+    safeLocalStorageSet(STORAGE_KEY_AUTO_UPDATE, JSON.stringify(autoUpdateConfig));
 }
 
 async function checkForUpdates() {
@@ -1242,6 +1297,17 @@ function loadData() {
     
     try { avatarImagesCache = JSON.parse(localStorage.getItem(STORAGE_KEY_AVATAR_IMAGES)) || []; } catch { avatarImagesCache = []; }
     try { customThemes = JSON.parse(localStorage.getItem(STORAGE_KEY_THEMES)) || {}; } catch { customThemes = {}; }
+    try {
+        const au = JSON.parse(localStorage.getItem(STORAGE_KEY_AUTO_UPDATE));
+        if (au) {
+            autoUpdateConfig = { ...JSON.parse(JSON.stringify(defaultAutoUpdateConfig)), ...au };
+            autoUpdateConfig.targets = {
+                user: { ...defaultAutoUpdateConfig.targets.user, ...(au.targets?.user || {}) },
+                npc: { ...defaultAutoUpdateConfig.targets.npc, ...(au.targets?.npc || {}) }
+            };
+            if (!autoUpdateConfig.chatStates) autoUpdateConfig.chatStates = {};
+        }
+    } catch { autoUpdateConfig = JSON.parse(JSON.stringify(defaultAutoUpdateConfig)); }
 
     // Load Isolated Context Data
     try {
@@ -1266,6 +1332,7 @@ function saveData() {
     safeLocalStorageSet(STORAGE_KEY_THEMES, JSON.stringify(customThemes));
     safeLocalStorageSet(STORAGE_KEY_DATA_USER, JSON.stringify(userContext));
     safeLocalStorageSet(STORAGE_KEY_DATA_NPC, JSON.stringify(npcContext));
+    safeLocalStorageSet(STORAGE_KEY_AUTO_UPDATE, JSON.stringify(autoUpdateConfig));
 }
 
 function saveHistory(item) {
@@ -1458,6 +1525,258 @@ async function syncToWorldInfoViaHelper(userName, content) {
         console.error("[PW] World Info Sync Error:", e);
         toastr.error("写入世界书失败: " + e.message); 
     }
+}
+
+// ============================================================================
+// 自动更新 - 核心逻辑
+// ============================================================================
+async function performAutoUpdate(targetMode) {
+    const origGenMode = uiStateCache.generationMode;
+    const origChatHist = uiStateCache.chatHistory ? { ...uiStateCache.chatHistory } : {};
+
+    try {
+        uiStateCache.generationMode = targetMode;
+
+        const useManualTags = !!autoUpdateConfig.useManualTags;
+        uiStateCache.chatHistory = {
+            enabled: true,
+            preset: String(autoUpdateConfig.contextRange || 30),
+            floorFrom: '', floorTo: '',
+            excludeTags: useManualTags ? (origChatHist.excludeTags || []) : [],
+            includeTags: useManualTags ? (origChatHist.includeTags || []) : []
+        };
+
+        const isNpc = targetMode === 'npc';
+        let currentText = '';
+        if (isNpc) {
+            currentText = npcContext.result || '';
+        } else {
+            currentText = getActivePersonaDescription() || userContext.result || '';
+        }
+
+        const savedState = loadState();
+        const lc = savedState.localConfig || {};
+        const config = { ...defaultSettings, ...extension_settings[extensionName], ...lc };
+
+        const data = {
+            mode: 'refine',
+            request: '[基于聊天记录自动更新]',
+            currentText: currentText,
+            wiText: '',
+            greetingsText: '',
+            apiSource: config.apiSource,
+            indepApiUrl: config.indepApiUrl,
+            indepApiKey: config.indepApiKey,
+            indepApiModel: config.indepApiModel
+        };
+
+        return await runGeneration(data, data, false);
+    } finally {
+        uiStateCache.generationMode = origGenMode;
+        uiStateCache.chatHistory = origChatHist;
+    }
+}
+
+async function applyAutoUpdateResult(targetMode, result) {
+    const isNpc = targetMode === 'npc';
+    const targets = autoUpdateConfig.targets[targetMode] || {};
+    const chatState = getAutoUpdateChatState();
+
+    if (isNpc) {
+        npcContext.result = result;
+        npcContext.hasResult = true;
+        if (targets.syncWorldBook) {
+            const origMode = uiStateCache.generationMode;
+            uiStateCache.generationMode = 'npc';
+            try {
+                const userName = $('.persona_name').first().text().trim() || "User";
+                await syncToWorldInfoViaHelper(userName, result);
+            } finally { uiStateCache.generationMode = origMode; }
+        }
+        chatState.npcUpdateCount = (chatState.npcUpdateCount || 0) + 1;
+    } else {
+        userContext.result = result;
+        userContext.hasResult = true;
+        if (targets.applyPersona) {
+            const name = $('.persona_name').first().text().trim() || "User";
+            await forceSavePersona(name, result);
+        }
+        if (targets.syncWorldBook) {
+            const origMode = uiStateCache.generationMode;
+            uiStateCache.generationMode = 'user';
+            try {
+                const userName = $('.persona_name').first().text().trim() || "User";
+                await syncToWorldInfoViaHelper(userName, result);
+            } finally { uiStateCache.generationMode = origMode; }
+        }
+        chatState.userUpdateCount = (chatState.userUpdateCount || 0) + 1;
+    }
+
+    chatState.lastUpdateFloor = getCurrentFloorCount();
+    chatState.lastUpdateTime = new Date().toLocaleString();
+    saveAutoUpdateConfig();
+    saveData();
+
+    saveHistory({
+        request: `[自动更新] ${isNpc ? 'NPC' : 'User'} 第${chatState.lastUpdateFloor}楼`,
+        timestamp: new Date().toLocaleString(),
+        title: `[自动] ${isNpc ? 'NPC' : 'User'} 第${chatState.lastUpdateFloor}楼`,
+        data: { name: isNpc ? 'NPC-AutoUpdate' : 'User-AutoUpdate', resultText: result, genType: isNpc ? 'npc_persona' : 'user_persona' }
+    });
+}
+
+async function checkAutoUpdateTrigger() {
+    if (!autoUpdateConfig.enabled || autoUpdateLock) return;
+
+    const chatState = getAutoUpdateChatState();
+    if (chatState.lastUpdateFloor === null) return;
+
+    const currentFloor = getCurrentFloorCount();
+    const { interval, delay } = autoUpdateConfig;
+    const nextTrigger = chatState.lastUpdateFloor + interval + delay;
+
+    if (currentFloor < nextTrigger) return;
+
+    const targetsToUpdate = [];
+    if (autoUpdateConfig.targets.user?.enabled) targetsToUpdate.push('user');
+    if (autoUpdateConfig.targets.npc?.enabled) targetsToUpdate.push('npc');
+    if (targetsToUpdate.length === 0) return;
+
+    autoUpdateLock = true;
+    console.log(`[PW] Auto-update triggered at floor ${currentFloor} (next was ${nextTrigger})`);
+
+    try {
+        const mode = autoUpdateConfig.confirmMode;
+
+        if (mode === 'notify') {
+            toastr.info(
+                `当前第 ${currentFloor} 楼，建议更新人设`,
+                '自动更新提醒',
+                { timeOut: 15000, extendedTimeOut: 5000, tapToDismiss: true, onclick: () => { if (window.openPersonaWeaver) window.openPersonaWeaver(); } }
+            );
+            chatState.lastUpdateFloor = currentFloor - delay;
+            saveAutoUpdateConfig();
+            return;
+        }
+
+        for (const targetMode of targetsToUpdate) {
+            const label = targetMode === 'user' ? 'User' : 'NPC';
+
+            if (mode === 'silent') {
+                toastr.info(`正在自动更新 ${label} 人设 (第${currentFloor}楼)...`, '自动更新', { timeOut: 3000 });
+            }
+
+            try {
+                const result = await performAutoUpdate(targetMode);
+
+                if (!result || result.trim().length < 20) {
+                    toastr.warning(`${label} 自动更新返回内容过短，已跳过`);
+                    continue;
+                }
+
+                if (mode === 'silent') {
+                    await applyAutoUpdateResult(targetMode, result);
+                    toastr.success(`${label} 人设已自动更新（第${currentFloor}楼）`, '自动更新完成');
+                } else if (mode === 'confirm') {
+                    showAutoUpdateConfirm(targetMode, result, currentFloor);
+                }
+            } catch (e) {
+                console.error(`[PW] Auto-update ${label} failed:`, e);
+                toastr.error(`${label} 自动更新失败: ${e.message}`, '自动更新错误');
+            }
+        }
+
+        updateAutoUpdateStatus();
+    } finally {
+        autoUpdateLock = false;
+    }
+}
+
+function showAutoUpdateConfirm(targetMode, result, floor) {
+    const label = targetMode === 'user' ? 'User' : 'NPC';
+
+    const $existing = $('#pw-auto-update-confirm');
+    if ($existing.length) $existing.remove();
+
+    const html = `
+    <div id="pw-auto-update-confirm" class="pw-auto-confirm-overlay" style="display:none;">
+        <div class="pw-auto-confirm-card">
+            <div class="pw-auto-confirm-header">
+                <span><i class="fa-solid fa-rotate"></i> ${label} 人设自动更新 · 第${floor}楼</span>
+                <button class="pw-auto-confirm-close pw-mini-btn"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="pw-auto-confirm-body">
+                <textarea class="pw-auto-confirm-text" readonly></textarea>
+            </div>
+            <div class="pw-auto-confirm-actions">
+                <button class="pw-btn danger pw-auto-confirm-reject" style="padding:8px 16px;"><i class="fa-solid fa-xmark"></i> 放弃</button>
+                <button class="pw-btn gen pw-auto-confirm-accept" style="padding:8px 16px;"><i class="fa-solid fa-check"></i> 应用更新</button>
+            </div>
+        </div>
+    </div>`;
+
+    $('body').append(html);
+    const $overlay = $('#pw-auto-update-confirm');
+    $overlay.find('.pw-auto-confirm-text').val(result);
+
+    $overlay.find('.pw-auto-confirm-accept').on('click', async () => {
+        const btn = $overlay.find('.pw-auto-confirm-accept');
+        btn.prop('disabled', true).html('<i class="fa-solid fa-spinner fa-spin"></i> 应用中...');
+        try {
+            await applyAutoUpdateResult(targetMode, result);
+            toastr.success(`${label} 人设已更新（第${floor}楼）`);
+            $overlay.fadeOut(200, () => $overlay.remove());
+            updateAutoUpdateStatus();
+        } catch (e) {
+            toastr.error('应用失败: ' + e.message);
+            btn.prop('disabled', false).html('<i class="fa-solid fa-check"></i> 应用更新');
+        }
+    });
+
+    $overlay.find('.pw-auto-confirm-reject, .pw-auto-confirm-close').on('click', () => {
+        const chatState = getAutoUpdateChatState();
+        chatState.lastUpdateFloor = floor - autoUpdateConfig.delay;
+        saveAutoUpdateConfig();
+        $overlay.fadeOut(200, () => $overlay.remove());
+    });
+
+    $overlay.fadeIn(200);
+}
+
+function updateAutoUpdateStatus() {
+    const $status = $('#pw-auto-status');
+    if (!$status.length) return;
+
+    const chatState = getAutoUpdateChatState();
+    const currentFloor = getCurrentFloorCount();
+
+    let html = `<div class="pw-auto-status-row"><i class="fa-solid fa-layer-group"></i> 当前楼层: <strong>${currentFloor}</strong></div>`;
+
+    if (chatState.lastUpdateFloor === null) {
+        html += `<div class="pw-auto-status-row pw-auto-status-waiting"><i class="fa-solid fa-clock"></i> 等待首次手动更新或手动设定锚点</div>`;
+    } else {
+        const nextTrigger = chatState.lastUpdateFloor + autoUpdateConfig.interval + autoUpdateConfig.delay;
+        html += `<div class="pw-auto-status-row"><i class="fa-solid fa-crosshairs"></i> 下次触发: <strong>第${nextTrigger}楼</strong> (还差 ${Math.max(0, nextTrigger - currentFloor)} 楼)</div>`;
+        html += `<div class="pw-auto-status-row"><i class="fa-solid fa-anchor"></i> 上次锚点: 第${chatState.lastUpdateFloor}楼 ${chatState.lastUpdateTime ? `(${chatState.lastUpdateTime})` : ''}</div>`;
+        html += `<div class="pw-auto-status-row"><i class="fa-solid fa-chart-bar"></i> 更新次数: User ${chatState.userUpdateCount || 0} 次 | NPC ${chatState.npcUpdateCount || 0} 次</div>`;
+    }
+
+    $status.html(html);
+}
+
+function maybeSetAutoUpdateAnchor() {
+    if (!autoUpdateConfig.enabled) return;
+    const chatState = getAutoUpdateChatState();
+    const floor = getCurrentFloorCount();
+    if (floor <= 0) return;
+    const wasNull = chatState.lastUpdateFloor === null;
+    chatState.lastUpdateFloor = floor;
+    chatState.lastUpdateTime = new Date().toLocaleString();
+    saveAutoUpdateConfig();
+    if (wasNull) {
+        toastr.info(`自动更新锚点已自动设为第 ${floor} 楼`, '自动更新', { timeOut: 4000 });
+    }
+    updateAutoUpdateStatus();
 }
 
 async function loadAvailableWorldBooks() {
@@ -1682,6 +2001,7 @@ async function openCreatorPopup() {
             <div class="pw-tab" data-tab="context">参考</div> 
             <div class="pw-tab" data-tab="api">API</div>
             <div class="pw-tab" data-tab="system">系统</div>
+            <div class="pw-tab" data-tab="auto">自动</div>
             <div class="pw-tab" data-tab="history">记录</div>
         </div>
     </div>
@@ -1798,8 +2118,8 @@ async function openCreatorPopup() {
         <div class="pw-diff-actions">
             <button class="pw-btn primary" id="pw-diff-reroll" title="使用相同的提示词重新生成"><i class="fa-solid fa-rotate-right"></i> 重新生成</button>
             <div style="flex:1;"></div>
-            <button class="pw-btn danger" id="pw-diff-cancel" style="font-size:1.05em; padding:10px 20px;"><i class="fa-solid fa-xmark"></i> 放弃</button>
-            <button class="pw-btn gen" id="pw-diff-confirm" style="width:auto; font-size:1.05em; padding:10px 20px;"><i class="fa-solid fa-check"></i> 应用</button>
+            <button class="pw-btn danger" id="pw-diff-cancel"><i class="fa-solid fa-xmark"></i> 放弃</button>
+            <button class="pw-btn gen" id="pw-diff-confirm" style="width:auto;"><i class="fa-solid fa-check"></i> 应用</button>
         </div>
     </div>
 
@@ -2070,6 +2390,130 @@ async function openCreatorPopup() {
         </div>
     </div>
 
+    <!-- Auto-Update View -->
+    <div id="pw-view-auto" class="pw-view">
+        <div class="pw-scroll-area">
+            <div class="pw-card-section">
+                <div class="pw-row" style="margin-bottom:8px;">
+                    <label class="pw-section-label" style="flex:1;">自动更新人设</label>
+                    <label class="pw-switch">
+                        <input type="checkbox" id="pw-auto-enable" ${autoUpdateConfig.enabled ? 'checked' : ''}>
+                        <span class="pw-switch-slider"></span>
+                    </label>
+                </div>
+                <div style="font-size:0.78em; opacity:0.6; margin-bottom:10px; text-align:left; line-height:1.5;">
+                    根据聊天楼层自动更新 User / NPC 人设。首次需手动生成或更新来设定锚点，之后按间隔自动触发。
+                </div>
+            </div>
+
+            <div class="pw-card-section">
+                <div class="pw-row" style="gap:8px; align-items:center; margin-bottom:8px;">
+                    <label style="font-size:0.85em; white-space:nowrap;">更新间隔</label>
+                    <input type="number" id="pw-auto-interval" class="pw-input" value="${autoUpdateConfig.interval}" min="10" max="999" style="width:65px; text-align:center; padding:4px;">
+                    <span style="font-size:0.85em; opacity:0.7;">楼</span>
+                    <span style="font-size:0.8em; opacity:0.5; margin-left:8px;">+</span>
+                    <label style="font-size:0.85em; white-space:nowrap; margin-left:4px;">延后</label>
+                    <input type="number" id="pw-auto-delay" class="pw-input" value="${autoUpdateConfig.delay}" min="0" max="99" style="width:50px; text-align:center; padding:4px;">
+                    <span style="font-size:0.85em; opacity:0.7;">楼</span>
+                </div>
+                <div style="font-size:0.72em; opacity:0.5; text-align:left;">
+                    实际触发楼层 = 锚点 + 间隔 + 延后（如: 0 + ${autoUpdateConfig.interval} + ${autoUpdateConfig.delay} = 第${autoUpdateConfig.interval + autoUpdateConfig.delay}楼）
+                </div>
+            </div>
+
+            <div class="pw-card-section">
+                <div class="pw-row" style="gap:8px; align-items:center; margin-bottom:8px;">
+                    <label style="font-size:0.85em; white-space:nowrap;">参考范围</label>
+                    <select id="pw-auto-context-range" class="pw-input" style="flex:1; padding:4px 6px; font-size:0.85em;">
+                        <option value="20" ${autoUpdateConfig.contextRange == 20 ? 'selected' : ''}>最近 20 条</option>
+                        <option value="30" ${autoUpdateConfig.contextRange == 30 ? 'selected' : ''}>最近 30 条</option>
+                        <option value="50" ${autoUpdateConfig.contextRange == 50 ? 'selected' : ''}>最近 50 条</option>
+                        <option value="80" ${autoUpdateConfig.contextRange == 80 ? 'selected' : ''}>最近 80 条</option>
+                        <option value="all" ${autoUpdateConfig.contextRange == 'all' ? 'selected' : ''}>全部</option>
+                    </select>
+                </div>
+                <div style="font-size:0.72em; opacity:0.5; text-align:left;">自动更新时喂给 AI 的聊天记录条数</div>
+            </div>
+
+            <div class="pw-card-section">
+                <div style="font-size:0.85em; margin-bottom:8px; font-weight:600; text-align:left;">更新目标</div>
+                <div class="pw-auto-target-group">
+                    <div class="pw-auto-target-item">
+                        <label class="pw-auto-target-header">
+                            <input type="checkbox" id="pw-auto-target-user" ${autoUpdateConfig.targets.user.enabled ? 'checked' : ''}>
+                            <span><i class="fa-solid fa-user"></i> User 人设</span>
+                        </label>
+                        <div class="pw-auto-target-opts" id="pw-auto-user-opts" style="${autoUpdateConfig.targets.user.enabled ? '' : 'display:none;'}">
+                            <label><input type="checkbox" id="pw-auto-user-apply" ${autoUpdateConfig.targets.user.applyPersona ? 'checked' : ''}> 覆盖当前人设</label>
+                            <label><input type="checkbox" id="pw-auto-user-wi" ${autoUpdateConfig.targets.user.syncWorldBook ? 'checked' : ''}> 同步到世界书</label>
+                        </div>
+                    </div>
+                    <div class="pw-auto-target-item">
+                        <label class="pw-auto-target-header">
+                            <input type="checkbox" id="pw-auto-target-npc" ${autoUpdateConfig.targets.npc.enabled ? 'checked' : ''}>
+                            <span><i class="fa-solid fa-user-secret"></i> NPC 人设</span>
+                        </label>
+                        <div class="pw-auto-target-opts" id="pw-auto-npc-opts" style="${autoUpdateConfig.targets.npc.enabled ? '' : 'display:none;'}">
+                            <label><input type="checkbox" id="pw-auto-npc-wi" ${autoUpdateConfig.targets.npc.syncWorldBook ? 'checked' : ''}> 同步到世界书</label>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="pw-card-section">
+                <div style="font-size:0.85em; margin-bottom:8px; font-weight:600; text-align:left;">更新确认方式</div>
+                <div class="pw-auto-confirm-modes">
+                    <label class="pw-auto-radio">
+                        <input type="radio" name="pw-auto-confirm" value="confirm" ${autoUpdateConfig.confirmMode === 'confirm' ? 'checked' : ''}>
+                        <span><i class="fa-solid fa-eye"></i> 弹窗确认</span>
+                        <small>生成后弹出预览，确认后应用</small>
+                    </label>
+                    <label class="pw-auto-radio">
+                        <input type="radio" name="pw-auto-confirm" value="silent" ${autoUpdateConfig.confirmMode === 'silent' ? 'checked' : ''}>
+                        <span><i class="fa-solid fa-bolt"></i> 静默更新</span>
+                        <small>直接应用，仅 toast 通知</small>
+                    </label>
+                    <label class="pw-auto-radio">
+                        <input type="radio" name="pw-auto-confirm" value="notify" ${autoUpdateConfig.confirmMode === 'notify' ? 'checked' : ''}>
+                        <span><i class="fa-solid fa-bell"></i> 仅提醒</span>
+                        <small>发送提醒，用户自行手动操作</small>
+                    </label>
+                </div>
+            </div>
+
+            <div class="pw-card-section">
+                <div class="pw-context-header" id="pw-auto-advanced-toggle" style="cursor:pointer;">
+                    <span style="font-size:0.85em;"><i class="fa-solid fa-gear"></i> 高级选项</span>
+                    <i class="fa-solid fa-chevron-down arrow" style="font-size:0.7em; opacity:0.5;"></i>
+                </div>
+                <div id="pw-auto-advanced-body" style="display:none; padding-top:8px;">
+                    <label style="display:flex; align-items:center; gap:6px; font-size:0.85em; cursor:pointer;">
+                        <input type="checkbox" id="pw-auto-use-manual-tags" ${autoUpdateConfig.useManualTags ? 'checked' : ''}>
+                        使用手动推断的标签过滤设置
+                    </label>
+                    <div style="font-size:0.72em; opacity:0.5; margin-top:4px; text-align:left;">
+                        勾选后将复用「参考」页面中设置的 include/exclude 标签
+                    </div>
+                    <div style="margin-top:10px;">
+                        <button class="pw-btn danger" id="pw-auto-reset-state" style="font-size:0.8em; padding:5px 12px;">
+                            <i class="fa-solid fa-rotate-left"></i> 重置当前聊天的自动更新状态
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="pw-card-section pw-auto-status-card">
+                <div style="font-size:0.85em; margin-bottom:6px; font-weight:600; text-align:left;"><i class="fa-solid fa-chart-line"></i> 运行状态</div>
+                <div id="pw-auto-status" class="pw-auto-status-body">
+                    <div class="pw-auto-status-row pw-auto-status-waiting"><i class="fa-solid fa-clock"></i> 打开面板时加载...</div>
+                </div>
+                <button class="pw-btn primary" id="pw-auto-set-anchor" style="margin-top:8px; font-size:0.82em; padding:6px 12px; width:100%;">
+                    <i class="fa-solid fa-anchor"></i> 以当前楼层为锚点
+                </button>
+            </div>
+        </div>
+    </div>
+
     <!-- History View with Pagination -->
     <div id="pw-view-history" class="pw-view">
         <div class="pw-scroll-area">
@@ -2143,6 +2587,7 @@ async function openCreatorPopup() {
     autoBindGreetings(); 
     renderThemeOptions(); 
     renderApiProfiles();
+    updateAutoUpdateStatus();
     
 const savedTheme = uiStateCache.theme || 'style.css';
     if (savedTheme === 'style.css' || savedTheme === 'Cozy_Fox.css') {
@@ -2297,6 +2742,24 @@ function bindEvents() {
     if (context && context.eventSource) {
         context.eventSource.on(context.eventTypes.APP_READY, addPersonaButton);
         context.eventSource.on(context.eventTypes.MOVABLE_PANELS_RESET, addPersonaButton);
+
+        // Auto-update: listen for new AI messages
+        const triggerEvents = ['MESSAGE_RECEIVED', 'GENERATION_ENDED'];
+        for (const evName of triggerEvents) {
+            if (context.eventTypes[evName]) {
+                context.eventSource.on(context.eventTypes[evName], () => {
+                    setTimeout(() => checkAutoUpdateTrigger(), 2000);
+                });
+                console.log(`[PW] Auto-update bound to ${evName}`);
+                break;
+            }
+        }
+        // Reset auto-update status on chat change
+        if (context.eventTypes.CHAT_CHANGED) {
+            context.eventSource.on(context.eventTypes.CHAT_CHANGED, () => {
+                setTimeout(() => updateAutoUpdateStatus(), 500);
+            });
+        }
     }
     window.openPersonaWeaver = openCreatorPopup;
 // --- [新增] API 预设表单管理事件 ---
@@ -3060,6 +3523,90 @@ function bindEvents() {
         }
     });
 
+    // --- Auto-Update Tab Event Handlers ---
+    $(document).on('change.pw', '#pw-auto-enable', function () {
+        autoUpdateConfig.enabled = $(this).prop('checked');
+        saveAutoUpdateConfig();
+        updateAutoUpdateStatus();
+        toastr.info(autoUpdateConfig.enabled ? '自动更新已启用' : '自动更新已关闭');
+    });
+
+    $(document).on('change.pw', '#pw-auto-interval, #pw-auto-delay', function () {
+        autoUpdateConfig.interval = Math.max(10, parseInt($('#pw-auto-interval').val()) || 50);
+        autoUpdateConfig.delay = Math.max(0, parseInt($('#pw-auto-delay').val()) || 0);
+        saveAutoUpdateConfig();
+        updateAutoUpdateStatus();
+    });
+
+    $(document).on('change.pw', '#pw-auto-context-range', function () {
+        autoUpdateConfig.contextRange = $(this).val();
+        saveAutoUpdateConfig();
+    });
+
+    $(document).on('change.pw', '#pw-auto-target-user', function () {
+        autoUpdateConfig.targets.user.enabled = $(this).prop('checked');
+        $('#pw-auto-user-opts').slideToggle(200);
+        saveAutoUpdateConfig();
+    });
+    $(document).on('change.pw', '#pw-auto-target-npc', function () {
+        autoUpdateConfig.targets.npc.enabled = $(this).prop('checked');
+        $('#pw-auto-npc-opts').slideToggle(200);
+        saveAutoUpdateConfig();
+    });
+    $(document).on('change.pw', '#pw-auto-user-apply', function () {
+        autoUpdateConfig.targets.user.applyPersona = $(this).prop('checked');
+        saveAutoUpdateConfig();
+    });
+    $(document).on('change.pw', '#pw-auto-user-wi', function () {
+        autoUpdateConfig.targets.user.syncWorldBook = $(this).prop('checked');
+        saveAutoUpdateConfig();
+    });
+    $(document).on('change.pw', '#pw-auto-npc-wi', function () {
+        autoUpdateConfig.targets.npc.syncWorldBook = $(this).prop('checked');
+        saveAutoUpdateConfig();
+    });
+
+    $(document).on('change.pw', 'input[name="pw-auto-confirm"]', function () {
+        autoUpdateConfig.confirmMode = $(this).val();
+        saveAutoUpdateConfig();
+    });
+
+    $(document).on('change.pw', '#pw-auto-use-manual-tags', function () {
+        autoUpdateConfig.useManualTags = $(this).prop('checked');
+        saveAutoUpdateConfig();
+    });
+
+    $(document).on('click.pw', '#pw-auto-advanced-toggle', function () {
+        const $body = $('#pw-auto-advanced-body');
+        $body.slideToggle(200);
+        $(this).find('.arrow').toggleClass('fa-chevron-down fa-chevron-up');
+    });
+
+    $(document).on('click.pw', '#pw-auto-reset-state', function () {
+        if (!confirm('确定要重置当前聊天的自动更新状态吗？锚点将清空，需重新手动更新。')) return;
+        const key = getAutoUpdateChatKey();
+        delete autoUpdateConfig.chatStates[key];
+        saveAutoUpdateConfig();
+        updateAutoUpdateStatus();
+        toastr.success('已重置');
+    });
+
+    $(document).on('click.pw', '#pw-auto-set-anchor', function () {
+        const floor = getCurrentFloorCount();
+        if (floor <= 0) return toastr.warning('当前没有聊天记录');
+        const chatState = getAutoUpdateChatState();
+        chatState.lastUpdateFloor = floor;
+        chatState.lastUpdateTime = new Date().toLocaleString();
+        saveAutoUpdateConfig();
+        updateAutoUpdateStatus();
+        toastr.success(`锚点已设为第 ${floor} 楼`);
+    });
+
+    // Update status when switching to auto tab
+    $(document).on('click.pw', '.pw-tab[data-tab="auto"]', function () {
+        updateAutoUpdateStatus();
+    });
+
     // --- Diff View Logic (Sub-view Mode Switching) ---
     $(document).on('click.pw', '.pw-diff-mode-btn', function () {
         const $list = $('#pw-diff-merge-list');
@@ -3397,6 +3944,7 @@ function bindEvents() {
         if (!content) return toastr.warning("内容为空，无法保存");
         const name = $('.persona_name').first().text().trim() || $('h5#your_name').text().trim() || "User";
         await syncToWorldInfoViaHelper(name, content);
+        maybeSetAutoUpdateAnchor();
     });
 
     $(document).on('click.pw', '#pw-btn-apply', async function () {
@@ -3405,6 +3953,7 @@ function bindEvents() {
         const name = $('.persona_name').first().text().trim() || $('h5#your_name').text().trim() || "User";
         await forceSavePersona(name, content);
         toastr.success(TEXT.TOAST_SAVE_SUCCESS(name));
+        maybeSetAutoUpdateAnchor();
         $('.popup_close').click();
     });
 
