@@ -1906,11 +1906,30 @@ function maybeSetAutoUpdateAnchor() {
     const wasNull = chatState.lastUpdateFloor === null;
     chatState.lastUpdateFloor = floor;
     chatState.lastUpdateTime = new Date().toLocaleString();
+
+    // Save snapshot on manual update too
+    const isNpc = uiStateCache.generationMode === 'npc';
+    const resultText = isNpc ? npcContext.result : userContext.result;
+    if (resultText) {
+        const snaps = chatState.snapshots;
+        const latest = snaps.length > 0 ? snaps[snaps.length - 1] : null;
+        if (latest && latest.floor === floor) {
+            if (isNpc) latest.npc = resultText; else latest.user = resultText;
+            latest.time = new Date().toLocaleString();
+        } else {
+            const entry = { floor, time: new Date().toLocaleString() };
+            if (isNpc) entry.npc = resultText; else entry.user = resultText;
+            snaps.push(entry);
+            if (snaps.length > MAX_SNAPSHOTS_PER_CHAT) snaps.splice(0, snaps.length - MAX_SNAPSHOTS_PER_CHAT);
+        }
+    }
+
     saveAutoUpdateConfig();
     if (wasNull) {
         toastr.info(`自动更新锚点已自动设为第 ${floor} 楼`, '自动更新', { timeOut: 4000 });
     }
     updateAutoUpdateStatus();
+    renderSnapshotList();
 }
 
 // ============================================================================
@@ -2740,7 +2759,7 @@ async function openCreatorPopup() {
                 <div class="pw-auto-form-row">
                     <label class="pw-auto-label">更新间隔</label>
                     <div class="pw-auto-field-group">
-                        <input type="number" id="pw-auto-interval" class="pw-input" value="${autoUpdateConfig.interval}" min="10" max="999" style="width:60px; text-align:center;">
+                        <input type="number" id="pw-auto-interval" class="pw-input" value="${autoUpdateConfig.interval}" min="1" max="999" style="width:60px; text-align:center;">
                         <span class="pw-auto-unit">楼</span>
                         <span style="opacity:0.4; margin:0 4px;">+</span>
                         <label class="pw-auto-label" style="min-width:auto;">延后</label>
@@ -2757,6 +2776,7 @@ async function openCreatorPopup() {
                     <label class="pw-auto-label">参考范围</label>
                     <div class="pw-auto-field-group">
                         <select id="pw-auto-context-range" class="pw-input" style="flex:1;">
+                            <option value="10" ${autoUpdateConfig.contextRange == 10 ? 'selected' : ''}>最近 10 条</option>
                             <option value="20" ${autoUpdateConfig.contextRange == 20 ? 'selected' : ''}>最近 20 条</option>
                             <option value="30" ${autoUpdateConfig.contextRange == 30 ? 'selected' : ''}>最近 30 条</option>
                             <option value="50" ${autoUpdateConfig.contextRange == 50 ? 'selected' : ''}>最近 50 条</option>
@@ -2874,15 +2894,8 @@ async function openCreatorPopup() {
                         <div class="pw-snapshot-empty"><i class="fa-solid fa-inbox"></i> 暂无快照</div>
                     </div>
                     <div class="pw-snapshot-toolbar">
-                        <button class="pw-btn" id="pw-snapshot-export" style="font-size:0.76em; padding:4px 8px; flex:1;">
-                            <i class="fa-solid fa-file-export"></i> 导出快照
-                        </button>
-                        <button class="pw-btn" id="pw-snapshot-import-btn" style="font-size:0.76em; padding:4px 8px; flex:1;">
-                            <i class="fa-solid fa-file-import"></i> 导入快照
-                        </button>
-                        <input type="file" id="pw-snapshot-import-file" accept=".json" style="display:none;">
                         <button class="pw-btn danger" id="pw-snapshot-clear" style="font-size:0.76em; padding:4px 8px;">
-                            <i class="fa-solid fa-trash-can"></i> 清空
+                            <i class="fa-solid fa-trash-can"></i> 清空本分支快照
                         </button>
                     </div>
                 </div>
@@ -3950,7 +3963,7 @@ function bindEvents() {
     });
 
     $(document).on('change.pw', '#pw-auto-interval, #pw-auto-delay', function () {
-        autoUpdateConfig.interval = Math.max(10, parseInt($('#pw-auto-interval').val()) || 50);
+        autoUpdateConfig.interval = Math.max(1, parseInt($('#pw-auto-interval').val()) || 50);
         autoUpdateConfig.delay = Math.max(0, parseInt($('#pw-auto-delay').val()) || 0);
         saveAutoUpdateConfig();
         updateAutoUpdateStatus();
@@ -4066,12 +4079,6 @@ function bindEvents() {
         saveAutoUpdateConfig();
         renderSnapshotList();
         toastr.info('快照已删除');
-    });
-    $(document).on('click.pw', '#pw-snapshot-export', exportSnapshots);
-    $(document).on('click.pw', '#pw-snapshot-import-btn', () => $('#pw-snapshot-import-file').click());
-    $(document).on('change.pw', '#pw-snapshot-import-file', function () {
-        if (this.files?.[0]) importSnapshots(this.files[0]);
-        $(this).val('');
     });
     $(document).on('click.pw', '#pw-snapshot-clear', function () {
         const chatState = getAutoUpdateChatState();
