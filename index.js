@@ -383,8 +383,8 @@ const defaultAutoUpdateConfig = {
     enabled: false, interval: 50, delay: 3, contextRange: 30,
     useManualTags: false,
     targets: {
-        user: { enabled: true, applyPersona: true, syncWorldBook: true, worldBookName: '' },
-        npc: { enabled: true, syncWorldBook: true, worldBookName: '' }
+        user: { enabled: true, applyPersona: true, syncWorldBook: true, wiEntryUid: '', wiBookName: '' },
+        npc: { enabled: true, syncWorldBook: true, wiEntryUid: '', wiBookName: '' }
     },
     confirmMode: 'confirm',
     chatStates: {}
@@ -1581,8 +1581,9 @@ async function syncToWorldBookForAutoUpdate(targetMode, content) {
     if (!window.TavernHelper) { toastr.error(TEXT.TOAST_WI_ERROR); return; }
 
     const targets = autoUpdateConfig.targets[targetMode] || {};
-    let targetBook = targets.worldBookName || '';
+    const isNpc = targetMode === 'npc';
 
+    let targetBook = targets.wiBookName || '';
     if (!targetBook) {
         try {
             const charBooks = window.TavernHelper.getCharWorldbookNames('current');
@@ -1596,40 +1597,12 @@ async function syncToWorldBookForAutoUpdate(targetMode, content) {
     }
 
     if (!targetBook) {
-        const context = getContext();
-        const charName = context.characters?.[context.characterId]?.name || 'PersonaWeaver';
-        const newBookName = `PW_${charName}_AutoUpdate`;
-        try {
-            if (window.TavernHelper.createWorldbook) {
-                await window.TavernHelper.createWorldbook(newBookName);
-            } else {
-                const res = await fetch('/api/worldinfo/create', {
-                    method: 'POST', headers: getRequestHeaders(),
-                    body: JSON.stringify({ name: newBookName })
-                });
-                if (!res.ok) throw new Error('创建世界书失败');
-            }
-            targetBook = newBookName;
-            targets.worldBookName = newBookName;
-            saveAutoUpdateConfig();
-            toastr.info(`已自动创建世界书: ${newBookName}`);
-
-            try {
-                if (window.TavernHelper.bindWorldbook) {
-                    await window.TavernHelper.bindWorldbook(newBookName, 'chat');
-                }
-            } catch {}
-        } catch (e) {
-            console.error('[PW] Failed to create world book:', e);
-            toastr.warning('无法自动创建世界书，请手动指定');
-            return;
-        }
+        toastr.warning('未找到绑定的世界书，请先为角色绑定世界书');
+        return;
     }
 
-    const isNpc = targetMode === 'npc';
     const nameMatch = content.match(/姓名:\s*(.*?)(\n|$)/);
     let entryTitle, entryKeys;
-
     if (isNpc) {
         let npcName = nameMatch ? nameMatch[1].trim() : '';
         if (!npcName) npcName = 'NPC';
@@ -1642,20 +1615,41 @@ async function syncToWorldBookForAutoUpdate(targetMode, content) {
     }
 
     try {
-        const entries = await window.TavernHelper.getLorebookEntries(targetBook);
-        const existing = entries.find(e => e.comment === entryTitle);
-        if (existing) {
+        const savedUid = targets.wiEntryUid;
+
+        if (savedUid) {
             await window.TavernHelper.setLorebookEntries(targetBook, [{
-                uid: existing.uid, content, keys: entryKeys, enabled: true
+                uid: savedUid, content, keys: entryKeys, enabled: true
             }]);
+            toastr.success(`已更新世界书条目 [${targetBook}] → UID:${savedUid}`);
         } else {
-            await window.TavernHelper.createLorebookEntries(targetBook, [{
-                comment: entryTitle, keys: entryKeys, content,
-                enabled: true, selective: true, constant: false,
-                position: { type: 'before_character_definition' }
-            }]);
+            const entries = await window.TavernHelper.getLorebookEntries(targetBook);
+            const prefix = isNpc ? 'NPC:' : 'USER:';
+            const existing = entries.find(e => (e.comment || '').startsWith(prefix));
+
+            if (existing) {
+                await window.TavernHelper.setLorebookEntries(targetBook, [{
+                    uid: existing.uid, content, keys: entryKeys, enabled: true,
+                    comment: entryTitle
+                }]);
+                targets.wiEntryUid = String(existing.uid);
+                targets.wiBookName = targetBook;
+                saveAutoUpdateConfig();
+                toastr.success(`已更新世界书条目 [${targetBook}] → ${existing.comment}`);
+            } else {
+                const newEntries = await window.TavernHelper.createLorebookEntries(targetBook, [{
+                    comment: entryTitle, keys: entryKeys, content,
+                    enabled: true, selective: true, constant: false,
+                    position: { type: 'before_character_definition' }
+                }]);
+                if (newEntries?.[0]?.uid) {
+                    targets.wiEntryUid = String(newEntries[0].uid);
+                    targets.wiBookName = targetBook;
+                    saveAutoUpdateConfig();
+                }
+                toastr.success(`已在世界书 [${targetBook}] 新建条目: ${entryTitle}`);
+            }
         }
-        toastr.success(`已同步到世界书 [${targetBook}] → ${entryTitle}`);
     } catch (e) {
         console.error('[PW] Auto-update WI sync error:', e);
         toastr.error('世界书同步失败: ' + e.message);
@@ -1839,18 +1833,44 @@ function updateAutoUpdateStatus() {
     $status.html(html);
 }
 
-function populateAutoWiSelectors() {
-    const books = availableWorldBooks || [];
+async function populateAutoWiSelectors() {
+    let targetBook = null;
+    try {
+        const charBooks = window.TavernHelper?.getCharWorldbookNames?.('current');
+        if (charBooks?.primary) targetBook = charBooks.primary;
+        else if (charBooks?.additional?.length > 0) targetBook = charBooks.additional[0];
+    } catch {}
+    if (!targetBook) {
+        const boundBooks = await getContextWorldBooks();
+        if (boundBooks.length > 0) targetBook = boundBooks[0];
+    }
+
+    let entries = [];
+    if (targetBook && window.TavernHelper?.getLorebookEntries) {
+        try { entries = await window.TavernHelper.getLorebookEntries(targetBook); } catch {}
+    }
+
     ['user', 'npc'].forEach(mode => {
-        const $sel = $(`#pw-auto-${mode}-wi-book`);
+        const $sel = $(`#pw-auto-${mode}-wi-entry`);
         if (!$sel.length) return;
-        const saved = autoUpdateConfig.targets[mode]?.worldBookName || '';
-        $sel.html('<option value="">(自动选择 / 新建)</option>');
-        books.forEach(b => {
-            $sel.append(`<option value="${b}" ${b === saved ? 'selected' : ''}>${b}</option>`);
+        const prefix = mode === 'user' ? 'USER:' : 'NPC:';
+        const savedUid = autoUpdateConfig.targets[mode]?.wiEntryUid || '';
+
+        $sel.html(`<option value="">(新建条目 ${prefix.replace(':','')} 条目)</option>`);
+
+        let autoSelected = '';
+        entries.forEach(e => {
+            const label = e.comment || e.displayName || `UID:${e.uid}`;
+            const isDefault = !savedUid && (e.comment || '').startsWith(prefix);
+            const isSaved = savedUid && String(e.uid) === String(savedUid);
+            $sel.append(`<option value="${e.uid}" data-book="${targetBook}" ${isSaved || isDefault ? 'selected' : ''}>${label}</option>`);
+            if (isSaved || isDefault) autoSelected = String(e.uid);
         });
-        if (saved && !books.includes(saved)) {
-            $sel.append(`<option value="${saved}" selected>${saved} (已保存)</option>`);
+
+        if (autoSelected && !savedUid) {
+            autoUpdateConfig.targets[mode].wiEntryUid = autoSelected;
+            autoUpdateConfig.targets[mode].wiBookName = targetBook || '';
+            saveAutoUpdateConfig();
         }
     });
 }
@@ -2493,12 +2513,12 @@ async function openCreatorPopup() {
                         <span class="pw-switch-slider"></span>
                     </label>
                 </div>
-                <div style="font-size:0.75em; opacity:0.55; margin-top:6px; text-align:left; line-height:1.5;">
+                <div class="pw-auto-hint" style="margin-top:6px;">
                     根据聊天楼层自动更新 User / NPC 人设。首次需手动生成或设定锚点，之后按间隔自动触发。
                 </div>
             </div>
 
-            <!-- Collapsible Body: hidden when disabled -->
+            <!-- Collapsible Body -->
             <div id="pw-auto-body" style="${autoUpdateConfig.enabled ? '' : 'display:none;'}">
 
             <!-- Interval + Delay -->
@@ -2539,57 +2559,58 @@ async function openCreatorPopup() {
                 </label>
             </div>
 
-            <!-- Targets: User -->
+            <!-- Update Targets (User + NPC inside one section) -->
             <div class="pw-card-section">
-                <div class="pw-auto-form-row" style="margin-bottom:6px;">
+                <div class="pw-auto-section-title">更新内容</div>
+
+                <!-- User -->
+                <div class="pw-auto-target-block">
                     <label class="pw-auto-target-header">
                         <input type="checkbox" id="pw-auto-target-user" ${autoUpdateConfig.targets.user.enabled ? 'checked' : ''}>
                         <i class="fa-solid fa-user" style="opacity:0.7;"></i>
-                        <span style="font-weight:600;">User 人设</span>
+                        <span>User 人设</span>
                     </label>
-                </div>
-                <div id="pw-auto-user-opts" class="pw-auto-target-opts" style="${autoUpdateConfig.targets.user.enabled ? '' : 'display:none;'}">
-                    <label class="pw-auto-opt-row">
-                        <input type="checkbox" id="pw-auto-user-apply" ${autoUpdateConfig.targets.user.applyPersona ? 'checked' : ''}>
-                        <span>覆盖当前人设</span>
-                    </label>
-                    <label class="pw-auto-opt-row">
-                        <input type="checkbox" id="pw-auto-user-wi" ${autoUpdateConfig.targets.user.syncWorldBook ? 'checked' : ''}>
-                        <span>同步到世界书</span>
-                    </label>
-                    <div id="pw-auto-user-wi-select-row" class="pw-auto-wi-row" style="${autoUpdateConfig.targets.user.syncWorldBook ? '' : 'display:none;'}">
-                        <select id="pw-auto-user-wi-book" class="pw-input" style="flex:1; font-size:0.82em;">
-                            <option value="">(自动选择 / 新建)</option>
-                        </select>
+                    <div id="pw-auto-user-opts" class="pw-auto-target-opts" style="${autoUpdateConfig.targets.user.enabled ? '' : 'display:none;'}">
+                        <label class="pw-auto-opt-row">
+                            <input type="checkbox" id="pw-auto-user-apply" ${autoUpdateConfig.targets.user.applyPersona ? 'checked' : ''}>
+                            <span>覆盖当前人设</span>
+                        </label>
+                        <label class="pw-auto-opt-row">
+                            <input type="checkbox" id="pw-auto-user-wi" ${autoUpdateConfig.targets.user.syncWorldBook ? 'checked' : ''}>
+                            <span>同步到世界书条目</span>
+                        </label>
+                        <div id="pw-auto-user-wi-select-row" class="pw-auto-wi-row" style="${autoUpdateConfig.targets.user.syncWorldBook ? '' : 'display:none;'}">
+                            <select id="pw-auto-user-wi-entry" class="pw-input" style="flex:1; font-size:0.82em;">
+                                <option value="">(自动匹配 / 新建 USER 条目)</option>
+                            </select>
+                        </div>
                     </div>
                 </div>
-            </div>
 
-            <!-- Targets: NPC -->
-            <div class="pw-card-section">
-                <div class="pw-auto-form-row" style="margin-bottom:6px;">
+                <!-- NPC -->
+                <div class="pw-auto-target-block">
                     <label class="pw-auto-target-header">
                         <input type="checkbox" id="pw-auto-target-npc" ${autoUpdateConfig.targets.npc.enabled ? 'checked' : ''}>
                         <i class="fa-solid fa-user-secret" style="opacity:0.7;"></i>
-                        <span style="font-weight:600;">NPC 人设</span>
+                        <span>NPC 人设</span>
                     </label>
-                </div>
-                <div id="pw-auto-npc-opts" class="pw-auto-target-opts" style="${autoUpdateConfig.targets.npc.enabled ? '' : 'display:none;'}">
-                    <label class="pw-auto-opt-row">
-                        <input type="checkbox" id="pw-auto-npc-wi" ${autoUpdateConfig.targets.npc.syncWorldBook ? 'checked' : ''}>
-                        <span>同步到世界书</span>
-                    </label>
-                    <div id="pw-auto-npc-wi-select-row" class="pw-auto-wi-row" style="${autoUpdateConfig.targets.npc.syncWorldBook ? '' : 'display:none;'}">
-                        <select id="pw-auto-npc-wi-book" class="pw-input" style="flex:1; font-size:0.82em;">
-                            <option value="">(自动选择 / 新建)</option>
-                        </select>
+                    <div id="pw-auto-npc-opts" class="pw-auto-target-opts" style="${autoUpdateConfig.targets.npc.enabled ? '' : 'display:none;'}">
+                        <label class="pw-auto-opt-row">
+                            <input type="checkbox" id="pw-auto-npc-wi" ${autoUpdateConfig.targets.npc.syncWorldBook ? 'checked' : ''}>
+                            <span>同步到世界书条目</span>
+                        </label>
+                        <div id="pw-auto-npc-wi-select-row" class="pw-auto-wi-row" style="${autoUpdateConfig.targets.npc.syncWorldBook ? '' : 'display:none;'}">
+                            <select id="pw-auto-npc-wi-entry" class="pw-input" style="flex:1; font-size:0.82em;">
+                                <option value="">(自动匹配 / 新建 NPC 条目)</option>
+                            </select>
+                        </div>
                     </div>
                 </div>
             </div>
 
             <!-- Confirm Mode -->
             <div class="pw-card-section">
-                <div class="pw-auto-section-title">更新确认方式</div>
+                <div class="pw-auto-section-title">更新方式</div>
                 <div class="pw-auto-confirm-modes">
                     <label class="pw-auto-radio">
                         <input type="radio" name="pw-auto-confirm" value="confirm" ${autoUpdateConfig.confirmMode === 'confirm' ? 'checked' : ''}>
@@ -2611,7 +2632,7 @@ async function openCreatorPopup() {
 
             <!-- Status + Controls -->
             <div class="pw-card-section pw-auto-status-card">
-                <div class="pw-auto-section-title"><i class="fa-solid fa-chart-line"></i> 运行状态</div>
+                <div class="pw-auto-section-title">运行状态</div>
                 <div id="pw-auto-status" class="pw-auto-status-body">
                     <div class="pw-auto-status-row pw-auto-status-waiting"><i class="fa-solid fa-clock"></i> 打开面板时加载...</div>
                 </div>
@@ -3702,12 +3723,14 @@ function bindEvents() {
         $('#pw-auto-npc-wi-select-row').slideToggle(200);
         saveAutoUpdateConfig();
     });
-    $(document).on('change.pw', '#pw-auto-user-wi-book', function () {
-        autoUpdateConfig.targets.user.worldBookName = $(this).val();
+    $(document).on('change.pw', '#pw-auto-user-wi-entry', function () {
+        autoUpdateConfig.targets.user.wiEntryUid = $(this).val();
+        autoUpdateConfig.targets.user.wiBookName = $(this).find(':selected').data('book') || '';
         saveAutoUpdateConfig();
     });
-    $(document).on('change.pw', '#pw-auto-npc-wi-book', function () {
-        autoUpdateConfig.targets.npc.worldBookName = $(this).val();
+    $(document).on('change.pw', '#pw-auto-npc-wi-entry', function () {
+        autoUpdateConfig.targets.npc.wiEntryUid = $(this).val();
+        autoUpdateConfig.targets.npc.wiBookName = $(this).find(':selected').data('book') || '';
         saveAutoUpdateConfig();
     });
 
