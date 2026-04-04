@@ -1558,12 +1558,15 @@
     background: var(--SmartThemeBlurTintColor, #fff);
     border-radius: 12px;
     width: 100%;
-    max-width: 550px;
-    max-height: 80vh;
+    max-width: 680px;
+    max-height: 85vh;
     display: flex;
     flex-direction: column;
     box-shadow: 0 8px 32px rgba(0,0,0,0.3);
     overflow: hidden;
+}
+.pw-snapshot-restore-card {
+    max-width: 500px;
 }
 .pw-snapshot-detail-header {
     display: flex;
@@ -1592,8 +1595,8 @@
 .pw-snapshot-detail-text {
     flex: 1;
     margin: 12px 16px;
-    min-height: 180px;
-    max-height: 50vh;
+    min-height: 280px;
+    max-height: 60vh;
     font-size: 0.82em;
     line-height: 1.6;
     padding: 10px;
