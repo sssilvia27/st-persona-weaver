@@ -383,8 +383,8 @@ const defaultAutoUpdateConfig = {
     enabled: false, interval: 50, delay: 3, contextRange: 30,
     useManualTags: false,
     targets: {
-        user: { enabled: true, applyPersona: true, syncWorldBook: true },
-        npc: { enabled: true, syncWorldBook: true }
+        user: { enabled: true, applyPersona: true, syncWorldBook: true, worldBookName: '' },
+        npc: { enabled: true, syncWorldBook: true, worldBookName: '' }
     },
     confirmMode: 'confirm',
     chatStates: {}
@@ -1577,6 +1577,91 @@ async function performAutoUpdate(targetMode) {
     }
 }
 
+async function syncToWorldBookForAutoUpdate(targetMode, content) {
+    if (!window.TavernHelper) { toastr.error(TEXT.TOAST_WI_ERROR); return; }
+
+    const targets = autoUpdateConfig.targets[targetMode] || {};
+    let targetBook = targets.worldBookName || '';
+
+    if (!targetBook) {
+        try {
+            const charBooks = window.TavernHelper.getCharWorldbookNames('current');
+            if (charBooks?.primary) targetBook = charBooks.primary;
+            else if (charBooks?.additional?.length > 0) targetBook = charBooks.additional[0];
+        } catch {}
+        if (!targetBook) {
+            const boundBooks = await getContextWorldBooks();
+            if (boundBooks.length > 0) targetBook = boundBooks[0];
+        }
+    }
+
+    if (!targetBook) {
+        const context = getContext();
+        const charName = context.characters?.[context.characterId]?.name || 'PersonaWeaver';
+        const newBookName = `PW_${charName}_AutoUpdate`;
+        try {
+            if (window.TavernHelper.createWorldbook) {
+                await window.TavernHelper.createWorldbook(newBookName);
+            } else {
+                const res = await fetch('/api/worldinfo/create', {
+                    method: 'POST', headers: getRequestHeaders(),
+                    body: JSON.stringify({ name: newBookName })
+                });
+                if (!res.ok) throw new Error('创建世界书失败');
+            }
+            targetBook = newBookName;
+            targets.worldBookName = newBookName;
+            saveAutoUpdateConfig();
+            toastr.info(`已自动创建世界书: ${newBookName}`);
+
+            try {
+                if (window.TavernHelper.bindWorldbook) {
+                    await window.TavernHelper.bindWorldbook(newBookName, 'chat');
+                }
+            } catch {}
+        } catch (e) {
+            console.error('[PW] Failed to create world book:', e);
+            toastr.warning('无法自动创建世界书，请手动指定');
+            return;
+        }
+    }
+
+    const isNpc = targetMode === 'npc';
+    const nameMatch = content.match(/姓名:\s*(.*?)(\n|$)/);
+    let entryTitle, entryKeys;
+
+    if (isNpc) {
+        let npcName = nameMatch ? nameMatch[1].trim() : '';
+        if (!npcName) npcName = 'NPC';
+        entryTitle = `NPC:${npcName}`;
+        entryKeys = generateSmartKeywords(npcName, content, ['NPC']);
+    } else {
+        const userName = nameMatch ? nameMatch[1].trim() : ($('.persona_name').first().text().trim() || 'User');
+        entryTitle = `USER:${userName}`;
+        entryKeys = generateSmartKeywords(userName, content, ['User']);
+    }
+
+    try {
+        const entries = await window.TavernHelper.getLorebookEntries(targetBook);
+        const existing = entries.find(e => e.comment === entryTitle);
+        if (existing) {
+            await window.TavernHelper.setLorebookEntries(targetBook, [{
+                uid: existing.uid, content, keys: entryKeys, enabled: true
+            }]);
+        } else {
+            await window.TavernHelper.createLorebookEntries(targetBook, [{
+                comment: entryTitle, keys: entryKeys, content,
+                enabled: true, selective: true, constant: false,
+                position: { type: 'before_character_definition' }
+            }]);
+        }
+        toastr.success(`已同步到世界书 [${targetBook}] → ${entryTitle}`);
+    } catch (e) {
+        console.error('[PW] Auto-update WI sync error:', e);
+        toastr.error('世界书同步失败: ' + e.message);
+    }
+}
+
 async function applyAutoUpdateResult(targetMode, result) {
     const isNpc = targetMode === 'npc';
     const targets = autoUpdateConfig.targets[targetMode] || {};
@@ -1586,12 +1671,7 @@ async function applyAutoUpdateResult(targetMode, result) {
         npcContext.result = result;
         npcContext.hasResult = true;
         if (targets.syncWorldBook) {
-            const origMode = uiStateCache.generationMode;
-            uiStateCache.generationMode = 'npc';
-            try {
-                const userName = $('.persona_name').first().text().trim() || "User";
-                await syncToWorldInfoViaHelper(userName, result);
-            } finally { uiStateCache.generationMode = origMode; }
+            await syncToWorldBookForAutoUpdate('npc', result);
         }
         chatState.npcUpdateCount = (chatState.npcUpdateCount || 0) + 1;
     } else {
@@ -1602,12 +1682,7 @@ async function applyAutoUpdateResult(targetMode, result) {
             await forceSavePersona(name, result);
         }
         if (targets.syncWorldBook) {
-            const origMode = uiStateCache.generationMode;
-            uiStateCache.generationMode = 'user';
-            try {
-                const userName = $('.persona_name').first().text().trim() || "User";
-                await syncToWorldInfoViaHelper(userName, result);
-            } finally { uiStateCache.generationMode = origMode; }
+            await syncToWorldBookForAutoUpdate('user', result);
         }
         chatState.userUpdateCount = (chatState.userUpdateCount || 0) + 1;
     }
@@ -1762,6 +1837,22 @@ function updateAutoUpdateStatus() {
     }
 
     $status.html(html);
+}
+
+function populateAutoWiSelectors() {
+    const books = availableWorldBooks || [];
+    ['user', 'npc'].forEach(mode => {
+        const $sel = $(`#pw-auto-${mode}-wi-book`);
+        if (!$sel.length) return;
+        const saved = autoUpdateConfig.targets[mode]?.worldBookName || '';
+        $sel.html('<option value="">(自动选择 / 新建)</option>');
+        books.forEach(b => {
+            $sel.append(`<option value="${b}" ${b === saved ? 'selected' : ''}>${b}</option>`);
+        });
+        if (saved && !books.includes(saved)) {
+            $sel.append(`<option value="${saved}" selected>${saved} (已保存)</option>`);
+        }
+    });
 }
 
 function maybeSetAutoUpdateAnchor() {
@@ -2392,76 +2483,113 @@ async function openCreatorPopup() {
 
     <!-- Auto-Update View -->
     <div id="pw-view-auto" class="pw-view">
-        <div class="pw-scroll-area">
+        <div class="pw-scroll-area pw-auto-scroll">
+            <!-- Header + Master Toggle -->
             <div class="pw-card-section">
-                <div class="pw-row" style="margin-bottom:8px;">
-                    <label class="pw-section-label" style="flex:1;">自动更新人设</label>
+                <div style="display:flex; align-items:center; gap:10px;">
+                    <label class="pw-section-label" style="flex:1; text-align:left;">自动更新人设</label>
                     <label class="pw-switch">
                         <input type="checkbox" id="pw-auto-enable" ${autoUpdateConfig.enabled ? 'checked' : ''}>
                         <span class="pw-switch-slider"></span>
                     </label>
                 </div>
-                <div style="font-size:0.78em; opacity:0.6; margin-bottom:10px; text-align:left; line-height:1.5;">
-                    根据聊天楼层自动更新 User / NPC 人设。首次需手动生成或更新来设定锚点，之后按间隔自动触发。
+                <div style="font-size:0.75em; opacity:0.55; margin-top:6px; text-align:left; line-height:1.5;">
+                    根据聊天楼层自动更新 User / NPC 人设。首次需手动生成或设定锚点，之后按间隔自动触发。
                 </div>
             </div>
 
-            <div class="pw-card-section">
-                <div class="pw-row" style="gap:8px; align-items:center; margin-bottom:8px;">
-                    <label style="font-size:0.85em; white-space:nowrap;">更新间隔</label>
-                    <input type="number" id="pw-auto-interval" class="pw-input" value="${autoUpdateConfig.interval}" min="10" max="999" style="width:65px; text-align:center; padding:4px;">
-                    <span style="font-size:0.85em; opacity:0.7;">楼</span>
-                    <span style="font-size:0.8em; opacity:0.5; margin-left:8px;">+</span>
-                    <label style="font-size:0.85em; white-space:nowrap; margin-left:4px;">延后</label>
-                    <input type="number" id="pw-auto-delay" class="pw-input" value="${autoUpdateConfig.delay}" min="0" max="99" style="width:50px; text-align:center; padding:4px;">
-                    <span style="font-size:0.85em; opacity:0.7;">楼</span>
-                </div>
-                <div style="font-size:0.72em; opacity:0.5; text-align:left;">
-                    实际触发楼层 = 锚点 + 间隔 + 延后（如: 0 + ${autoUpdateConfig.interval} + ${autoUpdateConfig.delay} = 第${autoUpdateConfig.interval + autoUpdateConfig.delay}楼）
-                </div>
-            </div>
+            <!-- Collapsible Body: hidden when disabled -->
+            <div id="pw-auto-body" style="${autoUpdateConfig.enabled ? '' : 'display:none;'}">
 
+            <!-- Interval + Delay -->
             <div class="pw-card-section">
-                <div class="pw-row" style="gap:8px; align-items:center; margin-bottom:8px;">
-                    <label style="font-size:0.85em; white-space:nowrap;">参考范围</label>
-                    <select id="pw-auto-context-range" class="pw-input" style="flex:1; padding:4px 6px; font-size:0.85em;">
-                        <option value="20" ${autoUpdateConfig.contextRange == 20 ? 'selected' : ''}>最近 20 条</option>
-                        <option value="30" ${autoUpdateConfig.contextRange == 30 ? 'selected' : ''}>最近 30 条</option>
-                        <option value="50" ${autoUpdateConfig.contextRange == 50 ? 'selected' : ''}>最近 50 条</option>
-                        <option value="80" ${autoUpdateConfig.contextRange == 80 ? 'selected' : ''}>最近 80 条</option>
-                        <option value="all" ${autoUpdateConfig.contextRange == 'all' ? 'selected' : ''}>全部</option>
-                    </select>
-                </div>
-                <div style="font-size:0.72em; opacity:0.5; text-align:left;">自动更新时喂给 AI 的聊天记录条数</div>
-            </div>
-
-            <div class="pw-card-section">
-                <div style="font-size:0.85em; margin-bottom:8px; font-weight:600; text-align:left;">更新目标</div>
-                <div class="pw-auto-target-group">
-                    <div class="pw-auto-target-item">
-                        <label class="pw-auto-target-header">
-                            <input type="checkbox" id="pw-auto-target-user" ${autoUpdateConfig.targets.user.enabled ? 'checked' : ''}>
-                            <span><i class="fa-solid fa-user"></i> User 人设</span>
-                        </label>
-                        <div class="pw-auto-target-opts" id="pw-auto-user-opts" style="${autoUpdateConfig.targets.user.enabled ? '' : 'display:none;'}">
-                            <label><input type="checkbox" id="pw-auto-user-apply" ${autoUpdateConfig.targets.user.applyPersona ? 'checked' : ''}> 覆盖当前人设</label>
-                            <label><input type="checkbox" id="pw-auto-user-wi" ${autoUpdateConfig.targets.user.syncWorldBook ? 'checked' : ''}> 同步到世界书</label>
-                        </div>
-                    </div>
-                    <div class="pw-auto-target-item">
-                        <label class="pw-auto-target-header">
-                            <input type="checkbox" id="pw-auto-target-npc" ${autoUpdateConfig.targets.npc.enabled ? 'checked' : ''}>
-                            <span><i class="fa-solid fa-user-secret"></i> NPC 人设</span>
-                        </label>
-                        <div class="pw-auto-target-opts" id="pw-auto-npc-opts" style="${autoUpdateConfig.targets.npc.enabled ? '' : 'display:none;'}">
-                            <label><input type="checkbox" id="pw-auto-npc-wi" ${autoUpdateConfig.targets.npc.syncWorldBook ? 'checked' : ''}> 同步到世界书</label>
-                        </div>
+                <div class="pw-auto-form-row">
+                    <label class="pw-auto-label">更新间隔</label>
+                    <div class="pw-auto-field-group">
+                        <input type="number" id="pw-auto-interval" class="pw-input" value="${autoUpdateConfig.interval}" min="10" max="999" style="width:60px; text-align:center;">
+                        <span class="pw-auto-unit">楼</span>
+                        <span style="opacity:0.4; margin:0 4px;">+</span>
+                        <label class="pw-auto-label" style="min-width:auto;">延后</label>
+                        <input type="number" id="pw-auto-delay" class="pw-input" value="${autoUpdateConfig.delay}" min="0" max="99" style="width:50px; text-align:center;">
+                        <span class="pw-auto-unit">楼</span>
                     </div>
                 </div>
+                <div class="pw-auto-hint">触发 = 锚点 + 间隔 + 延后（如: 0 + ${autoUpdateConfig.interval} + ${autoUpdateConfig.delay} = 第${autoUpdateConfig.interval + autoUpdateConfig.delay}楼）</div>
             </div>
 
+            <!-- Context Range -->
             <div class="pw-card-section">
-                <div style="font-size:0.85em; margin-bottom:8px; font-weight:600; text-align:left;">更新确认方式</div>
+                <div class="pw-auto-form-row">
+                    <label class="pw-auto-label">参考范围</label>
+                    <div class="pw-auto-field-group">
+                        <select id="pw-auto-context-range" class="pw-input" style="flex:1;">
+                            <option value="20" ${autoUpdateConfig.contextRange == 20 ? 'selected' : ''}>最近 20 条</option>
+                            <option value="30" ${autoUpdateConfig.contextRange == 30 ? 'selected' : ''}>最近 30 条</option>
+                            <option value="50" ${autoUpdateConfig.contextRange == 50 ? 'selected' : ''}>最近 50 条</option>
+                            <option value="80" ${autoUpdateConfig.contextRange == 80 ? 'selected' : ''}>最近 80 条</option>
+                            <option value="all" ${autoUpdateConfig.contextRange == 'all' ? 'selected' : ''}>全部</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="pw-auto-hint">自动更新时喂给 AI 的聊天记录条数</div>
+                <label style="display:flex; align-items:center; gap:6px; font-size:0.82em; margin-top:8px; cursor:pointer;">
+                    <input type="checkbox" id="pw-auto-use-manual-tags" ${autoUpdateConfig.useManualTags ? 'checked' : ''}>
+                    使用手动推断的标签过滤
+                    <span id="pw-auto-goto-tags" style="color:var(--pw-accent, #8b6cc1); cursor:pointer; text-decoration:underline; font-size:0.9em; margin-left:2px;">设置 →</span>
+                </label>
+            </div>
+
+            <!-- Targets: User -->
+            <div class="pw-card-section">
+                <div class="pw-auto-form-row" style="margin-bottom:6px;">
+                    <label class="pw-auto-target-header">
+                        <input type="checkbox" id="pw-auto-target-user" ${autoUpdateConfig.targets.user.enabled ? 'checked' : ''}>
+                        <i class="fa-solid fa-user" style="opacity:0.7;"></i>
+                        <span style="font-weight:600;">User 人设</span>
+                    </label>
+                </div>
+                <div id="pw-auto-user-opts" class="pw-auto-target-opts" style="${autoUpdateConfig.targets.user.enabled ? '' : 'display:none;'}">
+                    <label class="pw-auto-opt-row">
+                        <input type="checkbox" id="pw-auto-user-apply" ${autoUpdateConfig.targets.user.applyPersona ? 'checked' : ''}>
+                        <span>覆盖当前人设</span>
+                    </label>
+                    <label class="pw-auto-opt-row">
+                        <input type="checkbox" id="pw-auto-user-wi" ${autoUpdateConfig.targets.user.syncWorldBook ? 'checked' : ''}>
+                        <span>同步到世界书</span>
+                    </label>
+                    <div id="pw-auto-user-wi-select-row" class="pw-auto-wi-row" style="${autoUpdateConfig.targets.user.syncWorldBook ? '' : 'display:none;'}">
+                        <select id="pw-auto-user-wi-book" class="pw-input" style="flex:1; font-size:0.82em;">
+                            <option value="">(自动选择 / 新建)</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Targets: NPC -->
+            <div class="pw-card-section">
+                <div class="pw-auto-form-row" style="margin-bottom:6px;">
+                    <label class="pw-auto-target-header">
+                        <input type="checkbox" id="pw-auto-target-npc" ${autoUpdateConfig.targets.npc.enabled ? 'checked' : ''}>
+                        <i class="fa-solid fa-user-secret" style="opacity:0.7;"></i>
+                        <span style="font-weight:600;">NPC 人设</span>
+                    </label>
+                </div>
+                <div id="pw-auto-npc-opts" class="pw-auto-target-opts" style="${autoUpdateConfig.targets.npc.enabled ? '' : 'display:none;'}">
+                    <label class="pw-auto-opt-row">
+                        <input type="checkbox" id="pw-auto-npc-wi" ${autoUpdateConfig.targets.npc.syncWorldBook ? 'checked' : ''}>
+                        <span>同步到世界书</span>
+                    </label>
+                    <div id="pw-auto-npc-wi-select-row" class="pw-auto-wi-row" style="${autoUpdateConfig.targets.npc.syncWorldBook ? '' : 'display:none;'}">
+                        <select id="pw-auto-npc-wi-book" class="pw-input" style="flex:1; font-size:0.82em;">
+                            <option value="">(自动选择 / 新建)</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Confirm Mode -->
+            <div class="pw-card-section">
+                <div class="pw-auto-section-title">更新确认方式</div>
                 <div class="pw-auto-confirm-modes">
                     <label class="pw-auto-radio">
                         <input type="radio" name="pw-auto-confirm" value="confirm" ${autoUpdateConfig.confirmMode === 'confirm' ? 'checked' : ''}>
@@ -2481,36 +2609,23 @@ async function openCreatorPopup() {
                 </div>
             </div>
 
-            <div class="pw-card-section">
-                <div class="pw-context-header" id="pw-auto-advanced-toggle" style="cursor:pointer;">
-                    <span style="font-size:0.85em;"><i class="fa-solid fa-gear"></i> 高级选项</span>
-                    <i class="fa-solid fa-chevron-down arrow" style="font-size:0.7em; opacity:0.5;"></i>
-                </div>
-                <div id="pw-auto-advanced-body" style="display:none; padding-top:8px;">
-                    <label style="display:flex; align-items:center; gap:6px; font-size:0.85em; cursor:pointer;">
-                        <input type="checkbox" id="pw-auto-use-manual-tags" ${autoUpdateConfig.useManualTags ? 'checked' : ''}>
-                        使用手动推断的标签过滤设置
-                    </label>
-                    <div style="font-size:0.72em; opacity:0.5; margin-top:4px; text-align:left;">
-                        勾选后将复用「参考」页面中设置的 include/exclude 标签
-                    </div>
-                    <div style="margin-top:10px;">
-                        <button class="pw-btn danger" id="pw-auto-reset-state" style="font-size:0.8em; padding:5px 12px;">
-                            <i class="fa-solid fa-rotate-left"></i> 重置当前聊天的自动更新状态
-                        </button>
-                    </div>
-                </div>
-            </div>
-
+            <!-- Status + Controls -->
             <div class="pw-card-section pw-auto-status-card">
-                <div style="font-size:0.85em; margin-bottom:6px; font-weight:600; text-align:left;"><i class="fa-solid fa-chart-line"></i> 运行状态</div>
+                <div class="pw-auto-section-title"><i class="fa-solid fa-chart-line"></i> 运行状态</div>
                 <div id="pw-auto-status" class="pw-auto-status-body">
                     <div class="pw-auto-status-row pw-auto-status-waiting"><i class="fa-solid fa-clock"></i> 打开面板时加载...</div>
                 </div>
-                <button class="pw-btn primary" id="pw-auto-set-anchor" style="margin-top:8px; font-size:0.82em; padding:6px 12px; width:100%;">
-                    <i class="fa-solid fa-anchor"></i> 以当前楼层为锚点
-                </button>
+                <div style="display:flex; gap:8px; margin-top:10px;">
+                    <button class="pw-btn danger" id="pw-auto-reset-state" style="font-size:0.78em; padding:5px 10px; flex-shrink:0;">
+                        <i class="fa-solid fa-rotate-left"></i> 重置状态
+                    </button>
+                    <button class="pw-btn primary" id="pw-auto-set-anchor" style="font-size:0.78em; padding:5px 10px; flex:1;">
+                        <i class="fa-solid fa-anchor"></i> 以当前楼层为锚点
+                    </button>
+                </div>
             </div>
+
+            </div><!-- /pw-auto-body -->
         </div>
     </div>
 
@@ -3526,6 +3641,7 @@ function bindEvents() {
     // --- Auto-Update Tab Event Handlers ---
     $(document).on('change.pw', '#pw-auto-enable', function () {
         autoUpdateConfig.enabled = $(this).prop('checked');
+        $('#pw-auto-body').slideToggle(250);
         saveAutoUpdateConfig();
         updateAutoUpdateStatus();
         toastr.info(autoUpdateConfig.enabled ? '自动更新已启用' : '自动更新已关闭');
@@ -3543,6 +3659,23 @@ function bindEvents() {
         saveAutoUpdateConfig();
     });
 
+    $(document).on('change.pw', '#pw-auto-use-manual-tags', function () {
+        autoUpdateConfig.useManualTags = $(this).prop('checked');
+        saveAutoUpdateConfig();
+    });
+
+    $(document).on('click.pw', '#pw-auto-goto-tags', function () {
+        $('.pw-tab[data-tab="context"]').click();
+        setTimeout(() => {
+            const $section = $('#pw-chat-history-section');
+            if ($section.length) {
+                const $filterToggle = $('#pw-chat-filter-toggle');
+                if ($filterToggle.length && $('#pw-chat-filter-body').is(':hidden')) $filterToggle.click();
+                $section[0].scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
+        }, 200);
+    });
+
     $(document).on('change.pw', '#pw-auto-target-user', function () {
         autoUpdateConfig.targets.user.enabled = $(this).prop('checked');
         $('#pw-auto-user-opts').slideToggle(200);
@@ -3558,11 +3691,23 @@ function bindEvents() {
         saveAutoUpdateConfig();
     });
     $(document).on('change.pw', '#pw-auto-user-wi', function () {
-        autoUpdateConfig.targets.user.syncWorldBook = $(this).prop('checked');
+        const checked = $(this).prop('checked');
+        autoUpdateConfig.targets.user.syncWorldBook = checked;
+        $('#pw-auto-user-wi-select-row').slideToggle(200);
         saveAutoUpdateConfig();
     });
     $(document).on('change.pw', '#pw-auto-npc-wi', function () {
-        autoUpdateConfig.targets.npc.syncWorldBook = $(this).prop('checked');
+        const checked = $(this).prop('checked');
+        autoUpdateConfig.targets.npc.syncWorldBook = checked;
+        $('#pw-auto-npc-wi-select-row').slideToggle(200);
+        saveAutoUpdateConfig();
+    });
+    $(document).on('change.pw', '#pw-auto-user-wi-book', function () {
+        autoUpdateConfig.targets.user.worldBookName = $(this).val();
+        saveAutoUpdateConfig();
+    });
+    $(document).on('change.pw', '#pw-auto-npc-wi-book', function () {
+        autoUpdateConfig.targets.npc.worldBookName = $(this).val();
         saveAutoUpdateConfig();
     });
 
@@ -3571,19 +3716,8 @@ function bindEvents() {
         saveAutoUpdateConfig();
     });
 
-    $(document).on('change.pw', '#pw-auto-use-manual-tags', function () {
-        autoUpdateConfig.useManualTags = $(this).prop('checked');
-        saveAutoUpdateConfig();
-    });
-
-    $(document).on('click.pw', '#pw-auto-advanced-toggle', function () {
-        const $body = $('#pw-auto-advanced-body');
-        $body.slideToggle(200);
-        $(this).find('.arrow').toggleClass('fa-chevron-down fa-chevron-up');
-    });
-
     $(document).on('click.pw', '#pw-auto-reset-state', function () {
-        if (!confirm('确定要重置当前聊天的自动更新状态吗？锚点将清空，需重新手动更新。')) return;
+        if (!confirm('确定重置？锚点将清空，需重新手动更新或设锚。')) return;
         const key = getAutoUpdateChatKey();
         delete autoUpdateConfig.chatStates[key];
         saveAutoUpdateConfig();
@@ -3602,9 +3736,10 @@ function bindEvents() {
         toastr.success(`锚点已设为第 ${floor} 楼`);
     });
 
-    // Update status when switching to auto tab
+    // Populate world book selectors & update status when switching to auto tab
     $(document).on('click.pw', '.pw-tab[data-tab="auto"]', function () {
         updateAutoUpdateStatus();
+        populateAutoWiSelectors();
     });
 
     // --- Diff View Logic (Sub-view Mode Switching) ---
