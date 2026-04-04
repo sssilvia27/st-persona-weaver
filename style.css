@@ -1399,6 +1399,150 @@
     margin-top: 8px;
 }
 
+/* Branch groups */
+.pw-snap-branch {
+    border: 1px solid var(--pw-border, rgba(0,0,0,0.06));
+    border-radius: 6px;
+    overflow: hidden;
+    margin-bottom: 6px;
+}
+.pw-snap-branch-current {
+    border-color: var(--pw-accent, #8b6cc1);
+    border-width: 1.5px;
+}
+.pw-snap-branch-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 5px 8px;
+    font-size: 0.8em;
+    font-weight: 600;
+    cursor: pointer;
+    background: var(--pw-paper-bg, rgba(0,0,0,0.02));
+    user-select: none;
+}
+.pw-snap-branch-header:hover {
+    background: var(--pw-accent-light, rgba(139,108,193,0.08));
+}
+.pw-snap-branch-name {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.pw-snap-branch-count {
+    font-size: 0.75em;
+    background: var(--pw-accent, #8b6cc1);
+    color: #fff;
+    border-radius: 8px;
+    padding: 0 5px;
+    min-width: 16px;
+    text-align: center;
+    line-height: 1.5;
+    flex-shrink: 0;
+}
+.pw-snap-branch-items {
+    padding: 2px;
+}
+.pw-snap-type-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    border-radius: 4px;
+    font-size: 0.65em;
+    font-weight: 700;
+    cursor: pointer;
+    transition: opacity 0.15s;
+}
+.pw-snap-type-badge:hover { opacity: 1; }
+.pw-snap-type-user {
+    background: rgba(52,152,219,0.15);
+    color: #3498db;
+    border: 1px solid rgba(52,152,219,0.3);
+}
+.pw-snap-type-npc {
+    background: rgba(155,89,182,0.15);
+    color: #9b59b6;
+    border: 1px solid rgba(155,89,182,0.3);
+}
+
+/* Snapshot detail tabs */
+.pw-snap-detail-tabs {
+    display: flex;
+    gap: 0;
+    border-bottom: 1px solid var(--SmartThemeBorderColor, #ddd);
+}
+.pw-snap-dtab {
+    flex: 1;
+    background: none;
+    border: none;
+    padding: 8px 12px;
+    font-size: 0.82em;
+    cursor: pointer;
+    color: inherit;
+    opacity: 0.5;
+    border-bottom: 2px solid transparent;
+    transition: all 0.15s;
+}
+.pw-snap-dtab.active {
+    opacity: 1;
+    font-weight: 600;
+    border-bottom-color: var(--pw-accent, #8b6cc1);
+}
+.pw-snap-dtab:hover { opacity: 0.8; }
+
+/* Auto-update confirm diff tabs */
+.pw-auc-tabs {
+    display: flex;
+    gap: 0;
+    border-bottom: 1px solid var(--SmartThemeBorderColor, #ddd);
+}
+.pw-auc-tab {
+    flex: 1;
+    background: none;
+    border: none;
+    padding: 8px 12px;
+    font-size: 0.82em;
+    cursor: pointer;
+    color: inherit;
+    opacity: 0.5;
+    border-bottom: 2px solid transparent;
+    transition: all 0.15s;
+}
+.pw-auc-tab.active {
+    opacity: 1;
+    font-weight: 600;
+    border-bottom-color: var(--pw-accent, #8b6cc1);
+}
+.pw-auc-tab:hover { opacity: 0.8; }
+
+.pw-auc-diff-area {
+    padding: 0;
+}
+.pw-auc-diff-view {
+    font-size: 0.82em;
+    line-height: 1.7;
+    padding: 10px;
+    max-height: 50vh;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+.pw-auc-diff-info {
+    font-size: 0.72em;
+    opacity: 0.5;
+    padding: 4px 10px 0;
+    text-align: right;
+}
+.pw-auc-edit-text {
+    margin: 0 !important;
+}
+
 /* Snapshot Detail / Restore Overlay */
 .pw-snapshot-overlay {
     position: fixed;
