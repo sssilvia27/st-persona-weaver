@@ -1121,13 +1121,19 @@
     margin-bottom: 8px;
 }
 
-/* Target headers (User/NPC) as top-level items */
+/* Target blocks (User/NPC inside "更新内容") */
+.pw-auto-target-block {
+    padding: 8px 0;
+    border-bottom: 1px dashed var(--pw-border, rgba(0,0,0,0.06));
+}
+.pw-auto-target-block:last-child { border-bottom: none; }
 .pw-auto-target-header {
     display: flex;
     align-items: center;
     gap: 8px;
     cursor: pointer;
     font-size: 0.9em;
+    font-weight: 600;
 }
 .pw-auto-target-header input[type="checkbox"] {
     width: 16px; height: 16px;
@@ -1135,6 +1141,7 @@
 }
 .pw-auto-target-opts {
     padding-left: 28px;
+    margin-top: 6px;
     display: flex;
     flex-direction: column;
     gap: 5px;
