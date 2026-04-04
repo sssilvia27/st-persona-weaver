@@ -1464,6 +1464,25 @@ function generateSmartKeywords(name, content, staticTags = []) {
     return [...new Set(rawKeys)].filter(k => k && k.length > 1);
 }
 
+function extractAllNpcNames(content) {
+    const names = [];
+    const regex = /姓名[:：]\s*(.*?)(\n|$)/g;
+    let m;
+    while ((m = regex.exec(content)) !== null) {
+        const name = m[1].trim();
+        if (name && !names.includes(name)) names.push(name);
+    }
+    return names;
+}
+
+function generateSmartKeywordsMulti(names, content, staticTags = []) {
+    let allKeys = [...staticTags];
+    for (const name of names) {
+        allKeys.push(...generateSmartKeywords(name, content, []));
+    }
+    return [...new Set(allKeys)].filter(k => k && k.length > 1);
+}
+
 async function syncToWorldInfoViaHelper(userName, content) {
     if (!window.TavernHelper) return toastr.error(TEXT.TOAST_WI_ERROR);
 
@@ -1485,19 +1504,18 @@ async function syncToWorldInfoViaHelper(userName, content) {
     let entryKeys = [];
     const isNpc = uiStateCache.generationMode === 'npc';
 
-    // 尝试从 YAML 内容中优先读取姓名，如果没写则用传入的 fallback
-    const nameMatch = content.match(/姓名:\s*(.*?)(\n|$)/);
-    
     if (isNpc) {
-        let npcName = nameMatch ? nameMatch[1].trim() : "";
-        if (!npcName) {
-            npcName = prompt("无法自动识别 NPC 姓名，请输入：", "路人甲");
-            if (!npcName) return; 
+        const npcNames = extractAllNpcNames(content);
+        if (npcNames.length === 0) {
+            const fallback = prompt("无法自动识别 NPC 姓名，请输入：", "路人甲");
+            if (!fallback) return;
+            npcNames.push(fallback);
         }
-        entryTitle = `NPC:${npcName}`;
-        entryKeys = generateSmartKeywords(npcName, content, ["NPC"]);
+        const displayName = npcNames.join('&');
+        entryTitle = `NPC:${displayName}`;
+        entryKeys = generateSmartKeywordsMulti(npcNames, content, ["NPC"]);
     } else {
-        // User 优先用 YAML 里的名字（可能用户在设定里给自己起了全名），回退用酒馆用户名
+        const nameMatch = content.match(/姓名:\s*(.*?)(\n|$)/);
         const finalUserName = nameMatch ? nameMatch[1].trim() : (userName || "User");
         entryTitle = `USER:${finalUserName}`; 
         entryKeys = generateSmartKeywords(finalUserName, content, ["User"]);
@@ -1607,14 +1625,14 @@ async function syncToWorldBookForAutoUpdate(targetMode, content) {
         return;
     }
 
-    const nameMatch = content.match(/姓名:\s*(.*?)(\n|$)/);
     let entryTitle, entryKeys;
     if (isNpc) {
-        let npcName = nameMatch ? nameMatch[1].trim() : '';
-        if (!npcName) npcName = 'NPC';
-        entryTitle = `NPC:${npcName}`;
-        entryKeys = generateSmartKeywords(npcName, content, ['NPC']);
+        const npcNames = extractAllNpcNames(content);
+        const displayName = npcNames.length > 0 ? npcNames.join('&') : 'NPC';
+        entryTitle = `NPC:${displayName}`;
+        entryKeys = generateSmartKeywordsMulti(npcNames, content, ['NPC']);
     } else {
+        const nameMatch = content.match(/姓名:\s*(.*?)(\n|$)/);
         const userName = nameMatch ? nameMatch[1].trim() : ($('.persona_name').first().text().trim() || 'User');
         entryTitle = `USER:${userName}`;
         entryKeys = generateSmartKeywords(userName, content, ['User']);
@@ -1751,30 +1769,33 @@ async function checkAutoUpdateTrigger() {
             return;
         }
 
+        const results = {};
         for (const targetMode of targetsToUpdate) {
             const label = targetMode === 'user' ? 'User' : 'NPC';
-
             if (mode === 'silent') {
                 toastr.info(`正在自动更新 ${label} 人设 (第${currentFloor}楼)...`, '自动更新', { timeOut: 3000 });
             }
-
             try {
                 const result = await performAutoUpdate(targetMode);
-
                 if (!result || result.trim().length < 20) {
                     toastr.warning(`${label} 自动更新返回内容过短，已跳过`);
                     continue;
                 }
-
-                if (mode === 'silent') {
-                    await applyAutoUpdateResult(targetMode, result);
-                    toastr.success(`${label} 人设已自动更新（第${currentFloor}楼）`, '自动更新完成');
-                } else if (mode === 'confirm') {
-                    showAutoUpdateConfirm(targetMode, result, currentFloor);
-                }
+                results[targetMode] = result;
             } catch (e) {
                 console.error(`[PW] Auto-update ${label} failed:`, e);
                 toastr.error(`${label} 自动更新失败: ${e.message}`, '自动更新错误');
+            }
+        }
+
+        if (Object.keys(results).length > 0) {
+            if (mode === 'silent') {
+                for (const [tm, res] of Object.entries(results)) {
+                    await applyAutoUpdateResult(tm, res);
+                    toastr.success(`${tm === 'user' ? 'User' : 'NPC'} 人设已自动更新（第${currentFloor}楼）`, '自动更新完成');
+                }
+            } else if (mode === 'confirm') {
+                showAutoUpdateConfirm(results, currentFloor);
             }
         }
 
@@ -1784,44 +1805,149 @@ async function checkAutoUpdateTrigger() {
     }
 }
 
-function showAutoUpdateConfirm(targetMode, result, floor) {
-    const label = targetMode === 'user' ? 'User' : 'NPC';
-
+function showAutoUpdateConfirm(results, floor) {
     const $existing = $('#pw-auto-update-confirm');
     if ($existing.length) $existing.remove();
 
+    const modes = Object.keys(results);
+    const tabs = modes.map(m => `<button class="pw-auc-tab ${m === modes[0] ? 'active' : ''}" data-mode="${m}">
+        <i class="fa-solid fa-${m === 'user' ? 'user' : 'user-secret'}"></i> ${m === 'user' ? 'User' : 'NPC'}
+    </button>`).join('');
+
     const html = `
     <div id="pw-auto-update-confirm" class="pw-auto-confirm-overlay" style="display:none;">
-        <div class="pw-auto-confirm-card">
+        <div class="pw-auto-confirm-card" style="max-width:620px;">
             <div class="pw-auto-confirm-header">
-                <span><i class="fa-solid fa-rotate"></i> ${label} 人设自动更新 · 第${floor}楼</span>
+                <span><i class="fa-solid fa-rotate"></i> 人设自动更新 · 第${floor}楼</span>
                 <button class="pw-auto-confirm-close pw-mini-btn"><i class="fa-solid fa-xmark"></i></button>
             </div>
+            ${modes.length > 1 ? `<div class="pw-auc-tabs">${tabs}</div>` : ''}
             <div class="pw-auto-confirm-body">
-                <textarea class="pw-auto-confirm-text" readonly></textarea>
+                <div id="pw-auc-diff-area" class="pw-auc-diff-area"></div>
             </div>
             <div class="pw-auto-confirm-actions">
-                <button class="pw-btn danger pw-auto-confirm-reject" style="padding:8px 16px;"><i class="fa-solid fa-xmark"></i> 放弃</button>
-                <button class="pw-btn gen pw-auto-confirm-accept" style="padding:8px 16px;"><i class="fa-solid fa-check"></i> 应用更新</button>
+                <button class="pw-btn danger pw-auto-confirm-reject" style="padding:8px 14px;"><i class="fa-solid fa-xmark"></i> 放弃</button>
+                <button class="pw-btn pw-auc-reroll" style="padding:8px 14px;"><i class="fa-solid fa-rotate-right"></i> 重Roll</button>
+                <button class="pw-btn pw-auc-edit-toggle" style="padding:8px 14px;"><i class="fa-solid fa-pen"></i> 编辑</button>
+                <button class="pw-btn gen pw-auto-confirm-accept" style="padding:8px 14px;"><i class="fa-solid fa-check"></i> 应用</button>
             </div>
         </div>
     </div>`;
 
     $('body').append(html);
     const $overlay = $('#pw-auto-update-confirm');
-    $overlay.find('.pw-auto-confirm-text').val(result);
+
+    const diffStates = {};
+    for (const mode of modes) {
+        const isNpc = mode === 'npc';
+        const oldText = isNpc ? (npcContext.result || '') : (getActivePersonaDescription() || userContext.result || '');
+        diffStates[mode] = {
+            oldText,
+            newText: results[mode],
+            blocks: computeDiffBlocks(oldText, results[mode]),
+            editing: false
+        };
+    }
+
+    let activeMode = modes[0];
+
+    function renderActiveTab() {
+        const st = diffStates[activeMode];
+        const $area = $('#pw-auc-diff-area');
+        if (st.editing) {
+            $area.html(`<textarea class="pw-auto-confirm-text pw-auc-edit-text">${_esc(st.newText)}</textarea>`);
+        } else {
+            let diffHtml = '';
+            st.blocks.forEach((block, idx) => {
+                if (block.type === 'equal') {
+                    diffHtml += `<span>${_esc(block.value)}</span>`;
+                } else {
+                    const isNew = block.active === 'new';
+                    const isOld = block.active === 'old';
+                    diffHtml += `<span class="pw-diff-group" data-aidx="${idx}">`;
+                    if (block.oldText) diffHtml += `<span class="pw-idiff-old ${isOld ? 'active' : 'inactive'}" data-aidx="${idx}" title="点击保留旧版">${_esc(block.oldText)}</span>`;
+                    if (block.newText) diffHtml += `<span class="pw-idiff-new ${isNew ? 'active' : 'inactive'}" data-aidx="${idx}" title="点击保留新版">${_esc(block.newText)}</span>`;
+                    diffHtml += `</span>`;
+                }
+            });
+            const changeCount = st.blocks.filter(b => b.type === 'diff').length;
+            $area.html(`<div class="pw-auc-diff-view">${diffHtml}</div>
+                <div class="pw-auc-diff-info">${changeCount} 处变更</div>`);
+        }
+    }
+
+    renderActiveTab();
+
+    $overlay.on('click', '.pw-auc-tab', function () {
+        activeMode = $(this).data('mode');
+        $('.pw-auc-tab').removeClass('active');
+        $(this).addClass('active');
+        renderActiveTab();
+    });
+
+    $overlay.on('click', '.pw-auc-diff-view .pw-idiff-old, .pw-auc-diff-view .pw-idiff-new', function () {
+        const idx = parseInt($(this).data('aidx'), 10);
+        const block = diffStates[activeMode].blocks[idx];
+        if (!block || block.type !== 'diff') return;
+        block.active = $(this).hasClass('pw-idiff-old') ? 'old' : 'new';
+        renderActiveTab();
+    });
+
+    $overlay.on('click', '.pw-auc-edit-toggle', function () {
+        const st = diffStates[activeMode];
+        if (st.editing) {
+            st.newText = $overlay.find('.pw-auc-edit-text').val();
+            st.blocks = computeDiffBlocks(st.oldText, st.newText);
+            st.editing = false;
+            $(this).html('<i class="fa-solid fa-pen"></i> 编辑');
+        } else {
+            st.newText = assembleAutoConfirmResult(st);
+            st.editing = true;
+            $(this).html('<i class="fa-solid fa-code-compare"></i> 对比');
+        }
+        renderActiveTab();
+    });
+
+    $overlay.on('click', '.pw-auc-reroll', async function () {
+        const $btn = $(this);
+        $btn.prop('disabled', true).html('<i class="fa-solid fa-spinner fa-spin"></i> 生成中...');
+        try {
+            const newResult = await performAutoUpdate(activeMode);
+            if (!newResult || newResult.trim().length < 20) {
+                toastr.warning('重Roll结果过短，已放弃');
+                return;
+            }
+            const st = diffStates[activeMode];
+            st.newText = newResult;
+            st.blocks = computeDiffBlocks(st.oldText, newResult);
+            st.editing = false;
+            $overlay.find('.pw-auc-edit-toggle').html('<i class="fa-solid fa-pen"></i> 编辑');
+            renderActiveTab();
+        } catch (e) {
+            toastr.error('重Roll失败: ' + e.message);
+        } finally {
+            $btn.prop('disabled', false).html('<i class="fa-solid fa-rotate-right"></i> 重Roll');
+        }
+    });
 
     $overlay.find('.pw-auto-confirm-accept').on('click', async () => {
         const btn = $overlay.find('.pw-auto-confirm-accept');
         btn.prop('disabled', true).html('<i class="fa-solid fa-spinner fa-spin"></i> 应用中...');
         try {
-            await applyAutoUpdateResult(targetMode, result);
-            toastr.success(`${label} 人设已更新（第${floor}楼）`);
+            for (const mode of modes) {
+                const st = diffStates[mode];
+                const finalText = st.editing
+                    ? $overlay.find('.pw-auc-edit-text').val()
+                    : assembleAutoConfirmResult(st);
+                await applyAutoUpdateResult(mode, finalText);
+            }
+            const labels = modes.map(m => m === 'user' ? 'User' : 'NPC').join(' + ');
+            toastr.success(`${labels} 人设已更新（第${floor}楼）`);
             $overlay.fadeOut(200, () => $overlay.remove());
             updateAutoUpdateStatus();
         } catch (e) {
             toastr.error('应用失败: ' + e.message);
-            btn.prop('disabled', false).html('<i class="fa-solid fa-check"></i> 应用更新');
+            btn.prop('disabled', false).html('<i class="fa-solid fa-check"></i> 应用');
         }
     });
 
@@ -1833,6 +1959,16 @@ function showAutoUpdateConfirm(targetMode, result, floor) {
     });
 
     $overlay.fadeIn(200);
+}
+
+function assembleAutoConfirmResult(state) {
+    let text = '';
+    state.blocks.forEach(block => {
+        if (block.type === 'equal') text += block.value;
+        else if (block.active === 'old') text += block.oldText;
+        else text += block.newText;
+    });
+    return text;
 }
 
 function updateAutoUpdateStatus() {
@@ -1936,50 +2072,119 @@ function maybeSetAutoUpdateAnchor() {
 // 快照 - 查看 / 恢复 / 导出
 // ============================================================================
 
+function getCharIdFromChatKey(key) {
+    const i = key.indexOf('_');
+    return i > 0 ? key.substring(0, i) : key;
+}
+function getBranchNameFromChatKey(key) {
+    const i = key.indexOf('_');
+    if (i < 0) return key;
+    let name = key.substring(i + 1);
+    name = name.replace(/\.jsonl$/i, '').replace(/\.json$/i, '');
+    return name || '默认';
+}
+
+function getAllBranchesForCurrentChar() {
+    try {
+        const context = getContext();
+        const charId = String(context.characterId ?? 'none');
+        const branches = [];
+        for (const [key, state] of Object.entries(autoUpdateConfig.chatStates || {})) {
+            if (getCharIdFromChatKey(key) === charId && state.snapshots?.length > 0) {
+                branches.push({ key, state, name: getBranchNameFromChatKey(key) });
+            }
+        }
+        return { charId, branches };
+    } catch { return { charId: 'none', branches: [] }; }
+}
+
 function renderSnapshotList() {
     const $list = $('#pw-snapshot-list');
     if (!$list.length) return;
-    const chatState = getAutoUpdateChatState();
-    const snaps = chatState.snapshots || [];
 
-    if (snaps.length === 0) {
+    const currentKey = getAutoUpdateChatKey();
+    const { branches } = getAllBranchesForCurrentChar();
+
+    let totalCount = 0;
+    branches.forEach(b => totalCount += b.state.snapshots.length);
+
+    if (totalCount === 0) {
         $list.html('<div class="pw-snapshot-empty"><i class="fa-solid fa-inbox"></i> 暂无快照</div>');
         $('#pw-snapshot-count').text('0');
         return;
     }
-    $('#pw-snapshot-count').text(snaps.length);
+    $('#pw-snapshot-count').text(totalCount);
 
-    const items = snaps.slice().reverse().map((s, ri) => {
-        const idx = snaps.length - 1 - ri;
-        const types = [];
-        if (s.user) types.push('<i class="fa-solid fa-user" title="User"></i>');
-        if (s.npc) types.push('<i class="fa-solid fa-user-secret" title="NPC"></i>');
-        return `<div class="pw-snapshot-item" data-idx="${idx}">
-            <div class="pw-snapshot-item-header">
-                <span class="pw-snapshot-floor">第${s.floor}楼</span>
-                <span class="pw-snapshot-types">${types.join(' ')}</span>
-                <span class="pw-snapshot-time">${s.time || ''}</span>
+    const currentBranch = branches.find(b => b.key === currentKey);
+    const otherBranches = branches.filter(b => b.key !== currentKey)
+        .sort((a, b) => {
+            const latestA = a.state.snapshots[a.state.snapshots.length - 1]?.time || '';
+            const latestB = b.state.snapshots[b.state.snapshots.length - 1]?.time || '';
+            return latestB.localeCompare(latestA);
+        });
+
+    const orderedBranches = currentBranch ? [currentBranch, ...otherBranches] : otherBranches;
+
+    let html = '';
+    orderedBranches.forEach(branch => {
+        const isCurrent = branch.key === currentKey;
+        const snaps = branch.state.snapshots;
+
+        html += `<div class="pw-snap-branch ${isCurrent ? 'pw-snap-branch-current' : ''}">
+            <div class="pw-snap-branch-header" data-branch-key="${branch.key}">
+                <span class="pw-snap-branch-name">
+                    ${isCurrent ? '<i class="fa-solid fa-star" style="color:var(--pw-accent,#8b6cc1);font-size:0.7em;"></i> ' : ''}
+                    ${_esc(branch.name)}
+                </span>
+                <span class="pw-snap-branch-count">${snaps.length}</span>
             </div>
-            <div class="pw-snapshot-item-actions">
-                <button class="pw-snapshot-btn-view" data-idx="${idx}" title="查看"><i class="fa-solid fa-eye"></i></button>
-                <button class="pw-snapshot-btn-restore" data-idx="${idx}" title="恢复"><i class="fa-solid fa-rotate-left"></i></button>
-                <button class="pw-snapshot-btn-delete" data-idx="${idx}" title="删除"><i class="fa-solid fa-trash-can"></i></button>
-            </div>
-        </div>`;
+            <div class="pw-snap-branch-items" ${isCurrent ? '' : 'style="display:none;"'}>`;
+
+        snaps.slice().reverse().forEach((s, ri) => {
+            const idx = snaps.length - 1 - ri;
+            const hasUser = !!s.user;
+            const hasNpc = !!s.npc;
+            html += `<div class="pw-snapshot-item" data-branch-key="${branch.key}" data-idx="${idx}">
+                <div class="pw-snapshot-item-header">
+                    <span class="pw-snapshot-floor">第${s.floor}楼</span>
+                    <span class="pw-snapshot-types">
+                        ${hasUser ? `<span class="pw-snap-type-badge pw-snap-type-user" data-branch-key="${branch.key}" data-idx="${idx}" data-type="user" title="查看User">U</span>` : ''}
+                        ${hasNpc ? `<span class="pw-snap-type-badge pw-snap-type-npc" data-branch-key="${branch.key}" data-idx="${idx}" data-type="npc" title="查看NPC">N</span>` : ''}
+                    </span>
+                    <span class="pw-snapshot-time">${s.time || ''}</span>
+                </div>
+                <div class="pw-snapshot-item-actions">
+                    <button class="pw-snapshot-btn-restore" data-branch-key="${branch.key}" data-idx="${idx}" title="恢复"><i class="fa-solid fa-rotate-left"></i></button>
+                    ${isCurrent ? `<button class="pw-snapshot-btn-delete" data-branch-key="${branch.key}" data-idx="${idx}" title="删除"><i class="fa-solid fa-trash-can"></i></button>` : ''}
+                </div>
+            </div>`;
+        });
+
+        html += `</div></div>`;
     });
-    $list.html(items.join(''));
+
+    $list.html(html);
 }
 
-function showSnapshotDetail(snapshot) {
-    let content = '';
-    if (snapshot.user) content += `【User 人设 · 第${snapshot.floor}楼】\n${snapshot.user}\n\n`;
-    if (snapshot.npc) content += `【NPC 人设 · 第${snapshot.floor}楼】\n${snapshot.npc}`;
+function showSnapshotDetail(snapshot, viewType) {
+    const hasUser = !!snapshot.user;
+    const hasNpc = !!snapshot.npc;
+    const initialType = viewType || (hasUser ? 'user' : 'npc');
+
+    const tabs = (hasUser && hasNpc) ? `<div class="pw-snap-detail-tabs">
+        <button class="pw-snap-dtab ${initialType === 'user' ? 'active' : ''}" data-type="user"><i class="fa-solid fa-user"></i> User</button>
+        <button class="pw-snap-dtab ${initialType === 'npc' ? 'active' : ''}" data-type="npc"><i class="fa-solid fa-user-secret"></i> NPC</button>
+    </div>` : '';
+
+    const getContent = (type) => type === 'npc' ? (snapshot.npc || '(无NPC数据)') : (snapshot.user || '(无User数据)');
+
     const $overlay = $(`<div class="pw-snapshot-overlay">
         <div class="pw-snapshot-detail-card">
             <div class="pw-snapshot-detail-header">
                 <span><i class="fa-solid fa-camera"></i> 快照详情 · 第${snapshot.floor}楼</span>
                 <button class="pw-snapshot-close"><i class="fa-solid fa-xmark"></i></button>
             </div>
+            ${tabs}
             <textarea class="pw-snapshot-detail-text" readonly></textarea>
             <div class="pw-snapshot-detail-actions">
                 <button class="pw-btn primary pw-snapshot-detail-restore"><i class="fa-solid fa-rotate-left"></i> 恢复此快照</button>
@@ -1987,7 +2192,12 @@ function showSnapshotDetail(snapshot) {
             </div>
         </div>
     </div>`);
-    $overlay.find('.pw-snapshot-detail-text').val(content.trim());
+    $overlay.find('.pw-snapshot-detail-text').val(getContent(initialType));
+    $overlay.on('click', '.pw-snap-dtab', function () {
+        $overlay.find('.pw-snap-dtab').removeClass('active');
+        $(this).addClass('active');
+        $overlay.find('.pw-snapshot-detail-text').val(getContent($(this).data('type')));
+    });
     $overlay.on('click', '.pw-snapshot-close, .pw-snapshot-detail-close', () => $overlay.remove());
     $overlay.on('click', '.pw-snapshot-detail-restore', async () => {
         $overlay.remove();
@@ -2023,19 +2233,33 @@ async function restoreSnapshot(snapshot) {
     }
 
     if (restored.length > 0) {
+        const chatState = getAutoUpdateChatState();
+        chatState.lastUpdateFloor = snapshot.floor;
+        chatState.lastUpdateTime = new Date().toLocaleString();
+        saveAutoUpdateConfig();
         saveData();
-        toastr.success(`已恢复第${snapshot.floor}楼快照 (${restored.join(' + ')})`, '快照恢复');
+        updateAutoUpdateStatus();
+        toastr.success(`已恢复第${snapshot.floor}楼快照 (${restored.join(' + ')})，锚点已重置`, '快照恢复');
     }
 }
 
 function showSnapshotRestorePrompt(chatKey) {
     const state = autoUpdateConfig.chatStates[chatKey];
     if (!state?.snapshots?.length) return;
-    const latest = state.snapshots[state.snapshots.length - 1];
+
+    const currentFloor = getCurrentFloorCount();
+    let bestSnap = null;
+    for (let i = state.snapshots.length - 1; i >= 0; i--) {
+        if (state.snapshots[i].floor <= currentFloor) {
+            bestSnap = state.snapshots[i];
+            break;
+        }
+    }
+    if (!bestSnap) bestSnap = state.snapshots[0];
 
     const types = [];
-    if (latest.user) types.push('User');
-    if (latest.npc) types.push('NPC');
+    if (bestSnap.user) types.push('User');
+    if (bestSnap.npc) types.push('NPC');
     if (types.length === 0) return;
 
     const $overlay = $(`<div class="pw-snapshot-overlay">
@@ -2045,12 +2269,12 @@ function showSnapshotRestorePrompt(chatKey) {
                 <button class="pw-snapshot-close"><i class="fa-solid fa-xmark"></i></button>
             </div>
             <div style="padding:12px 16px; font-size:0.85em; line-height:1.7;">
-                <p>此分支在 <strong>第${latest.floor}楼</strong> 有最近的人设快照 (${types.join(' + ')})。</p>
-                <p>是否恢复该快照以匹配分支状态？</p>
+                <p>当前第 <strong>${currentFloor}</strong> 楼，找到最近匹配快照: <strong>第${bestSnap.floor}楼</strong> (${types.join(' + ')})</p>
+                <p>是否恢复该快照并将锚点设为第${bestSnap.floor}楼？</p>
                 <p style="font-size:0.85em; opacity:0.6; margin-top:6px;">共 ${state.snapshots.length} 个快照可用</p>
             </div>
             <div class="pw-snapshot-detail-actions">
-                <button class="pw-btn primary pw-snapshot-prompt-restore"><i class="fa-solid fa-rotate-left"></i> 恢复最近快照</button>
+                <button class="pw-btn primary pw-snapshot-prompt-restore"><i class="fa-solid fa-rotate-left"></i> 恢复快照</button>
                 <button class="pw-btn pw-snapshot-prompt-skip">跳过</button>
             </div>
         </div>
@@ -2058,10 +2282,51 @@ function showSnapshotRestorePrompt(chatKey) {
     $overlay.on('click', '.pw-snapshot-close, .pw-snapshot-prompt-skip', () => $overlay.remove());
     $overlay.on('click', '.pw-snapshot-prompt-restore', async () => {
         $overlay.remove();
-        await restoreSnapshot(latest);
+        await restoreSnapshot(bestSnap);
     });
     $overlay.on('click', (e) => { if ($(e.target).hasClass('pw-snapshot-overlay')) $overlay.remove(); });
     $('body').append($overlay);
+}
+
+function maybeCopySnapshotsToNewBranch(newChatKey) {
+    const existing = autoUpdateConfig.chatStates[newChatKey];
+    if (existing && existing.snapshots && existing.snapshots.length > 0) return;
+
+    const currentFloor = getCurrentFloorCount();
+    if (currentFloor <= 0) return;
+
+    const { branches } = getAllBranchesForCurrentChar();
+    if (branches.length === 0) return;
+
+    let bestSource = null;
+    let bestScore = -1;
+    for (const b of branches) {
+        if (b.key === newChatKey) continue;
+        const snaps = b.state.snapshots || [];
+        const eligible = snaps.filter(s => s.floor <= currentFloor);
+        if (eligible.length > bestScore) {
+            bestScore = eligible.length;
+            bestSource = b;
+        }
+    }
+
+    if (!bestSource || bestScore <= 0) return;
+
+    const copiedSnaps = bestSource.state.snapshots
+        .filter(s => s.floor <= currentFloor)
+        .map(s => ({ ...s }));
+
+    if (copiedSnaps.length === 0) return;
+
+    if (!autoUpdateConfig.chatStates[newChatKey]) {
+        autoUpdateConfig.chatStates[newChatKey] = {
+            lastUpdateFloor: null, userUpdateCount: 0, npcUpdateCount: 0,
+            lastUpdateTime: null, snapshots: []
+        };
+    }
+    autoUpdateConfig.chatStates[newChatKey].snapshots = copiedSnaps;
+    saveAutoUpdateConfig();
+    console.log(`[PW] Copied ${copiedSnaps.length} snapshots to new branch from ${bestSource.name}`);
 }
 
 function exportSnapshots() {
@@ -3149,10 +3414,11 @@ function bindEvents() {
         if (context.eventTypes.CHAT_CHANGED) {
             context.eventSource.on(context.eventTypes.CHAT_CHANGED, () => {
                 setTimeout(() => {
+                    const chatKey = getAutoUpdateChatKey();
+                    maybeCopySnapshotsToNewBranch(chatKey);
                     updateAutoUpdateStatus();
                     renderSnapshotList();
                     if (autoUpdateConfig.enabled) {
-                        const chatKey = getAutoUpdateChatKey();
                         showSnapshotRestorePrompt(chatKey);
                     }
                 }, 600);
@@ -4060,22 +4326,32 @@ function bindEvents() {
         $body.slideToggle(200);
         $chev.toggleClass('pw-rotated');
     });
-    $(document).on('click.pw', '.pw-snapshot-btn-view', function () {
+    $(document).on('click.pw', '.pw-snap-branch-header', function () {
+        $(this).next('.pw-snap-branch-items').slideToggle(150);
+    });
+    $(document).on('click.pw', '.pw-snap-type-badge', function (e) {
+        e.stopPropagation();
+        const branchKey = $(this).data('branch-key');
         const idx = parseInt($(this).data('idx'), 10);
-        const snap = getAutoUpdateChatState().snapshots?.[idx];
-        if (snap) showSnapshotDetail(snap);
+        const viewType = $(this).data('type');
+        const state = autoUpdateConfig.chatStates[branchKey];
+        const snap = state?.snapshots?.[idx];
+        if (snap) showSnapshotDetail(snap, viewType);
     });
     $(document).on('click.pw', '.pw-snapshot-btn-restore', async function () {
+        const branchKey = $(this).data('branch-key');
         const idx = parseInt($(this).data('idx'), 10);
-        const snap = getAutoUpdateChatState().snapshots?.[idx];
-        if (snap && confirm(`确定恢复第${snap.floor}楼的快照？`)) await restoreSnapshot(snap);
+        const state = autoUpdateConfig.chatStates[branchKey];
+        const snap = state?.snapshots?.[idx];
+        if (snap && confirm(`确定恢复第${snap.floor}楼的快照？锚点将重置为该楼层。`)) await restoreSnapshot(snap);
     });
     $(document).on('click.pw', '.pw-snapshot-btn-delete', function () {
+        const branchKey = $(this).data('branch-key');
         const idx = parseInt($(this).data('idx'), 10);
-        const chatState = getAutoUpdateChatState();
-        if (!chatState.snapshots?.[idx]) return;
-        if (!confirm(`确定删除第${chatState.snapshots[idx].floor}楼的快照？`)) return;
-        chatState.snapshots.splice(idx, 1);
+        const state = autoUpdateConfig.chatStates[branchKey];
+        if (!state?.snapshots?.[idx]) return;
+        if (!confirm(`确定删除第${state.snapshots[idx].floor}楼的快照？`)) return;
+        state.snapshots.splice(idx, 1);
         saveAutoUpdateConfig();
         renderSnapshotList();
         toastr.info('快照已删除');
