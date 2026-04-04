@@ -581,8 +581,14 @@ function getAutoUpdateChatKey() {
     try {
         const context = getContext();
         const charId = context.characterId ?? 'none';
-        const chatMeta = context.chatMetadata || {};
-        const chatFile = chatMeta.chat_file_name || chatMeta.chat_id || 'default';
+        let chatFile = 'default';
+        if (context.getCurrentChatId) {
+            chatFile = context.getCurrentChatId() || chatFile;
+        }
+        if (chatFile === 'default') {
+            const chatMeta = context.chatMetadata || {};
+            chatFile = chatMeta.chat_file_name || chatMeta.chat_id || 'default';
+        }
         return `${charId}_${chatFile}`;
     } catch { return 'unknown'; }
 }
@@ -1724,14 +1730,6 @@ async function applyAutoUpdateResult(targetMode, result) {
 
     saveAutoUpdateConfig();
     saveData();
-
-    saveHistory({
-        request: `[自动更新] ${isNpc ? 'NPC' : 'User'} 第${chatState.lastUpdateFloor}楼`,
-        timestamp: new Date().toLocaleString(),
-        title: `[自动] ${isNpc ? 'NPC' : 'User'} 第${chatState.lastUpdateFloor}楼`,
-        data: { name: isNpc ? 'NPC-AutoUpdate' : 'User-AutoUpdate', resultText: result, genType: isNpc ? 'npc_persona' : 'user_persona' }
-    });
-
     renderSnapshotList();
 }
 
@@ -2248,14 +2246,16 @@ function showSnapshotRestorePrompt(chatKey) {
     if (!state?.snapshots?.length) return;
 
     const currentFloor = getCurrentFloorCount();
+    if (currentFloor <= 0) return;
+
     let bestSnap = null;
     for (let i = state.snapshots.length - 1; i >= 0; i--) {
-        if (state.snapshots[i].floor <= currentFloor) {
+        if (state.snapshots[i].floor < currentFloor) {
             bestSnap = state.snapshots[i];
             break;
         }
     }
-    if (!bestSnap) bestSnap = state.snapshots[0];
+    if (!bestSnap) return;
 
     const types = [];
     if (bestSnap.user) types.push('User');
@@ -2263,15 +2263,16 @@ function showSnapshotRestorePrompt(chatKey) {
     if (types.length === 0) return;
 
     const $overlay = $(`<div class="pw-snapshot-overlay">
-        <div class="pw-snapshot-detail-card" style="max-width:420px;">
+        <div class="pw-snapshot-detail-card pw-snapshot-restore-card">
             <div class="pw-snapshot-detail-header">
-                <span><i class="fa-solid fa-code-branch"></i> 切换到的分支有人设快照</span>
+                <span><i class="fa-solid fa-code-branch"></i> 此分支有可恢复的人设快照</span>
                 <button class="pw-snapshot-close"><i class="fa-solid fa-xmark"></i></button>
             </div>
-            <div style="padding:12px 16px; font-size:0.85em; line-height:1.7;">
-                <p>当前第 <strong>${currentFloor}</strong> 楼，找到最近匹配快照: <strong>第${bestSnap.floor}楼</strong> (${types.join(' + ')})</p>
-                <p>是否恢复该快照并将锚点设为第${bestSnap.floor}楼？</p>
-                <p style="font-size:0.85em; opacity:0.6; margin-top:6px;">共 ${state.snapshots.length} 个快照可用</p>
+            <div style="padding:14px 18px; font-size:0.88em; line-height:1.8;">
+                <p>当前第 <strong>${currentFloor}</strong> 楼</p>
+                <p>找到最近的快照: <strong>第${bestSnap.floor}楼</strong> (${types.join(' + ')})</p>
+                <p style="margin-top:6px;">恢复后将同步人设/世界书，并将锚点设为第${bestSnap.floor}楼。</p>
+                <p style="font-size:0.82em; opacity:0.5; margin-top:8px;">本分支共 ${state.snapshots.length} 个快照</p>
             </div>
             <div class="pw-snapshot-detail-actions">
                 <button class="pw-btn primary pw-snapshot-prompt-restore"><i class="fa-solid fa-rotate-left"></i> 恢复快照</button>
@@ -2303,7 +2304,7 @@ function maybeCopySnapshotsToNewBranch(newChatKey) {
     for (const b of branches) {
         if (b.key === newChatKey) continue;
         const snaps = b.state.snapshots || [];
-        const eligible = snaps.filter(s => s.floor <= currentFloor);
+        const eligible = snaps.filter(s => s.floor < currentFloor);
         if (eligible.length > bestScore) {
             bestScore = eligible.length;
             bestSource = b;
@@ -2313,8 +2314,8 @@ function maybeCopySnapshotsToNewBranch(newChatKey) {
     if (!bestSource || bestScore <= 0) return;
 
     const copiedSnaps = bestSource.state.snapshots
-        .filter(s => s.floor <= currentFloor)
-        .map(s => ({ ...s }));
+        .filter(s => s.floor < currentFloor)
+        .map(s => JSON.parse(JSON.stringify(s)));
 
     if (copiedSnaps.length === 0) return;
 
@@ -2326,7 +2327,7 @@ function maybeCopySnapshotsToNewBranch(newChatKey) {
     }
     autoUpdateConfig.chatStates[newChatKey].snapshots = copiedSnaps;
     saveAutoUpdateConfig();
-    console.log(`[PW] Copied ${copiedSnaps.length} snapshots to new branch from ${bestSource.name}`);
+    console.log(`[PW] Copied ${copiedSnaps.length} snapshots (floor < ${currentFloor}) to new branch [${newChatKey}] from [${bestSource.name}]`);
 }
 
 function exportSnapshots() {
@@ -3415,13 +3416,15 @@ function bindEvents() {
             context.eventSource.on(context.eventTypes.CHAT_CHANGED, () => {
                 setTimeout(() => {
                     const chatKey = getAutoUpdateChatKey();
+                    const floor = getCurrentFloorCount();
+                    console.log(`[PW] CHAT_CHANGED → key=${chatKey}, floor=${floor}`);
                     maybeCopySnapshotsToNewBranch(chatKey);
                     updateAutoUpdateStatus();
                     renderSnapshotList();
                     if (autoUpdateConfig.enabled) {
                         showSnapshotRestorePrompt(chatKey);
                     }
-                }, 600);
+                }, 1200);
             });
         }
     }
