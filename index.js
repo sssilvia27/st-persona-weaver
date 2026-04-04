@@ -594,11 +594,17 @@ function getAutoUpdateChatState() {
             lastUpdateFloor: null,
             userUpdateCount: 0,
             npcUpdateCount: 0,
-            lastUpdateTime: null
+            lastUpdateTime: null,
+            snapshots: []
         };
+    }
+    if (!autoUpdateConfig.chatStates[key].snapshots) {
+        autoUpdateConfig.chatStates[key].snapshots = [];
     }
     return autoUpdateConfig.chatStates[key];
 }
+
+const MAX_SNAPSHOTS_PER_CHAT = 50;
 
 function saveAutoUpdateConfig() {
     safeLocalStorageSet(STORAGE_KEY_AUTO_UPDATE, JSON.stringify(autoUpdateConfig));
@@ -1683,6 +1689,21 @@ async function applyAutoUpdateResult(targetMode, result) {
 
     chatState.lastUpdateFloor = getCurrentFloorCount();
     chatState.lastUpdateTime = new Date().toLocaleString();
+
+    // --- Snapshot ---
+    const floor = chatState.lastUpdateFloor;
+    const snaps = chatState.snapshots;
+    const latest = snaps.length > 0 ? snaps[snaps.length - 1] : null;
+    if (latest && latest.floor === floor) {
+        if (isNpc) latest.npc = result; else latest.user = result;
+        latest.time = new Date().toLocaleString();
+    } else {
+        const entry = { floor, time: new Date().toLocaleString() };
+        if (isNpc) entry.npc = result; else entry.user = result;
+        snaps.push(entry);
+        if (snaps.length > MAX_SNAPSHOTS_PER_CHAT) snaps.splice(0, snaps.length - MAX_SNAPSHOTS_PER_CHAT);
+    }
+
     saveAutoUpdateConfig();
     saveData();
 
@@ -1692,6 +1713,8 @@ async function applyAutoUpdateResult(targetMode, result) {
         title: `[自动] ${isNpc ? 'NPC' : 'User'} 第${chatState.lastUpdateFloor}楼`,
         data: { name: isNpc ? 'NPC-AutoUpdate' : 'User-AutoUpdate', resultText: result, genType: isNpc ? 'npc_persona' : 'user_persona' }
     });
+
+    renderSnapshotList();
 }
 
 async function checkAutoUpdateTrigger() {
@@ -1856,7 +1879,7 @@ async function populateAutoWiSelectors() {
         const prefix = mode === 'user' ? 'USER:' : 'NPC:';
         const savedUid = autoUpdateConfig.targets[mode]?.wiEntryUid || '';
 
-        $sel.html(`<option value="">(新建条目 ${prefix.replace(':','')} 条目)</option>`);
+        $sel.html(`<option value="">(新建 ${prefix.replace(':','')} 条目)</option>`);
 
         let autoSelected = '';
         entries.forEach(e => {
@@ -1888,6 +1911,196 @@ function maybeSetAutoUpdateAnchor() {
         toastr.info(`自动更新锚点已自动设为第 ${floor} 楼`, '自动更新', { timeOut: 4000 });
     }
     updateAutoUpdateStatus();
+}
+
+// ============================================================================
+// 快照 - 查看 / 恢复 / 导出
+// ============================================================================
+
+function renderSnapshotList() {
+    const $list = $('#pw-snapshot-list');
+    if (!$list.length) return;
+    const chatState = getAutoUpdateChatState();
+    const snaps = chatState.snapshots || [];
+
+    if (snaps.length === 0) {
+        $list.html('<div class="pw-snapshot-empty"><i class="fa-solid fa-inbox"></i> 暂无快照</div>');
+        $('#pw-snapshot-count').text('0');
+        return;
+    }
+    $('#pw-snapshot-count').text(snaps.length);
+
+    const items = snaps.slice().reverse().map((s, ri) => {
+        const idx = snaps.length - 1 - ri;
+        const types = [];
+        if (s.user) types.push('<i class="fa-solid fa-user" title="User"></i>');
+        if (s.npc) types.push('<i class="fa-solid fa-user-secret" title="NPC"></i>');
+        return `<div class="pw-snapshot-item" data-idx="${idx}">
+            <div class="pw-snapshot-item-header">
+                <span class="pw-snapshot-floor">第${s.floor}楼</span>
+                <span class="pw-snapshot-types">${types.join(' ')}</span>
+                <span class="pw-snapshot-time">${s.time || ''}</span>
+            </div>
+            <div class="pw-snapshot-item-actions">
+                <button class="pw-snapshot-btn-view" data-idx="${idx}" title="查看"><i class="fa-solid fa-eye"></i></button>
+                <button class="pw-snapshot-btn-restore" data-idx="${idx}" title="恢复"><i class="fa-solid fa-rotate-left"></i></button>
+                <button class="pw-snapshot-btn-delete" data-idx="${idx}" title="删除"><i class="fa-solid fa-trash-can"></i></button>
+            </div>
+        </div>`;
+    });
+    $list.html(items.join(''));
+}
+
+function showSnapshotDetail(snapshot) {
+    let content = '';
+    if (snapshot.user) content += `【User 人设 · 第${snapshot.floor}楼】\n${snapshot.user}\n\n`;
+    if (snapshot.npc) content += `【NPC 人设 · 第${snapshot.floor}楼】\n${snapshot.npc}`;
+    const $overlay = $(`<div class="pw-snapshot-overlay">
+        <div class="pw-snapshot-detail-card">
+            <div class="pw-snapshot-detail-header">
+                <span><i class="fa-solid fa-camera"></i> 快照详情 · 第${snapshot.floor}楼</span>
+                <button class="pw-snapshot-close"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <textarea class="pw-snapshot-detail-text" readonly></textarea>
+            <div class="pw-snapshot-detail-actions">
+                <button class="pw-btn primary pw-snapshot-detail-restore"><i class="fa-solid fa-rotate-left"></i> 恢复此快照</button>
+                <button class="pw-btn pw-snapshot-detail-close">关闭</button>
+            </div>
+        </div>
+    </div>`);
+    $overlay.find('.pw-snapshot-detail-text').val(content.trim());
+    $overlay.on('click', '.pw-snapshot-close, .pw-snapshot-detail-close', () => $overlay.remove());
+    $overlay.on('click', '.pw-snapshot-detail-restore', async () => {
+        $overlay.remove();
+        await restoreSnapshot(snapshot);
+    });
+    $overlay.on('click', (e) => { if ($(e.target).hasClass('pw-snapshot-overlay')) $overlay.remove(); });
+    $('body').append($overlay);
+}
+
+async function restoreSnapshot(snapshot) {
+    const targets = autoUpdateConfig.targets;
+    let restored = [];
+
+    if (snapshot.user) {
+        userContext.result = snapshot.user;
+        userContext.hasResult = true;
+        if (targets.user?.applyPersona) {
+            const name = $('.persona_name').first().text().trim() || 'User';
+            await forceSavePersona(name, snapshot.user);
+        }
+        if (targets.user?.syncWorldBook) {
+            await syncToWorldBookForAutoUpdate('user', snapshot.user);
+        }
+        restored.push('User');
+    }
+    if (snapshot.npc) {
+        npcContext.result = snapshot.npc;
+        npcContext.hasResult = true;
+        if (targets.npc?.syncWorldBook) {
+            await syncToWorldBookForAutoUpdate('npc', snapshot.npc);
+        }
+        restored.push('NPC');
+    }
+
+    if (restored.length > 0) {
+        saveData();
+        toastr.success(`已恢复第${snapshot.floor}楼快照 (${restored.join(' + ')})`, '快照恢复');
+    }
+}
+
+function showSnapshotRestorePrompt(chatKey) {
+    const state = autoUpdateConfig.chatStates[chatKey];
+    if (!state?.snapshots?.length) return;
+    const latest = state.snapshots[state.snapshots.length - 1];
+
+    const types = [];
+    if (latest.user) types.push('User');
+    if (latest.npc) types.push('NPC');
+    if (types.length === 0) return;
+
+    const $overlay = $(`<div class="pw-snapshot-overlay">
+        <div class="pw-snapshot-detail-card" style="max-width:420px;">
+            <div class="pw-snapshot-detail-header">
+                <span><i class="fa-solid fa-code-branch"></i> 切换到的分支有人设快照</span>
+                <button class="pw-snapshot-close"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div style="padding:12px 16px; font-size:0.85em; line-height:1.7;">
+                <p>此分支在 <strong>第${latest.floor}楼</strong> 有最近的人设快照 (${types.join(' + ')})。</p>
+                <p>是否恢复该快照以匹配分支状态？</p>
+                <p style="font-size:0.85em; opacity:0.6; margin-top:6px;">共 ${state.snapshots.length} 个快照可用</p>
+            </div>
+            <div class="pw-snapshot-detail-actions">
+                <button class="pw-btn primary pw-snapshot-prompt-restore"><i class="fa-solid fa-rotate-left"></i> 恢复最近快照</button>
+                <button class="pw-btn pw-snapshot-prompt-skip">跳过</button>
+            </div>
+        </div>
+    </div>`);
+    $overlay.on('click', '.pw-snapshot-close, .pw-snapshot-prompt-skip', () => $overlay.remove());
+    $overlay.on('click', '.pw-snapshot-prompt-restore', async () => {
+        $overlay.remove();
+        await restoreSnapshot(latest);
+    });
+    $overlay.on('click', (e) => { if ($(e.target).hasClass('pw-snapshot-overlay')) $overlay.remove(); });
+    $('body').append($overlay);
+}
+
+function exportSnapshots() {
+    const states = autoUpdateConfig.chatStates || {};
+    const exportObj = {};
+    let total = 0;
+    for (const [key, st] of Object.entries(states)) {
+        if (st.snapshots?.length > 0) {
+            exportObj[key] = st.snapshots;
+            total += st.snapshots.length;
+        }
+    }
+    if (total === 0) { toastr.info('没有可导出的快照'); return; }
+    const blob = new Blob([JSON.stringify({ _pw_snapshots: true, version: CURRENT_VERSION, exportedAt: new Date().toISOString(), data: exportObj })], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `pw_snapshots_${new Date().toISOString().slice(0,10)}.json`;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    toastr.success(`已导出 ${total} 个快照 (${Object.keys(exportObj).length} 个分支)`);
+}
+
+function importSnapshots(file) {
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+        try {
+            const data = JSON.parse(ev.target.result);
+            if (!data._pw_snapshots || !data.data) { toastr.error('无效的快照备份文件'); return; }
+            let imported = 0;
+            for (const [key, snaps] of Object.entries(data.data)) {
+                if (!Array.isArray(snaps)) continue;
+                if (!autoUpdateConfig.chatStates[key]) {
+                    autoUpdateConfig.chatStates[key] = {
+                        lastUpdateFloor: null, userUpdateCount: 0, npcUpdateCount: 0,
+                        lastUpdateTime: null, snapshots: []
+                    };
+                }
+                if (!autoUpdateConfig.chatStates[key].snapshots) autoUpdateConfig.chatStates[key].snapshots = [];
+                const existing = autoUpdateConfig.chatStates[key].snapshots;
+                const existingFloors = new Set(existing.map(s => s.floor));
+                for (const s of snaps) {
+                    if (!existingFloors.has(s.floor)) {
+                        existing.push(s);
+                        imported++;
+                    }
+                }
+                existing.sort((a, b) => a.floor - b.floor);
+                if (existing.length > MAX_SNAPSHOTS_PER_CHAT) existing.splice(0, existing.length - MAX_SNAPSHOTS_PER_CHAT);
+            }
+            saveAutoUpdateConfig();
+            renderSnapshotList();
+            toastr.success(`已导入 ${imported} 个快照`);
+        } catch (e) {
+            console.error('[PW] Snapshot import error:', e);
+            toastr.error('快照导入失败: ' + e.message);
+        }
+    };
+    reader.readAsText(file);
 }
 
 async function loadAvailableWorldBooks() {
@@ -2429,6 +2642,7 @@ async function openCreatorPopup() {
                     <label style="display:flex; align-items:center; gap:4px; cursor:pointer;"><input type="checkbox" class="pw-migrate-opt" value="prompts" checked> Prompt</label>
                     <label style="display:flex; align-items:center; gap:4px; cursor:pointer;"><input type="checkbox" class="pw-migrate-opt" value="apiConfig" checked> API配置</label>
                     <label style="display:flex; align-items:center; gap:4px; cursor:pointer;"><input type="checkbox" class="pw-migrate-opt" value="themes" checked> 界面主题</label>
+                    <label style="display:flex; align-items:center; gap:4px; cursor:pointer;"><input type="checkbox" class="pw-migrate-opt" value="snapshots" checked> 人设快照</label>
                 </div>
                 <div class="pw-row" style="gap:8px;">
                     <button class="pw-btn primary" id="pw-btn-export-data" style="flex:1;"><i class="fa-solid fa-file-export"></i> 导出</button>
@@ -2643,6 +2857,34 @@ async function openCreatorPopup() {
                     <button class="pw-btn primary" id="pw-auto-set-anchor" style="font-size:0.78em; padding:5px 10px; flex:1;">
                         <i class="fa-solid fa-anchor"></i> 以当前楼层为锚点
                     </button>
+                </div>
+            </div>
+
+            <!-- Snapshots -->
+            <div class="pw-card-section pw-snapshot-section">
+                <div class="pw-snapshot-header" id="pw-snapshot-toggle">
+                    <div class="pw-auto-section-title" style="margin:0;cursor:pointer;">
+                        <i class="fa-solid fa-camera"></i> 人设快照
+                        <span id="pw-snapshot-count" class="pw-snapshot-badge">0</span>
+                        <i class="fa-solid fa-chevron-down pw-snapshot-chevron"></i>
+                    </div>
+                </div>
+                <div id="pw-snapshot-body" style="display:none;">
+                    <div id="pw-snapshot-list" class="pw-snapshot-list">
+                        <div class="pw-snapshot-empty"><i class="fa-solid fa-inbox"></i> 暂无快照</div>
+                    </div>
+                    <div class="pw-snapshot-toolbar">
+                        <button class="pw-btn" id="pw-snapshot-export" style="font-size:0.76em; padding:4px 8px; flex:1;">
+                            <i class="fa-solid fa-file-export"></i> 导出快照
+                        </button>
+                        <button class="pw-btn" id="pw-snapshot-import-btn" style="font-size:0.76em; padding:4px 8px; flex:1;">
+                            <i class="fa-solid fa-file-import"></i> 导入快照
+                        </button>
+                        <input type="file" id="pw-snapshot-import-file" accept=".json" style="display:none;">
+                        <button class="pw-btn danger" id="pw-snapshot-clear" style="font-size:0.76em; padding:4px 8px;">
+                            <i class="fa-solid fa-trash-can"></i> 清空
+                        </button>
+                    </div>
                 </div>
             </div>
 
@@ -2893,7 +3135,14 @@ function bindEvents() {
         // Reset auto-update status on chat change
         if (context.eventTypes.CHAT_CHANGED) {
             context.eventSource.on(context.eventTypes.CHAT_CHANGED, () => {
-                setTimeout(() => updateAutoUpdateStatus(), 500);
+                setTimeout(() => {
+                    updateAutoUpdateStatus();
+                    renderSnapshotList();
+                    if (autoUpdateConfig.enabled) {
+                        const chatKey = getAutoUpdateChatKey();
+                        showSnapshotRestorePrompt(chatKey);
+                    }
+                }, 600);
             });
         }
     }
@@ -3183,6 +3432,15 @@ function bindEvents() {
             if (sel.history)  { exportData.history = historyCache || []; parts.push(`${exportData.history.length} 存档`); }
             if (sel.prompts)  { try { exportData.prompts = JSON.parse(localStorage.getItem(STORAGE_KEY_PROMPTS)); } catch {} parts.push('Prompt'); }
             if (sel.themes)   { exportData.themes = customThemes || {}; parts.push('主题'); }
+            if (sel.snapshots) {
+                const snapData = {};
+                let snapCount = 0;
+                for (const [k, st] of Object.entries(autoUpdateConfig.chatStates || {})) {
+                    if (st.snapshots?.length) { snapData[k] = st.snapshots; snapCount += st.snapshots.length; }
+                }
+                exportData.snapshots = snapData;
+                parts.push(`${snapCount} 快照`);
+            }
             const blob = new Blob([JSON.stringify(exportData)], { type: 'application/json' });
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
@@ -3229,11 +3487,34 @@ function bindEvents() {
                     safeLocalStorageSet(STORAGE_KEY_THEMES, JSON.stringify(customThemes));
                     parts.push('主题');
                 }
+                if (sel.snapshots && data.snapshots && Object.keys(data.snapshots).length) {
+                    let imported = 0;
+                    for (const [key, snaps] of Object.entries(data.snapshots)) {
+                        if (!Array.isArray(snaps)) continue;
+                        if (!autoUpdateConfig.chatStates[key]) {
+                            autoUpdateConfig.chatStates[key] = {
+                                lastUpdateFloor: null, userUpdateCount: 0, npcUpdateCount: 0,
+                                lastUpdateTime: null, snapshots: []
+                            };
+                        }
+                        if (!autoUpdateConfig.chatStates[key].snapshots) autoUpdateConfig.chatStates[key].snapshots = [];
+                        const existing = autoUpdateConfig.chatStates[key].snapshots;
+                        const existingFloors = new Set(existing.map(s => s.floor));
+                        for (const s of snaps) {
+                            if (!existingFloors.has(s.floor)) { existing.push(s); imported++; }
+                        }
+                        existing.sort((a, b) => a.floor - b.floor);
+                        if (existing.length > MAX_SNAPSHOTS_PER_CHAT) existing.splice(0, existing.length - MAX_SNAPSHOTS_PER_CHAT);
+                    }
+                    saveAutoUpdateConfig();
+                    parts.push(`${imported} 快照`);
+                }
                 if (parts.length === 0) { toastr.info('备份中无匹配的勾选内容'); return; }
                 toastr.success(`已导入: ${parts.join(', ')}`);
                 renderAvatarMgmt();
                 renderAvatarStrip();
                 renderHistoryList();
+                renderSnapshotList();
             } catch (e) {
                 console.error('[PW] Import failed:', e);
                 toastr.error('导入失败: ' + e.message);
@@ -3759,10 +4040,54 @@ function bindEvents() {
         toastr.success(`锚点已设为第 ${floor} 楼`);
     });
 
+    // --- Snapshot viewer events ---
+    $(document).on('click.pw', '#pw-snapshot-toggle', function () {
+        const $body = $('#pw-snapshot-body');
+        const $chev = $(this).find('.pw-snapshot-chevron');
+        $body.slideToggle(200);
+        $chev.toggleClass('pw-rotated');
+    });
+    $(document).on('click.pw', '.pw-snapshot-btn-view', function () {
+        const idx = parseInt($(this).data('idx'), 10);
+        const snap = getAutoUpdateChatState().snapshots?.[idx];
+        if (snap) showSnapshotDetail(snap);
+    });
+    $(document).on('click.pw', '.pw-snapshot-btn-restore', async function () {
+        const idx = parseInt($(this).data('idx'), 10);
+        const snap = getAutoUpdateChatState().snapshots?.[idx];
+        if (snap && confirm(`确定恢复第${snap.floor}楼的快照？`)) await restoreSnapshot(snap);
+    });
+    $(document).on('click.pw', '.pw-snapshot-btn-delete', function () {
+        const idx = parseInt($(this).data('idx'), 10);
+        const chatState = getAutoUpdateChatState();
+        if (!chatState.snapshots?.[idx]) return;
+        if (!confirm(`确定删除第${chatState.snapshots[idx].floor}楼的快照？`)) return;
+        chatState.snapshots.splice(idx, 1);
+        saveAutoUpdateConfig();
+        renderSnapshotList();
+        toastr.info('快照已删除');
+    });
+    $(document).on('click.pw', '#pw-snapshot-export', exportSnapshots);
+    $(document).on('click.pw', '#pw-snapshot-import-btn', () => $('#pw-snapshot-import-file').click());
+    $(document).on('change.pw', '#pw-snapshot-import-file', function () {
+        if (this.files?.[0]) importSnapshots(this.files[0]);
+        $(this).val('');
+    });
+    $(document).on('click.pw', '#pw-snapshot-clear', function () {
+        const chatState = getAutoUpdateChatState();
+        if (!chatState.snapshots?.length) return toastr.info('暂无快照');
+        if (!confirm(`确定清空当前分支的 ${chatState.snapshots.length} 个快照？`)) return;
+        chatState.snapshots = [];
+        saveAutoUpdateConfig();
+        renderSnapshotList();
+        toastr.success('快照已清空');
+    });
+
     // Populate world book selectors & update status when switching to auto tab
     $(document).on('click.pw', '.pw-tab[data-tab="auto"]', function () {
         updateAutoUpdateStatus();
         populateAutoWiSelectors();
+        renderSnapshotList();
     });
 
     // --- Diff View Logic (Sub-view Mode Switching) ---
