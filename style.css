@@ -1053,6 +1053,8 @@
    Auto-Update Tab Styles
    ============================================================================ */
 
+.pw-auto-scroll { text-align: left; }
+
 .pw-switch {
     position: relative;
     display: inline-block;
@@ -1085,56 +1087,85 @@
     transform: translateX(20px);
 }
 
-.pw-auto-target-group {
+/* Form rows: consistent left-aligned layout */
+.pw-auto-form-row {
     display: flex;
-    flex-direction: column;
+    align-items: center;
     gap: 8px;
 }
-.pw-auto-target-item {
-    border: 1px solid var(--pw-border, rgba(0,0,0,0.08));
-    border-radius: 8px;
-    padding: 8px 10px;
-    background: var(--pw-paper-bg, rgba(255,255,255,0.4));
+.pw-auto-label {
+    font-size: 0.85em;
+    white-space: nowrap;
+    min-width: 55px;
+    flex-shrink: 0;
 }
+.pw-auto-field-group {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex: 1;
+}
+.pw-auto-unit {
+    font-size: 0.82em;
+    opacity: 0.6;
+}
+.pw-auto-hint {
+    font-size: 0.72em;
+    opacity: 0.5;
+    margin-top: 5px;
+    line-height: 1.4;
+}
+.pw-auto-section-title {
+    font-size: 0.85em;
+    font-weight: 600;
+    margin-bottom: 8px;
+}
+
+/* Target headers (User/NPC) as top-level items */
 .pw-auto-target-header {
     display: flex;
     align-items: center;
     gap: 8px;
     cursor: pointer;
     font-size: 0.9em;
-    font-weight: 500;
 }
 .pw-auto-target-header input[type="checkbox"] {
     width: 16px; height: 16px;
     accent-color: var(--pw-accent, #8b6cc1);
 }
 .pw-auto-target-opts {
-    margin-top: 6px;
-    padding-left: 24px;
+    padding-left: 28px;
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 5px;
 }
-.pw-auto-target-opts label {
+.pw-auto-opt-row {
     display: flex;
     align-items: center;
     gap: 6px;
     font-size: 0.82em;
-    opacity: 0.85;
     cursor: pointer;
 }
+.pw-auto-wi-row {
+    margin-top: 4px;
+    padding-left: 22px;
+}
+.pw-auto-wi-row .pw-input {
+    padding: 3px 6px;
+}
 
+/* Confirm mode radio group */
 .pw-auto-confirm-modes {
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 2px;
 }
 .pw-auto-radio {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
     gap: 6px;
-    padding: 6px 8px;
+    padding: 5px 8px;
     border-radius: 6px;
     cursor: pointer;
     transition: background 0.15s;
@@ -1152,11 +1183,12 @@
 .pw-auto-radio small {
     width: 100%;
     font-size: 0.72em;
-    opacity: 0.55;
+    opacity: 0.5;
     padding-left: 22px;
     margin-top: -2px;
 }
 
+/* Status card */
 .pw-auto-status-card {
     background: var(--pw-paper-bg, rgba(255,255,255,0.4));
     border: 1px solid var(--pw-border, rgba(0,0,0,0.08));
@@ -1164,14 +1196,13 @@
 .pw-auto-status-body {
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 3px;
 }
 .pw-auto-status-row {
     font-size: 0.82em;
     display: flex;
     align-items: center;
     gap: 6px;
-    text-align: left;
     line-height: 1.6;
 }
 .pw-auto-status-row i {
