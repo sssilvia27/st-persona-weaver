@@ -3,7 +3,7 @@ import { extension_settings, getContext } from "../../../extensions.js";
 import { saveSettingsDebounced, callPopup, getRequestHeaders, saveChat, reloadCurrentChat, saveCharacterDebounced } from "../../../../script.js";
 
 const extensionName = "st-persona-weaver";
-const CURRENT_VERSION = "3.0.0"; // Avatar Reference + Chat Inference
+const CURRENT_VERSION = "3.0.1"; // Avatar Reference + Chat Inference
 
 const UPDATE_CHECK_URL = "https://raw.githubusercontent.com/sssilvia27/st-persona-weaver/main/manifest.json";
 
@@ -1862,12 +1862,11 @@ async function openCreatorPopup() {
 
             <div class="pw-card-section" id="pw-avatar-mgmt-section">
                 <div style="display:flex; align-items:center; gap:8px; margin-bottom:5px;">
-                    <label class="pw-section-label" style="flex:1; min-width:0; text-align:left;">形象参考</label>
+                    <label class="pw-section-label pw-avatar-mgmt-toggle" style="flex:1; min-width:0; text-align:left; cursor:pointer;">形象参考 <i class="fa-solid fa-chevron-down" style="font-size:0.7em; opacity:0.5; margin-left:2px;"></i></label>
                     <label class="pw-mini-btn" style="cursor:pointer; display:inline-flex; align-items:center; gap:3px; padding:2px 8px; font-size:0.75em; white-space:nowrap; flex-shrink:0;">
                         <i class="fa-solid fa-upload"></i> 上传
                         <input type="file" id="pw-avatar-upload" accept="image/*" multiple style="display:none;">
                     </label>
-                    <span id="pw-avatar-mgmt-collapse" style="cursor:pointer; opacity:0.5; font-size:0.85em; padding:2px 4px; flex-shrink:0;" title="展开/收起"><i class="fa-solid fa-chevron-down"></i></span>
                 </div>
                 <div id="pw-avatar-mgmt-body" class="pw-avatar-mgmt-body">
                     <div id="pw-avatar-mgmt-grid" class="pw-avatar-mgmt-grid"></div>
@@ -1997,6 +1996,7 @@ async function openCreatorPopup() {
                     <label style="display:flex; align-items:center; gap:4px; cursor:pointer;"><input type="checkbox" class="pw-migrate-opt" value="avatars" checked> 参考图片</label>
                     <label style="display:flex; align-items:center; gap:4px; cursor:pointer;"><input type="checkbox" class="pw-migrate-opt" value="history" checked> 存档记录</label>
                     <label style="display:flex; align-items:center; gap:4px; cursor:pointer;"><input type="checkbox" class="pw-migrate-opt" value="prompts" checked> Prompt</label>
+                    <label style="display:flex; align-items:center; gap:4px; cursor:pointer;"><input type="checkbox" class="pw-migrate-opt" value="apiConfig" checked> API配置</label>
                     <label style="display:flex; align-items:center; gap:4px; cursor:pointer;"><input type="checkbox" class="pw-migrate-opt" value="themes" checked> 界面主题</label>
                 </div>
                 <div class="pw-row" style="gap:8px;">
@@ -2437,6 +2437,7 @@ function bindEvents() {
             $('#pw-toggle-edit-template').text("编辑模版").removeClass('editing');
             $('#pw-template-block-header').find('i').show();
             $('#pw-btn-apply-template').hide();
+            $('#pw-avatar-ref-row, #pw-chat-infer-row').slideDown(200);
         }
         $('#pw-request').attr('placeholder', '在此输入要求，或点击上方模版块插入参考结构（无需全部填满）...');
 
@@ -2729,9 +2730,9 @@ function bindEvents() {
             $('#pw-toggle-edit-template').text("编辑模版").removeClass('editing');
             $('#pw-template-block-header').find('i').show();
             $('#pw-request').attr('placeholder', '在此输入要求，或点击上方模版块插入参考结构（无需全部填满）...');
-            $('#pw-btn-gen').html(`<i class="fa-solid fa-wand-magic-sparkles"></i> ${isNpc ? '生成 NPC 设定' : '生成 User 设定'}`);
             $('#pw-btn-apply-template').hide();
             $('#pw-avatar-ref-row, #pw-chat-infer-row').slideDown(200);
+            updateChatInferBadge();
         }
     });
 
@@ -2878,9 +2879,9 @@ function bindEvents() {
         $('#pw-toggle-edit-template').text("编辑模版").removeClass('editing');
         $('#pw-template-block-header').find('i').show();
         $('#pw-btn-apply-template').hide();
-        const isNpc = uiStateCache.generationMode === 'npc';
         $('#pw-request').attr('placeholder', '在此输入要求，或点击上方模版块插入参考结构（无需全部填满）...');
-        $('#pw-btn-gen').html(`<i class="fa-solid fa-wand-magic-sparkles"></i> ${isNpc ? '生成 NPC 设定' : '生成 User 设定'}`);
+        $('#pw-avatar-ref-row, #pw-chat-infer-row').slideDown(200);
+        updateChatInferBadge();
         toastr.success("模版已更新并保存至记录");
     });
 
@@ -3683,9 +3684,10 @@ function bindEvents() {
         $input.on('blur', save).on('keydown', function(e) { if (e.key === 'Enter') save(); });
     });
 
-    $(document).on('click.pw', '#pw-avatar-mgmt-collapse', function () {
+    $(document).on('click.pw', '.pw-avatar-mgmt-toggle', function () {
         const $body = $('#pw-avatar-mgmt-body');
         const $icon = $(this).find('i');
+        if (!$body.is(':visible')) renderAvatarMgmt();
         $body.slideToggle(200);
         $icon.toggleClass('fa-chevron-down fa-chevron-up');
     });
