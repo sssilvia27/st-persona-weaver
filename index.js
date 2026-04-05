@@ -1929,6 +1929,11 @@ async function checkAutoUpdateTrigger() {
     }
 }
 
+function getTopLayerContainer() {
+    const $dialog = $('dialog:has(.pw-wrapper), .dialogue_popup_large:has(.pw-wrapper)');
+    return $dialog.length ? $dialog.first() : $('body');
+}
+
 function showAutoUpdateConfirm(results, floor) {
     const $existing = $('#pw-auto-update-confirm');
     if ($existing.length) $existing.remove();
@@ -1957,7 +1962,7 @@ function showAutoUpdateConfirm(results, floor) {
         </div>
     </div>`;
 
-    $('body').append(html);
+    getTopLayerContainer().append(html);
     const $overlay = $('#pw-auto-update-confirm');
 
     const diffStates = {};
@@ -2393,7 +2398,7 @@ function showSnapshotDetail(snapshot, viewType) {
         await restoreSnapshot(snapshot);
     });
     $overlay.on('click', (e) => { if ($(e.target).hasClass('pw-snapshot-overlay')) $overlay.remove(); });
-    $('body').append($overlay);
+    getTopLayerContainer().append($overlay);
 }
 
 async function restoreSnapshot(snapshot) {
@@ -2477,7 +2482,7 @@ function showSnapshotRestorePrompt(chatKey) {
         await restoreSnapshot(bestSnap);
     });
     $overlay.on('click', (e) => { if ($(e.target).hasClass('pw-snapshot-overlay')) $overlay.remove(); });
-    $('body').append($overlay);
+    getTopLayerContainer().append($overlay);
 }
 
 function maybeCopySnapshotsToNewBranch(newChatKey) {
