@@ -1349,7 +1349,10 @@
 }
 .pw-auto-confirm-actions .pw-btn {
     white-space: nowrap;
-    flex-shrink: 0;
+    flex: 1;
+    min-width: 0;
+    width: auto;
+    margin-top: 0;
 }
 
 /* ============ Snapshot Section ============ */
