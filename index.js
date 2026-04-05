@@ -1929,19 +1929,22 @@ async function checkAutoUpdateTrigger() {
     }
 }
 
+function getPwDialogContainer() {
+    const $dialog = $('.pw-wrapper').closest('dialog');
+    return $dialog.length ? $dialog : $('body');
+}
+
 function showAutoUpdateConfirm(results, floor) {
     const $existing = $('#pw-auto-update-confirm');
-    if ($existing.length) { if ($existing[0].close) $existing[0].close(); $existing.remove(); }
+    if ($existing.length) $existing.remove();
 
     const modes = Object.keys(results);
     const tabs = modes.map(m => `<button class="pw-auc-tab ${m === modes[0] ? 'active' : ''}" data-mode="${m}">
         <i class="fa-solid fa-${m === 'user' ? 'user' : 'user-secret'}"></i> ${m === 'user' ? 'User' : 'NPC'}
     </button>`).join('');
 
-    const dialogEl = document.createElement('dialog');
-    dialogEl.id = 'pw-auto-update-confirm';
-    dialogEl.className = 'pw-auto-confirm-overlay';
-    dialogEl.innerHTML = `
+    const html = `
+    <div id="pw-auto-update-confirm" class="pw-auto-confirm-overlay" style="display:none;">
         <div class="pw-auto-confirm-card">
             <div class="pw-auto-confirm-header">
                 <span><i class="fa-solid fa-rotate"></i> 人设自动更新 · 第${floor}楼</span>
@@ -1956,10 +1959,12 @@ function showAutoUpdateConfirm(results, floor) {
                 <button class="pw-btn pw-auc-reroll"><i class="fa-solid fa-rotate-right"></i> 重Roll</button>
                 <button class="pw-btn gen pw-auto-confirm-accept"><i class="fa-solid fa-check"></i> 应用</button>
             </div>
-        </div>`;
-    document.body.appendChild(dialogEl);
-    dialogEl.showModal();
-    const $overlay = $(dialogEl);
+        </div>
+    </div>`;
+
+    getPwDialogContainer().append(html);
+    const $overlay = $('#pw-auto-update-confirm');
+    $overlay.css({ display: 'flex', opacity: 0 }).animate({ opacity: 1 }, 200);
 
     const diffStates = {};
     for (const mode of modes) {
@@ -2061,8 +2066,7 @@ function showAutoUpdateConfirm(results, floor) {
             }
             const labels = modes.map(m => m === 'user' ? 'User' : 'NPC').join(' + ');
             toastr.success(`${labels} 人设已更新（第${floor}楼）`);
-            dialogEl.close();
-            $overlay.remove();
+            $overlay.animate({ opacity: 0 }, 200, () => $overlay.remove());
             updateAutoUpdateStatus();
         } catch (e) {
             toastr.error('应用失败: ' + e.message);
@@ -2070,15 +2074,12 @@ function showAutoUpdateConfirm(results, floor) {
         }
     });
 
-    const closeConfirmDialog = () => {
+    $overlay.find('.pw-auto-confirm-reject, .pw-auto-confirm-close').on('click', () => {
         const chatState = getAutoUpdateChatState();
         chatState.lastUpdateFloor = floor - autoUpdateConfig.delay;
         saveAutoUpdateConfig();
-        dialogEl.close();
-        $overlay.remove();
-    };
-    $overlay.find('.pw-auto-confirm-reject, .pw-auto-confirm-close').on('click', closeConfirmDialog);
-    dialogEl.addEventListener('cancel', (e) => { e.preventDefault(); closeConfirmDialog(); });
+        $overlay.animate({ opacity: 0 }, 200, () => $overlay.remove());
+    });
 }
 
 function assembleAutoConfirmResult(state) {
@@ -2370,9 +2371,7 @@ function showSnapshotDetail(snapshot, viewType) {
 
     const getContent = (type) => type === 'npc' ? (snapshot.npc || '(无NPC数据)') : (snapshot.user || '(无User数据)');
 
-    const dialogEl = document.createElement('dialog');
-    dialogEl.className = 'pw-snapshot-overlay';
-    dialogEl.innerHTML = `
+    const $overlay = $(`<div class="pw-snapshot-overlay">
         <div class="pw-snapshot-detail-card">
             <div class="pw-snapshot-detail-header">
                 <span><i class="fa-solid fa-camera"></i> 快照详情 · 第${snapshot.floor}楼</span>
@@ -2384,24 +2383,21 @@ function showSnapshotDetail(snapshot, viewType) {
                 <button class="pw-btn primary pw-snapshot-detail-restore"><i class="fa-solid fa-rotate-left"></i> 恢复此快照</button>
                 <button class="pw-btn pw-snapshot-detail-close">关闭</button>
             </div>
-        </div>`;
-    document.body.appendChild(dialogEl);
-    dialogEl.showModal();
-    const $overlay = $(dialogEl);
+        </div>
+    </div>`);
     $overlay.find('.pw-snapshot-detail-text').val(getContent(initialType));
     $overlay.on('click', '.pw-snap-dtab', function () {
         $overlay.find('.pw-snap-dtab').removeClass('active');
         $(this).addClass('active');
         $overlay.find('.pw-snapshot-detail-text').val(getContent($(this).data('type')));
     });
-    const closeDialog = () => { dialogEl.close(); $overlay.remove(); };
-    $overlay.on('click', '.pw-snapshot-close, .pw-snapshot-detail-close', closeDialog);
+    $overlay.on('click', '.pw-snapshot-close, .pw-snapshot-detail-close', () => $overlay.remove());
     $overlay.on('click', '.pw-snapshot-detail-restore', async () => {
-        closeDialog();
+        $overlay.remove();
         await restoreSnapshot(snapshot);
     });
-    dialogEl.addEventListener('click', (e) => { if (e.target === dialogEl) closeDialog(); });
-    dialogEl.addEventListener('cancel', (e) => { e.preventDefault(); closeDialog(); });
+    $overlay.on('click', (e) => { if ($(e.target).hasClass('pw-snapshot-overlay')) $overlay.remove(); });
+    getPwDialogContainer().append($overlay);
 }
 
 async function restoreSnapshot(snapshot) {
@@ -2461,9 +2457,7 @@ function showSnapshotRestorePrompt(chatKey) {
     if (bestSnap.npc) types.push('NPC');
     if (types.length === 0) return;
 
-    const dialogEl = document.createElement('dialog');
-    dialogEl.className = 'pw-snapshot-overlay';
-    dialogEl.innerHTML = `
+    const $overlay = $(`<div class="pw-snapshot-overlay">
         <div class="pw-snapshot-detail-card pw-snapshot-restore-card">
             <div class="pw-snapshot-detail-header">
                 <span><i class="fa-solid fa-code-branch"></i> 此分支有可恢复的人设快照</span>
@@ -2479,18 +2473,15 @@ function showSnapshotRestorePrompt(chatKey) {
                 <button class="pw-btn primary pw-snapshot-prompt-restore"><i class="fa-solid fa-rotate-left"></i> 恢复快照</button>
                 <button class="pw-btn pw-snapshot-prompt-skip">跳过</button>
             </div>
-        </div>`;
-    document.body.appendChild(dialogEl);
-    dialogEl.showModal();
-    const $overlay = $(dialogEl);
-    const closeDialog = () => { dialogEl.close(); $overlay.remove(); };
-    $overlay.on('click', '.pw-snapshot-close, .pw-snapshot-prompt-skip', closeDialog);
+        </div>
+    </div>`);
+    $overlay.on('click', '.pw-snapshot-close, .pw-snapshot-prompt-skip', () => $overlay.remove());
     $overlay.on('click', '.pw-snapshot-prompt-restore', async () => {
-        closeDialog();
+        $overlay.remove();
         await restoreSnapshot(bestSnap);
     });
-    dialogEl.addEventListener('click', (e) => { if (e.target === dialogEl) closeDialog(); });
-    dialogEl.addEventListener('cancel', (e) => { e.preventDefault(); closeDialog(); });
+    $overlay.on('click', (e) => { if ($(e.target).hasClass('pw-snapshot-overlay')) $overlay.remove(); });
+    getPwDialogContainer().append($overlay);
 }
 
 function maybeCopySnapshotsToNewBranch(newChatKey) {
