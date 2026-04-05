@@ -1929,9 +1929,9 @@ async function checkAutoUpdateTrigger() {
     }
 }
 
-function getPwDialogContainer() {
-    const $dialog = $('.pw-wrapper').closest('dialog');
-    return $dialog.length ? $dialog : $('body');
+function getOverlayContainer() {
+    const $wrapper = $('.pw-wrapper');
+    return $wrapper.length ? $wrapper.first() : $('body');
 }
 
 function showAutoUpdateConfirm(results, floor) {
@@ -1962,9 +1962,8 @@ function showAutoUpdateConfirm(results, floor) {
         </div>
     </div>`;
 
-    getPwDialogContainer().append(html);
+    getOverlayContainer().append(html);
     const $overlay = $('#pw-auto-update-confirm');
-    $overlay.css({ display: 'flex', opacity: 0 }).animate({ opacity: 1 }, 200);
 
     const diffStates = {};
     for (const mode of modes) {
@@ -2080,6 +2079,8 @@ function showAutoUpdateConfirm(results, floor) {
         saveAutoUpdateConfig();
         $overlay.animate({ opacity: 0 }, 200, () => $overlay.remove());
     });
+
+    $overlay.css({ display: 'flex', opacity: 0 }).animate({ opacity: 1 }, 200);
 }
 
 function assembleAutoConfirmResult(state) {
@@ -2397,7 +2398,7 @@ function showSnapshotDetail(snapshot, viewType) {
         await restoreSnapshot(snapshot);
     });
     $overlay.on('click', (e) => { if ($(e.target).hasClass('pw-snapshot-overlay')) $overlay.remove(); });
-    getPwDialogContainer().append($overlay);
+    getOverlayContainer().append($overlay);
 }
 
 async function restoreSnapshot(snapshot) {
@@ -2481,7 +2482,7 @@ function showSnapshotRestorePrompt(chatKey) {
         await restoreSnapshot(bestSnap);
     });
     $overlay.on('click', (e) => { if ($(e.target).hasClass('pw-snapshot-overlay')) $overlay.remove(); });
-    getPwDialogContainer().append($overlay);
+    getOverlayContainer().append($overlay);
 }
 
 function maybeCopySnapshotsToNewBranch(newChatKey) {
