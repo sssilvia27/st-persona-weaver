@@ -1273,8 +1273,8 @@ async function runGeneration(data, apiConfig, isTemplateMode = false) {
                         model: apiConfig.indepApiModel,
                         system: systemParts.join('\n\n'),
                         messages: nonSystem,
-                        max_tokens: 8192,
-                        temperature: 0.85
+                        max_tokens: 16384,
+                        temperature: 1.00
                     });
                 } else {
                     if (baseUrl.endsWith('/chat/completions')) baseUrl = baseUrl.replace(/\/chat\/completions$/, '');
@@ -1287,7 +1287,8 @@ async function runGeneration(data, apiConfig, isTemplateMode = false) {
                     body = JSON.stringify({
                         model: apiConfig.indepApiModel,
                         messages: messages,
-                        temperature: 0.85
+                        max_tokens: 16384,
+                        temperature: 1.00
                     });
                 }
 
@@ -1307,7 +1308,13 @@ async function runGeneration(data, apiConfig, isTemplateMode = false) {
                 if (isAnthropic) {
                     return json.content[0].text;
                 }
-                return json.choices[0].message.content;
+                if (json.choices && json.choices[0]?.message?.content) {
+                    return json.choices[0].message.content;
+                }
+                if (json.content && json.content[0]?.text) {
+                    return json.content[0].text;
+                }
+                throw new Error("无法解析 API 返回格式");
             } else {
                 if (window.TavernHelper && typeof window.TavernHelper.generateRaw === 'function') {
                     return await window.TavernHelper.generateRaw({
@@ -1983,7 +1990,7 @@ function showAutoUpdateConfirm(results, floor) {
         let diffHtml = '';
         st.blocks.forEach((block, idx) => {
             if (block.type === 'equal') {
-                diffHtml += `<span>${_esc(block.value)}</span>`;
+                diffHtml += `<span class="pw-idiff-equal" contenteditable="true" data-aidx="${idx}">${_esc(block.value)}</span>`;
             } else {
                 const isOld = block.active === 'old';
                 const isNew = block.active === 'new';
@@ -2007,7 +2014,7 @@ function showAutoUpdateConfirm(results, floor) {
         renderActiveTab();
     });
 
-    $overlay.on('click', '.pw-auc-diff-view .pw-idiff-old', function () {
+    $overlay.on('mousedown', '.pw-auc-diff-view .pw-idiff-old', function () {
         if ($(this).hasClass('active')) return;
         const idx = parseInt($(this).data('aidx'), 10);
         const block = diffStates[activeMode].blocks[idx];
@@ -2016,7 +2023,7 @@ function showAutoUpdateConfirm(results, floor) {
         $(this).addClass('active').removeClass('inactive').attr('contenteditable', 'true');
         $(this).siblings('.pw-idiff-new').addClass('inactive').removeClass('active').removeAttr('contenteditable');
     });
-    $overlay.on('click', '.pw-auc-diff-view .pw-idiff-new', function () {
+    $overlay.on('mousedown', '.pw-auc-diff-view .pw-idiff-new', function () {
         if ($(this).hasClass('active')) return;
         const idx = parseInt($(this).data('aidx'), 10);
         const block = diffStates[activeMode].blocks[idx];
@@ -2033,6 +2040,10 @@ function showAutoUpdateConfirm(results, floor) {
     $overlay.on('input', '.pw-auc-diff-view .pw-idiff-new.active[contenteditable]', function () {
         const idx = parseInt($(this).data('aidx'), 10);
         if (diffStates[activeMode].blocks[idx]) diffStates[activeMode].blocks[idx].newText = $(this).text();
+    });
+    $overlay.on('input', '.pw-auc-diff-view .pw-idiff-equal[contenteditable]', function () {
+        const idx = parseInt($(this).data('aidx'), 10);
+        if (diffStates[activeMode].blocks[idx]) diffStates[activeMode].blocks[idx].value = $(this).text();
     });
 
     $overlay.on('click', '.pw-auc-reroll', async function () {
@@ -3007,7 +3018,7 @@ async function openCreatorPopup() {
                         <input type="file" id="pw-avatar-upload" accept="image/*" multiple style="display:none;">
                     </label>
                 </div>
-                <div id="pw-avatar-mgmt-body" class="pw-avatar-mgmt-body">
+                <div id="pw-avatar-mgmt-body" class="pw-avatar-mgmt-body" style="display:none;">
                     <div id="pw-avatar-mgmt-grid" class="pw-avatar-mgmt-grid"></div>
                 </div>
             </div>
@@ -3576,7 +3587,7 @@ function renderInlineDiff() {
     let html = '';
     currentDiffBlocks.forEach((block, index) => {
         if (block.type === 'equal') {
-            html += `<span>${_esc(block.value)}</span>`;
+            html += `<span class="pw-idiff-equal" contenteditable="true" data-idx="${index}">${_esc(block.value)}</span>`;
         } else {
             const isActiveOld = block.active === 'old';
             const isActiveNew = block.active === 'new';
@@ -3675,7 +3686,7 @@ function bindEvents() {
         // 刷新列表并清空表单
         renderApiProfiles();
         $('#pw-api-profile-name').val(newName);
-        $('#pw-api-url').val('').focus(); // 自动聚焦 URL 框方便输入
+        $('#pw-api-url').val('').focus();
         $('#pw-api-key').val('');
         $('#pw-api-model-select').empty().append('<option value="">请填写URL和Key后获取</option>');
         
@@ -4798,7 +4809,7 @@ function bindEvents() {
         $('#pw-diff-hint').hide();
     });
 
-    $(document).on('click.pw', '.pw-idiff-old', function () {
+    $(document).on('mousedown.pw', '.pw-idiff-old', function () {
         if (!$('#pw-diff-merge-list').hasClass('pw-diff-mode-all')) return;
         if ($(this).hasClass('active')) return;
         const idx = $(this).data('idx');
@@ -4806,7 +4817,7 @@ function bindEvents() {
         $(this).addClass('active').removeClass('inactive').attr('contenteditable', 'true');
         $(this).siblings('.pw-idiff-new').addClass('inactive').removeClass('active').removeAttr('contenteditable');
     });
-    $(document).on('click.pw', '.pw-idiff-new', function () {
+    $(document).on('mousedown.pw', '.pw-idiff-new', function () {
         if (!$('#pw-diff-merge-list').hasClass('pw-diff-mode-all')) return;
         if ($(this).hasClass('active')) return;
         const idx = $(this).data('idx');
@@ -4822,6 +4833,10 @@ function bindEvents() {
     $(document).on('input.pw', '.pw-idiff-new.active[contenteditable]', function () {
         const idx = $(this).data('idx');
         if (idx !== undefined) currentDiffBlocks[idx].newText = $(this).text();
+    });
+    $(document).on('input.pw', '.pw-idiff-equal[contenteditable]', function () {
+        const idx = $(this).data('idx');
+        if (idx !== undefined) currentDiffBlocks[idx].value = $(this).text();
     });
 
     // Refine (Persona)
@@ -5443,9 +5458,15 @@ function bindEvents() {
     $(document).on('click.pw', '.pw-avatar-mgmt-toggle', function () {
         const $body = $('#pw-avatar-mgmt-body');
         const $icon = $(this).find('i');
-        if (!$body.is(':visible')) renderAvatarMgmt();
-        $body.slideToggle(200);
-        $icon.toggleClass('fa-chevron-down fa-chevron-up');
+        $body.stop(true, true);
+        if ($body.is(':visible')) {
+            $body.slideUp(200);
+            $icon.removeClass('fa-chevron-up').addClass('fa-chevron-down');
+        } else {
+            renderAvatarMgmt();
+            $body.slideDown(200);
+            $icon.removeClass('fa-chevron-down').addClass('fa-chevron-up');
+        }
     });
 
     $(document).on('click.pw', '#pw-avatar-add-btn', function () {
@@ -5456,7 +5477,6 @@ function bindEvents() {
         }, 200);
     });
 
-    renderAvatarMgmt();
     renderAvatarStrip();
 
     function updateChatInferSummary() {
