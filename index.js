@@ -3,7 +3,7 @@ import { extension_settings, getContext } from "../../../extensions.js";
 import { saveSettingsDebounced, callPopup, getRequestHeaders, saveChat, reloadCurrentChat, saveCharacterDebounced } from "../../../../script.js";
 
 const extensionName = "st-persona-weaver";
-const CURRENT_VERSION = "3.0.1"; // Avatar Reference + Chat Inference
+const CURRENT_VERSION = "3.2"; // Avatar Reference + Chat Inference
 
 const UPDATE_CHECK_URL = "https://raw.githubusercontent.com/sssilvia27/st-persona-weaver/main/manifest.json";
 
@@ -1990,7 +1990,7 @@ function showAutoUpdateConfirm(results, floor) {
         let diffHtml = '';
         st.blocks.forEach((block, idx) => {
             if (block.type === 'equal') {
-                diffHtml += `<span class="pw-idiff-equal" contenteditable="true" data-aidx="${idx}">${_esc(block.value)}</span>`;
+                diffHtml += `<span>${_esc(block.value)}</span>`;
             } else {
                 const isOld = block.active === 'old';
                 const isNew = block.active === 'new';
@@ -2014,23 +2014,29 @@ function showAutoUpdateConfirm(results, floor) {
         renderActiveTab();
     });
 
-    $overlay.on('mousedown', '.pw-auc-diff-view .pw-idiff-old', function () {
+    $overlay.on('mousedown', '.pw-auc-diff-view .pw-idiff-old', function (e) {
         if ($(this).hasClass('active')) return;
+        e.preventDefault();
+        $overlay.find('.pw-auc-diff-view [contenteditable]').blur();
         const idx = parseInt($(this).data('aidx'), 10);
         const block = diffStates[activeMode].blocks[idx];
         if (!block || block.type !== 'diff') return;
         block.active = 'old';
         $(this).addClass('active').removeClass('inactive').attr('contenteditable', 'true');
         $(this).siblings('.pw-idiff-new').addClass('inactive').removeClass('active').removeAttr('contenteditable');
+        this.focus();
     });
-    $overlay.on('mousedown', '.pw-auc-diff-view .pw-idiff-new', function () {
+    $overlay.on('mousedown', '.pw-auc-diff-view .pw-idiff-new', function (e) {
         if ($(this).hasClass('active')) return;
+        e.preventDefault();
+        $overlay.find('.pw-auc-diff-view [contenteditable]').blur();
         const idx = parseInt($(this).data('aidx'), 10);
         const block = diffStates[activeMode].blocks[idx];
         if (!block || block.type !== 'diff') return;
         block.active = 'new';
         $(this).addClass('active').removeClass('inactive').attr('contenteditable', 'true');
         $(this).siblings('.pw-idiff-old').addClass('inactive').removeClass('active').removeAttr('contenteditable');
+        this.focus();
     });
 
     $overlay.on('input', '.pw-auc-diff-view .pw-idiff-old.active[contenteditable]', function () {
@@ -2040,10 +2046,6 @@ function showAutoUpdateConfirm(results, floor) {
     $overlay.on('input', '.pw-auc-diff-view .pw-idiff-new.active[contenteditable]', function () {
         const idx = parseInt($(this).data('aidx'), 10);
         if (diffStates[activeMode].blocks[idx]) diffStates[activeMode].blocks[idx].newText = $(this).text();
-    });
-    $overlay.on('input', '.pw-auc-diff-view .pw-idiff-equal[contenteditable]', function () {
-        const idx = parseInt($(this).data('aidx'), 10);
-        if (diffStates[activeMode].blocks[idx]) diffStates[activeMode].blocks[idx].value = $(this).text();
     });
 
     $overlay.on('click', '.pw-auc-reroll', async function () {
@@ -3587,7 +3589,7 @@ function renderInlineDiff() {
     let html = '';
     currentDiffBlocks.forEach((block, index) => {
         if (block.type === 'equal') {
-            html += `<span class="pw-idiff-equal" contenteditable="true" data-idx="${index}">${_esc(block.value)}</span>`;
+            html += `<span>${_esc(block.value)}</span>`;
         } else {
             const isActiveOld = block.active === 'old';
             const isActiveNew = block.active === 'new';
@@ -4809,21 +4811,27 @@ function bindEvents() {
         $('#pw-diff-hint').hide();
     });
 
-    $(document).on('mousedown.pw', '.pw-idiff-old', function () {
+    $(document).on('mousedown.pw', '.pw-idiff-old', function (e) {
         if (!$('#pw-diff-merge-list').hasClass('pw-diff-mode-all')) return;
         if ($(this).hasClass('active')) return;
+        e.preventDefault();
+        $('#pw-diff-merge-list [contenteditable]').blur();
         const idx = $(this).data('idx');
         currentDiffBlocks[idx].active = 'old';
         $(this).addClass('active').removeClass('inactive').attr('contenteditable', 'true');
         $(this).siblings('.pw-idiff-new').addClass('inactive').removeClass('active').removeAttr('contenteditable');
+        this.focus();
     });
-    $(document).on('mousedown.pw', '.pw-idiff-new', function () {
+    $(document).on('mousedown.pw', '.pw-idiff-new', function (e) {
         if (!$('#pw-diff-merge-list').hasClass('pw-diff-mode-all')) return;
         if ($(this).hasClass('active')) return;
+        e.preventDefault();
+        $('#pw-diff-merge-list [contenteditable]').blur();
         const idx = $(this).data('idx');
         currentDiffBlocks[idx].active = 'new';
         $(this).addClass('active').removeClass('inactive').attr('contenteditable', 'true');
         $(this).siblings('.pw-idiff-old').addClass('inactive').removeClass('active').removeAttr('contenteditable');
+        this.focus();
     });
 
     $(document).on('input.pw', '.pw-idiff-old.active[contenteditable]', function () {
@@ -4833,10 +4841,6 @@ function bindEvents() {
     $(document).on('input.pw', '.pw-idiff-new.active[contenteditable]', function () {
         const idx = $(this).data('idx');
         if (idx !== undefined) currentDiffBlocks[idx].newText = $(this).text();
-    });
-    $(document).on('input.pw', '.pw-idiff-equal[contenteditable]', function () {
-        const idx = $(this).data('idx');
-        if (idx !== undefined) currentDiffBlocks[idx].value = $(this).text();
     });
 
     // Refine (Persona)
