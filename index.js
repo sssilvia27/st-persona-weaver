@@ -3,7 +3,7 @@ import { extension_settings, getContext } from "../../../extensions.js";
 import { saveSettingsDebounced, callPopup, getRequestHeaders, saveChat, reloadCurrentChat, saveCharacterDebounced } from "../../../../script.js";
 
 const extensionName = "st-persona-weaver";
-const CURRENT_VERSION = "3.4.3"; // Model-aware max_tokens — no more mid-generation truncation
+const CURRENT_VERSION = "3.4.4"; // Auto-resolve max_tokens by model name (no user config)
 
 const UPDATE_CHECK_URL = "https://raw.githubusercontent.com/sssilvia27/st-persona-weaver/main/manifest.json";
 
@@ -350,6 +350,7 @@ const defaultSettings = {
     indepTimeout: 300,
     // 流式输出。默认开启，避免 Cloudflare / 酒馆后端 / 中转站的 504 Gateway Timeout。
     indepStream: true
+    // max_tokens 由 resolveMaxTokens() 按模型名自动推断，不放在设置里
 };
 
 const TEXT = {
@@ -1051,6 +1052,7 @@ async function runGeneration(data, apiConfig, isTemplateMode = false) {
     const useStream = (apiConfig && typeof apiConfig.indepStream === 'boolean')
         ? apiConfig.indepStream
         : getIndepStreamEnabled();
+    // max_tokens 由 resolveMaxTokens() 按模型名自动推断，不再由用户配置
     console.log(`[PW] Request timeout=${timeoutSec}s, stream=${useStream}`);
 
     try {
@@ -1119,16 +1121,16 @@ async function runGeneration(data, apiConfig, isTemplateMode = false) {
                         'x-api-key': apiConfig.indepApiKey,
                         'anthropic-version': '2023-06-01'
                     };
-                    const maxTokAnthropic = getMaxTokensForModel(apiConfig.indepApiModel);
+                    // Anthropic 必填 max_tokens；按模型名自动挑安全值（Claude 3.5=8192, 3.7/4/4.5=32000, 3=4096）
+                    const anthropicMaxTokens = resolveMaxTokens(apiConfig.indepApiModel, true) || 8192;
                     const anthropicPayload = {
                         model: apiConfig.indepApiModel,
                         system: systemParts.join('\n\n'),
                         messages: nonSystem,
-                        max_tokens: maxTokAnthropic,
+                        max_tokens: anthropicMaxTokens,
                         temperature: 1.00
                     };
                     if (useStream) anthropicPayload.stream = true;
-                    console.log(`[PW] Anthropic max_tokens=${maxTokAnthropic}`);
                     body = JSON.stringify(anthropicPayload);
                 } else {
                     // OpenAI 兼容模式：支持原生 OpenAI / OpenRouter / DeepSeek / Groq / xAI /
@@ -1142,20 +1144,20 @@ async function runGeneration(data, apiConfig, isTemplateMode = false) {
                         'Content-Type': 'application/json',
                         'Authorization': `Bearer ${apiConfig.indepApiKey}`
                     };
-                    const maxTokOpenAI = getMaxTokensForModel(apiConfig.indepApiModel);
                     const payload = {
                         model: apiConfig.indepApiModel,
                         messages: messages,
-                        temperature: 1.00,
-                        // 按模型名动态推断上限，避免被截断；未知模型回落到 16384（够装完整 YAML）
-                        max_tokens: maxTokOpenAI
+                        temperature: 1.00
                     };
+                    // OpenAI 兼容：默认不发送 max_tokens，让服务端用模型默认最大值（长 YAML 不会被截断）
+                    // 仅当隐藏覆盖写了非 0 值时才发送
+                    const openaiMaxTokens = resolveMaxTokens(apiConfig.indepApiModel, false);
+                    if (openaiMaxTokens > 0) payload.max_tokens = openaiMaxTokens;
                     if (useStream) {
                         payload.stream = true;
                         // OpenAI 流式建议顺便带上 usage
                         payload.stream_options = { include_usage: false };
                     }
-                    console.log(`[PW] OpenAI-compat max_tokens=${maxTokOpenAI}`);
                     body = JSON.stringify(payload);
                 }
 
@@ -1438,66 +1440,6 @@ function getIndepTimeoutSec() {
     return v;
 }
 
-// 按模型名推断 max_tokens 上限（官方/常见中转站允许的最大输出 token 数）。
-// 设计原则：
-//   - 已知模型精确给到该系列上限，尽可能避开"生成被截断"
-//   - 未知模型给一个较健康的默认值（16384），兼顾"不截断"与"不因超限 400"
-//   - 对太老/太小的模型（Claude 3 Haiku、GPT-3.5）按它们真实硬上限 4096
-// 如遇个别中转站拒绝（400 max_tokens exceeded），runGeneration 里会被当作 BadRequest 走兼容重试。
-function getMaxTokensForModel(model) {
-    const m = (model || '').toString().toLowerCase();
-    if (!m) return 16384;
-
-    // === Anthropic Claude 系列 ===
-    if (m.includes('claude')) {
-        // Claude 4 家族（Opus 4 / Sonnet 4 / 3.7 Sonnet）支持超长输出
-        if (m.includes('opus-4') || m.includes('sonnet-4') || /claude-?4[-_.]/.test(m)) return 32000;
-        if (m.includes('3-7-sonnet') || m.includes('3.7-sonnet') || m.includes('3.7sonnet')) return 32000;
-        // Claude 3.5 系列硬上限 8192
-        if (m.includes('3-5') || m.includes('3.5')) return 8192;
-        // Claude 3 家族
-        if (m.includes('3-opus') || m.includes('3.opus') || m.includes('opus-3')) return 4096;
-        if (m.includes('3-sonnet') || m.includes('sonnet-3')) return 4096;
-        if (m.includes('3-haiku') || m.includes('haiku-3') || m.includes('claude-haiku')) return 4096;
-        // Claude 2.x 系列
-        if (m.includes('claude-2')) return 4096;
-        // 未匹配到具体版本但确认是 Claude → 给一个保守偏上的值
-        return 8192;
-    }
-
-    // === Google Gemini 系列 ===
-    if (m.includes('gemini')) {
-        if (m.includes('2.5') || m.includes('2-5')) return 65536;
-        if (m.includes('2.0') || m.includes('2-0')) return 32768;
-        if (m.includes('1.5') || m.includes('1-5')) return 8192;
-        return 8192;
-    }
-
-    // === OpenAI 系列 ===
-    if (m.includes('gpt-5') || m.startsWith('o3') || m.includes('-o3-') || m.includes('/o3')) return 32768;
-    if (m.includes('gpt-4.1') || m.includes('gpt-4-1')) return 32768;
-    if (m.includes('gpt-4o') || m.includes('gpt4o')) return 16384;
-    if (m.startsWith('o1') || m.includes('-o1-')) return 16384;
-    if (m.includes('gpt-4-turbo') || m.includes('gpt-4t')) return 4096;
-    if (m.startsWith('gpt-4') || m.includes('/gpt-4')) return 8192;
-    if (m.includes('gpt-3.5') || m.includes('gpt-35')) return 4096;
-
-    // === DeepSeek ===
-    if (m.includes('deepseek-r1') || m.includes('deepseek-reasoner')) return 32768;
-    if (m.includes('deepseek-v3') || m.includes('deepseek-chat')) return 8192;
-    if (m.includes('deepseek')) return 8192;
-
-    // === Qwen / Mistral / Llama / Groq / xAI / 其他开源/中转 ===
-    if (m.includes('qwen')) return 16384;
-    if (m.includes('llama-3') || m.includes('llama3')) return 16384;
-    if (m.includes('mistral-large') || m.includes('mixtral')) return 8192;
-    if (m.includes('grok')) return 16384;
-
-    // 未知模型：给一个"够长 YAML 但不至于到处 400"的中间值
-    return 16384;
-}
-
-// 读取流式输出开关。默认 ON，因为非流式请求长 YAML 极易被反代 504。
 function getIndepStreamEnabled() {
     try {
         const $el = (typeof $ === 'function') ? $('#pw-indep-stream') : null;
@@ -1508,6 +1450,42 @@ function getIndepStreamEnabled() {
         }
     } catch {}
     return true;
+}
+
+// 根据模型名自动推断合理的 max_tokens，无需用户配置。
+// 若用户想强制覆盖，仍保留隐藏入口：手动在 DevTools 给 localStorage 的
+// pw_state_* → localConfig.indepMaxTokensOverride 写一个正整数即可。
+// （特地换了 key，避免 v3.4.3 残留的 indepMaxTokens=32000 把 Claude 3.5 打成 400）
+// 返回 0 表示"不发送 max_tokens 字段"，仅 OpenAI 兼容分支可用；Anthropic 必填故永远不返回 0。
+function resolveMaxTokens(modelName, isAnthropic) {
+    // 1) 隐藏的手动覆盖（仅极端场景使用）
+    try {
+        const saved = loadState();
+        if (saved && saved.localConfig && Number.isInteger(saved.localConfig.indepMaxTokensOverride)) {
+            const v = saved.localConfig.indepMaxTokensOverride;
+            if (v >= 0 && v <= 200000) return v;
+        }
+    } catch {}
+
+    const m = String(modelName || '').toLowerCase();
+
+    if (isAnthropic) {
+        // Claude 4 / 4.x 系列 (sonnet-4, opus-4, sonnet-4-5, opus-4-1, haiku-4-5 等)：
+        // 上限 32K~64K，取安全值 32000
+        if (/claude-(?:[a-z]+-)?4(?:[-.]|$|\b)/.test(m)) return 32000;
+        // Claude 3.7 Sonnet：上限 64K，取安全值 32000
+        if (/claude-3[-.]7/.test(m)) return 32000;
+        // Claude 3.5 (Sonnet / Haiku)：硬限 8192
+        if (/claude-3[-.]5/.test(m)) return 8192;
+        // Claude 3 原版 (opus/sonnet/haiku 20240229~20240307)：硬限 4096
+        if (/claude-3-(?:opus|sonnet|haiku)/.test(m)) return 4096;
+        // Claude 2 / 未识别型号：安全中值 8192
+        return 8192;
+    }
+
+    // OpenAI 兼容分支（含 GPT / Gemini / DeepSeek / OpenRouter / 中转站 / 本地模型）
+    // 返回 0 让调用端省略 max_tokens 字段，服务端使用模型默认最大值 —— 对长 YAML 最友好。
+    return 0;
 }
 
 // SSE 流式响应解析。兼容：
@@ -3330,6 +3308,7 @@ function bindEvents() {
                 if (timeoutInput > 0) currentLc.indepTimeout = Math.min(1800, Math.max(30, timeoutInput));
                 const $streamEl = $('#pw-indep-stream');
                 if ($streamEl.length) currentLc.indepStream = $streamEl.prop('checked');
+                // max_tokens 现在由 resolveMaxTokens() 按模型名自动推断，不再有 UI 可配置
                 currentLc.extraBooks = window.pwExtraBooks ||[];
 
                 // --- 自动热保存至当前选中配置 ---
