@@ -3,7 +3,7 @@ import { extension_settings, getContext } from "../../../extensions.js";
 import { saveSettingsDebounced, callPopup, getRequestHeaders, saveChat, reloadCurrentChat, saveCharacterDebounced } from "../../../../script.js";
 
 const extensionName = "st-persona-weaver";
-const CURRENT_VERSION = "3.4.1"; // Configurable request timeout + clearer abort errors (Claude/proxy)
+const CURRENT_VERSION = "3.4.2"; // Streaming (SSE) for independent & main API to avoid 504 Gateway Timeout
 
 const UPDATE_CHECK_URL = "https://raw.githubusercontent.com/sssilvia27/st-persona-weaver/main/manifest.json";
 
@@ -347,7 +347,9 @@ const defaultSettings = {
     apiSource: 'main',
     indepApiUrl: 'https://api.openai.com/v1', indepApiKey: '', indepApiModel: 'gpt-3.5-turbo',
     // 独立 API 请求超时（秒）。Claude / 第三方中转站输出长 YAML 经常 >2min，默认给 5 min。
-    indepTimeout: 300
+    indepTimeout: 300,
+    // 流式输出。默认开启，避免 Cloudflare / 酒馆后端 / 中转站的 504 Gateway Timeout。
+    indepStream: true
 };
 
 const TEXT = {
@@ -1045,7 +1047,11 @@ async function runGeneration(data, apiConfig, isTemplateMode = false) {
         : getIndepTimeoutSec();
     let timedOutBySelf = false;
     const timeoutId = setTimeout(() => { timedOutBySelf = true; try { controller.abort(); } catch {} }, timeoutSec * 1000);
-    console.log(`[PW] Request timeout set to ${timeoutSec}s`);
+    // 流式开关：默认 ON。非流式请求长 YAML 时会被反代 504 Gateway Timeout。
+    const useStream = (apiConfig && typeof apiConfig.indepStream === 'boolean')
+        ? apiConfig.indepStream
+        : getIndepStreamEnabled();
+    console.log(`[PW] Request timeout=${timeoutSec}s, stream=${useStream}`);
 
     try {
         const promptArray = [];
@@ -1113,13 +1119,15 @@ async function runGeneration(data, apiConfig, isTemplateMode = false) {
                         'x-api-key': apiConfig.indepApiKey,
                         'anthropic-version': '2023-06-01'
                     };
-                    body = JSON.stringify({
+                    const anthropicPayload = {
                         model: apiConfig.indepApiModel,
                         system: systemParts.join('\n\n'),
                         messages: nonSystem,
                         max_tokens: 16384,
                         temperature: 1.00
-                    });
+                    };
+                    if (useStream) anthropicPayload.stream = true;
+                    body = JSON.stringify(anthropicPayload);
                 } else {
                     // OpenAI 兼容模式：支持原生 OpenAI / OpenRouter / DeepSeek / Groq / xAI /
                     // Mistral / 01.AI / 本地 llama.cpp / 各类中转站 等
@@ -1140,6 +1148,11 @@ async function runGeneration(data, apiConfig, isTemplateMode = false) {
                         // 避免硬编码 16384 触发部分小模型 400。
                         max_tokens: 8192
                     };
+                    if (useStream) {
+                        payload.stream = true;
+                        // OpenAI 流式建议顺便带上 usage
+                        payload.stream_options = { include_usage: false };
+                    }
                     body = JSON.stringify(payload);
                 }
 
@@ -1154,7 +1167,13 @@ async function runGeneration(data, apiConfig, isTemplateMode = false) {
                     if (errText.length > 200) errText = errText.substring(0, 200) + "...";
                     throw new Error(`API Error (${res.status}): ${errText}`);
                 }
-                
+
+                // 流式路径：解析 SSE，返回拼接后的完整文本
+                if (useStream) {
+                    return await readSSEResponse(res, isAnthropic, null);
+                }
+
+                // 非流式路径：整体 JSON 解析（保留原逻辑）
                 const json = await res.json();
                 if (isAnthropic) {
                     return json.content[0].text;
@@ -1168,6 +1187,8 @@ async function runGeneration(data, apiConfig, isTemplateMode = false) {
                 throw new Error("无法解析 API 返回格式");
             } else {
                 if (window.TavernHelper && typeof window.TavernHelper.generateRaw === 'function') {
+                    // should_stream 让 TavernHelper 走流式管道，避免 Cloudflare / 酒馆 Node 后端
+                    // 在等完整响应时 504。generateRaw 内部会累积 token 后一次性返回完整字符串。
                     return await window.TavernHelper.generateRaw({
                         user_input: '', 
                         ordered_prompts: messages,
@@ -1176,7 +1197,8 @@ async function runGeneration(data, apiConfig, isTemplateMode = false) {
                             char_description: '', char_personality: '', scenario: '', dialogue_examples: '',
                             chat_history: { prompts: [], with_depth_entries: false, author_note: '' }
                         },
-                        injects: [], max_chat_history: 0
+                        injects: [], max_chat_history: 0,
+                        should_stream: useStream
                     });
                 } else {
                     throw new Error("ST版本过旧或未安装 TavernHelper");
@@ -1411,6 +1433,119 @@ function getIndepTimeoutSec() {
     if (!v || v < 30) v = 300;      // 下限 30 秒，避免把请求秒 abort
     if (v > 1800) v = 1800;          // 上限 30 分钟，防止浏览器挂太久
     return v;
+}
+
+// 读取流式输出开关。默认 ON，因为非流式请求长 YAML 极易被反代 504。
+function getIndepStreamEnabled() {
+    try {
+        const $el = (typeof $ === 'function') ? $('#pw-indep-stream') : null;
+        if ($el && $el.length) return !!$el.prop('checked');
+        const saved = loadState();
+        if (saved && saved.localConfig && typeof saved.localConfig.indepStream === 'boolean') {
+            return saved.localConfig.indepStream;
+        }
+    } catch {}
+    return true;
+}
+
+// SSE 流式响应解析。兼容：
+//   - OpenAI 兼容：`data: {"choices":[{"delta":{"content":"..."}}]}` / `data: [DONE]`
+//   - Anthropic  ：`event: content_block_delta` + `data: {"delta":{"type":"text_delta","text":"..."}}`
+//   - 忽略 ping / 心跳 / 空 event，对不完整 JSON 静默跳过
+// 每收到 chunk 就回调 onDelta(text) 供 UI 渐进显示（目前 Persona Weaver 不用，留做扩展）。
+async function readSSEResponse(res, isAnthropic, onDelta) {
+    if (!res.body || !res.body.getReader) {
+        const text = await res.text();
+        throw new Error("当前浏览器不支持 Fetch 流式读取，无法解析流式响应。请关闭『流式输出』再试。原始返回前 200 字: " + text.slice(0, 200));
+    }
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder('utf-8');
+    let buffer = '';
+    let fullText = '';
+    let sawAnyDelta = false;
+
+    const processEvent = (event) => {
+        const lines = event.split('\n');
+        for (const rawLine of lines) {
+            const line = rawLine.replace(/\r$/, '');
+            if (!line.startsWith('data:')) continue;
+            const dataStr = line.substring(5).trim();
+            if (!dataStr || dataStr === '[DONE]') continue;
+            let json;
+            try { json = JSON.parse(dataStr); } catch { continue; }
+
+            let piece = '';
+            if (isAnthropic) {
+                // content_block_delta: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"..."}}
+                if (json.type === 'content_block_delta' && json.delta) {
+                    if (json.delta.type === 'text_delta' && typeof json.delta.text === 'string') {
+                        piece = json.delta.text;
+                    } else if (typeof json.delta.text === 'string') {
+                        piece = json.delta.text;
+                    }
+                }
+                // 有些中转站直接包 message_delta.delta.text
+                else if (json.type === 'message_delta' && json.delta && typeof json.delta.text === 'string') {
+                    piece = json.delta.text;
+                }
+                // 有些把文本放在 completion 字段
+                else if (typeof json.completion === 'string') {
+                    piece = json.completion;
+                }
+                // 错误帧
+                else if (json.type === 'error' && json.error) {
+                    throw new Error(`Anthropic 流式错误: ${json.error.message || JSON.stringify(json.error)}`);
+                }
+            } else {
+                // OpenAI 兼容
+                const choices = json.choices;
+                if (Array.isArray(choices) && choices[0]) {
+                    const delta = choices[0].delta || choices[0].message || {};
+                    if (typeof delta.content === 'string') {
+                        piece = delta.content;
+                    } else if (Array.isArray(delta.content)) {
+                        // 有些兼容实现用数组：[{type:'text', text:'...'}]
+                        piece = delta.content.map(b => (b && typeof b.text === 'string') ? b.text : '').join('');
+                    }
+                }
+                // 错误帧（部分中转站在 stream 里塞 error 对象）
+                if (json.error && (json.error.message || typeof json.error === 'string')) {
+                    throw new Error(`API 流式错误: ${json.error.message || json.error}`);
+                }
+            }
+            if (piece) {
+                fullText += piece;
+                sawAnyDelta = true;
+                if (typeof onDelta === 'function') { try { onDelta(piece); } catch {} }
+            }
+        }
+    };
+
+    while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        // SSE 事件以空行分隔，同时兼容 \r\n\r\n
+        let idx;
+        while (true) {
+            const a = buffer.indexOf('\n\n');
+            const b = buffer.indexOf('\r\n\r\n');
+            if (a === -1 && b === -1) break;
+            idx = (a === -1) ? b : (b === -1 ? a : Math.min(a, b));
+            const sep = (idx === b) ? 4 : 2;
+            const event = buffer.substring(0, idx);
+            buffer = buffer.substring(idx + sep);
+            if (event.trim().length > 0) processEvent(event);
+        }
+    }
+    // 尾巴可能没有空行结束，补处理一次
+    buffer += decoder.decode();
+    if (buffer.trim().length > 0) processEvent(buffer);
+
+    if (!fullText && !sawAnyDelta) {
+        throw new Error("流式响应为空（可能被反代吞掉或模型未返回文本）。可尝试关闭『流式输出』切回非流式模式。");
+    }
+    return fullText;
 }
 
 function saveAvatarImages() { safeLocalStorageSet(STORAGE_KEY_AVATAR_IMAGES, JSON.stringify(avatarImagesCache)); }
@@ -2060,6 +2195,15 @@ async function openCreatorPopup() {
                         <input type="number" id="pw-indep-timeout" class="pw-input" min="30" max="1800" step="10"
                             value="${Number(config.indepTimeout) > 0 ? Number(config.indepTimeout) : 300}"
                             style="flex:1;" placeholder="300">
+                    </div>
+                    <div class="pw-row">
+                        <label title="开启后以 SSE 流式方式接收响应，避免 Cloudflare / 酒馆后端 / 中转站在等待完整响应时返回 504 Gateway Timeout。此开关同时作用于独立 API 和主 API。">流式输出</label>
+                        <div style="flex:1; display:flex; align-items:center; gap:8px;">
+                            <label style="display:inline-flex; align-items:center; gap:6px; cursor:pointer;">
+                                <input type="checkbox" id="pw-indep-stream" ${config.indepStream !== false ? 'checked' : ''}>
+                                <span style="opacity:0.85;">启用 (推荐，避免 504)</span>
+                            </label>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -3122,6 +3266,8 @@ function bindEvents() {
                 currentLc.indepApiModel = $('#pw-api-model-select').val() || $('#pw-api-model').val();
                 const timeoutInput = parseInt($('#pw-indep-timeout').val(), 10);
                 if (timeoutInput > 0) currentLc.indepTimeout = Math.min(1800, Math.max(30, timeoutInput));
+                const $streamEl = $('#pw-indep-stream');
+                if ($streamEl.length) currentLc.indepStream = $streamEl.prop('checked');
                 currentLc.extraBooks = window.pwExtraBooks ||[];
 
                 // --- 自动热保存至当前选中配置 ---
@@ -3150,7 +3296,7 @@ function bindEvents() {
         }, 1200); 
     };           
     
-    $(document).on('input.pw change.pw', '#pw-request, #pw-result-text, #pw-wi-toggle, .pw-input, .pw-select', saveCurrentState);
+    $(document).on('input.pw change.pw', '#pw-request, #pw-result-text, #pw-wi-toggle, #pw-indep-stream, .pw-input, .pw-select', saveCurrentState);
 
     // --- 文本框焦点切换：点击哪个展开哪个 ---
     $(document).on('focus.pw', '#pw-request', function() {
@@ -4581,6 +4727,6 @@ function addPersonaButton() {
 jQuery(async () => {
     addPersonaButton(); 
     bindEvents(); 
-    loadThemeCSS('style.css'); // Default theme
+    loadThemeCSS('style.css'); 
     console.log("[PW] Persona Weaver Loaded (v2.7.2 - Hotfix)");
 });
