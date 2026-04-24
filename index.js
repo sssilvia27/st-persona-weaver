@@ -3,7 +3,7 @@ import { extension_settings, getContext } from "../../../extensions.js";
 import { saveSettingsDebounced, callPopup, getRequestHeaders, saveChat, reloadCurrentChat, saveCharacterDebounced } from "../../../../script.js";
 
 const extensionName = "st-persona-weaver";
-const CURRENT_VERSION = "3.4.2"; // Streaming (SSE) for independent & main API to avoid 504 Gateway Timeout
+const CURRENT_VERSION = "3.4.3"; // Model-aware max_tokens — no more mid-generation truncation
 
 const UPDATE_CHECK_URL = "https://raw.githubusercontent.com/sssilvia27/st-persona-weaver/main/manifest.json";
 
@@ -1119,14 +1119,16 @@ async function runGeneration(data, apiConfig, isTemplateMode = false) {
                         'x-api-key': apiConfig.indepApiKey,
                         'anthropic-version': '2023-06-01'
                     };
+                    const maxTokAnthropic = getMaxTokensForModel(apiConfig.indepApiModel);
                     const anthropicPayload = {
                         model: apiConfig.indepApiModel,
                         system: systemParts.join('\n\n'),
                         messages: nonSystem,
-                        max_tokens: 16384,
+                        max_tokens: maxTokAnthropic,
                         temperature: 1.00
                     };
                     if (useStream) anthropicPayload.stream = true;
+                    console.log(`[PW] Anthropic max_tokens=${maxTokAnthropic}`);
                     body = JSON.stringify(anthropicPayload);
                 } else {
                     // OpenAI 兼容模式：支持原生 OpenAI / OpenRouter / DeepSeek / Groq / xAI /
@@ -1140,19 +1142,20 @@ async function runGeneration(data, apiConfig, isTemplateMode = false) {
                         'Content-Type': 'application/json',
                         'Authorization': `Bearer ${apiConfig.indepApiKey}`
                     };
+                    const maxTokOpenAI = getMaxTokensForModel(apiConfig.indepApiModel);
                     const payload = {
                         model: apiConfig.indepApiModel,
                         messages: messages,
                         temperature: 1.00,
-                        // 兼容大多数模型上限（GPT-4o/Claude/Gemini/DS/本地模型），
-                        // 避免硬编码 16384 触发部分小模型 400。
-                        max_tokens: 8192
+                        // 按模型名动态推断上限，避免被截断；未知模型回落到 16384（够装完整 YAML）
+                        max_tokens: maxTokOpenAI
                     };
                     if (useStream) {
                         payload.stream = true;
                         // OpenAI 流式建议顺便带上 usage
                         payload.stream_options = { include_usage: false };
                     }
+                    console.log(`[PW] OpenAI-compat max_tokens=${maxTokOpenAI}`);
                     body = JSON.stringify(payload);
                 }
 
@@ -1433,6 +1436,65 @@ function getIndepTimeoutSec() {
     if (!v || v < 30) v = 300;      // 下限 30 秒，避免把请求秒 abort
     if (v > 1800) v = 1800;          // 上限 30 分钟，防止浏览器挂太久
     return v;
+}
+
+// 按模型名推断 max_tokens 上限（官方/常见中转站允许的最大输出 token 数）。
+// 设计原则：
+//   - 已知模型精确给到该系列上限，尽可能避开"生成被截断"
+//   - 未知模型给一个较健康的默认值（16384），兼顾"不截断"与"不因超限 400"
+//   - 对太老/太小的模型（Claude 3 Haiku、GPT-3.5）按它们真实硬上限 4096
+// 如遇个别中转站拒绝（400 max_tokens exceeded），runGeneration 里会被当作 BadRequest 走兼容重试。
+function getMaxTokensForModel(model) {
+    const m = (model || '').toString().toLowerCase();
+    if (!m) return 16384;
+
+    // === Anthropic Claude 系列 ===
+    if (m.includes('claude')) {
+        // Claude 4 家族（Opus 4 / Sonnet 4 / 3.7 Sonnet）支持超长输出
+        if (m.includes('opus-4') || m.includes('sonnet-4') || /claude-?4[-_.]/.test(m)) return 32000;
+        if (m.includes('3-7-sonnet') || m.includes('3.7-sonnet') || m.includes('3.7sonnet')) return 32000;
+        // Claude 3.5 系列硬上限 8192
+        if (m.includes('3-5') || m.includes('3.5')) return 8192;
+        // Claude 3 家族
+        if (m.includes('3-opus') || m.includes('3.opus') || m.includes('opus-3')) return 4096;
+        if (m.includes('3-sonnet') || m.includes('sonnet-3')) return 4096;
+        if (m.includes('3-haiku') || m.includes('haiku-3') || m.includes('claude-haiku')) return 4096;
+        // Claude 2.x 系列
+        if (m.includes('claude-2')) return 4096;
+        // 未匹配到具体版本但确认是 Claude → 给一个保守偏上的值
+        return 8192;
+    }
+
+    // === Google Gemini 系列 ===
+    if (m.includes('gemini')) {
+        if (m.includes('2.5') || m.includes('2-5')) return 65536;
+        if (m.includes('2.0') || m.includes('2-0')) return 32768;
+        if (m.includes('1.5') || m.includes('1-5')) return 8192;
+        return 8192;
+    }
+
+    // === OpenAI 系列 ===
+    if (m.includes('gpt-5') || m.startsWith('o3') || m.includes('-o3-') || m.includes('/o3')) return 32768;
+    if (m.includes('gpt-4.1') || m.includes('gpt-4-1')) return 32768;
+    if (m.includes('gpt-4o') || m.includes('gpt4o')) return 16384;
+    if (m.startsWith('o1') || m.includes('-o1-')) return 16384;
+    if (m.includes('gpt-4-turbo') || m.includes('gpt-4t')) return 4096;
+    if (m.startsWith('gpt-4') || m.includes('/gpt-4')) return 8192;
+    if (m.includes('gpt-3.5') || m.includes('gpt-35')) return 4096;
+
+    // === DeepSeek ===
+    if (m.includes('deepseek-r1') || m.includes('deepseek-reasoner')) return 32768;
+    if (m.includes('deepseek-v3') || m.includes('deepseek-chat')) return 8192;
+    if (m.includes('deepseek')) return 8192;
+
+    // === Qwen / Mistral / Llama / Groq / xAI / 其他开源/中转 ===
+    if (m.includes('qwen')) return 16384;
+    if (m.includes('llama-3') || m.includes('llama3')) return 16384;
+    if (m.includes('mistral-large') || m.includes('mixtral')) return 8192;
+    if (m.includes('grok')) return 16384;
+
+    // 未知模型：给一个"够长 YAML 但不至于到处 400"的中间值
+    return 16384;
 }
 
 // 读取流式输出开关。默认 ON，因为非流式请求长 YAML 极易被反代 504。
@@ -4727,6 +4789,6 @@ function addPersonaButton() {
 jQuery(async () => {
     addPersonaButton(); 
     bindEvents(); 
-    loadThemeCSS('style.css'); 
+    loadThemeCSS('style.css'); // Default theme
     console.log("[PW] Persona Weaver Loaded (v2.7.2 - Hotfix)");
 });
